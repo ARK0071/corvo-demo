@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Corvo – Corvus
+
+Procurement intelligence platform powered by Claude AI. Features two modules:
+
+- **Corvus** — AI procurement agent with 20+ specialized tools for spend analysis, benchmarking, savings identification, vendor risk analysis, and procurement optimization.
+- **Porter** — Federal grant matching for port vendors, with SAM.gov integration and automated outreach.
+
+## Tech Stack
+
+- Next.js 16 / React 19 / TypeScript
+- Anthropic AI SDK (Claude tool use with streaming)
+- Tailwind CSS 4 / shadcn/ui
+- Recharts for data visualization
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+npm install
+cp .env.example .env.local  # Add your API keys
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Environment Variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Anthropic API key for Claude |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API key for market news |
+| `SAM_GOV_API_KEY` | SAM.gov API key for federal opportunities |
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+├── app/              # Next.js pages and API routes
+│   ├── api/          # Chat, grant extraction, SAM.gov search endpoints
+│   ├── dashboard/    # Spend dashboard
+│   ├── grant-match/  # Grant matching chat
+│   ├── grants/       # Grants listing
+│   └── ...           # Other feature pages
+├── components/       # React components
+│   ├── chat/         # Chat interface components
+│   ├── grant-match/  # Grant matching UI
+│   └── ui/           # shadcn/ui primitives
+├── data/             # Mock data modules (vendors, transactions, grants)
+├── hooks/            # Custom React hooks
+├── lib/              # System prompts, API clients, utilities
+└── tools/            # Claude tool definitions and implementations
+    └── grant-match/  # Grant-specific tool functions
+```
