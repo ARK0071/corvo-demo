@@ -1,7 +1,8 @@
 import { searchVendors, deriveNaicsFromGrant } from "@/lib/usaspending";
 import { PORT_NAICS_CODES } from "@/lib/naics";
+import type { PortVendor } from "@/data/port-vendors";
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const rateLimit = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW = 60_000;
@@ -29,11 +30,15 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { naicsCodes, focusAreas, eligibleActivities, limit } = body as {
+    const { naicsCodes, focusAreas, eligibleActivities, limit, maxPages, state, query, source } = body as {
       naicsCodes?: string[];
       focusAreas?: string[];
       eligibleActivities?: string[];
       limit?: number;
+      maxPages?: number;
+      state?: string;
+      query?: string;
+      source?: "recipients" | "awards" | "both";
     };
 
     // Derive NAICS codes from grant focus areas if not provided directly
@@ -45,15 +50,22 @@ export async function POST(req: Request) {
       codes = PORT_NAICS_CODES;
     }
 
-    const { vendors, totalRecords } = await searchVendors({
+    const cappedMaxPages = Math.min(maxPages || 5, 10);
+    const dataSource = source || "both";
+
+    const result = await searchVendors({
       naicsCodes: codes,
       focusAreas,
       eligibleActivities,
-      limit: limit || 25,
+      limit: limit || 100,
+      maxPages: cappedMaxPages,
+      state,
+      query,
+      source: dataSource,
     });
 
     return new Response(
-      JSON.stringify({ vendors, totalRecords }),
+      JSON.stringify({ vendors: result.vendors, totalRecords: result.totalRecords }),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error: unknown) {

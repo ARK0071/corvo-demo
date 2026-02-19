@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Award, ChevronDown, ChevronRight, Calendar, DollarSign, Building2 } from "lucide-react";
+import { Award, ChevronDown, ChevronRight, Calendar, DollarSign, Building2, ArrowUpDown } from "lucide-react";
 import { grants } from "@/data/grants";
 
 const statusColors: Record<string, string> = {
@@ -19,8 +19,13 @@ function formatCurrency(n: number) {
   return `$${n}`;
 }
 
+type SortField = "funding" | "deadline" | "name";
+type SortDir = "desc" | "asc";
+
 export default function GrantsDashboardPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sortField, setSortField] = useState<SortField>("funding");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   function toggleGrant(id: string) {
     setExpanded((prev) => {
@@ -30,6 +35,29 @@ export default function GrantsDashboardPage() {
       return next;
     });
   }
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "name" ? "asc" : "desc");
+    }
+  }
+
+  const sortedGrants = [...grants].sort((a, b) => {
+    const dir = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "funding":
+        return (a.totalFunding - b.totalFunding) * dir;
+      case "deadline":
+        return a.deadline.localeCompare(b.deadline) * dir;
+      case "name":
+        return a.shortName.localeCompare(b.shortName) * dir;
+      default:
+        return 0;
+    }
+  });
 
   const totalFunding = grants.reduce((s, g) => s + g.totalFunding, 0);
   const openGrants = grants.filter((g) => g.status === "open");
@@ -74,9 +102,28 @@ export default function GrantsDashboardPage() {
           </Card>
         </div>
 
+        {/* Sort Controls */}
+        <div className="flex items-center gap-2 mb-4">
+          <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground">Sort by:</span>
+          {([["funding", "Funding"], ["deadline", "Deadline"], ["name", "Name"]] as const).map(([field, label]) => (
+            <button
+              key={field}
+              onClick={() => handleSort(field)}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                sortField === field
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {label} {sortField === field && (sortDir === "desc" ? "\u2193" : "\u2191")}
+            </button>
+          ))}
+        </div>
+
         {/* Grant Program Cards */}
         <div className="space-y-3">
-          {grants.map((grant) => {
+          {sortedGrants.map((grant) => {
             const isOpen = expanded.has(grant.id);
 
             return (

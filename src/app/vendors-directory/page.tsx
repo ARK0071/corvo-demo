@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Building2, Search, ChevronDown, ChevronRight, Shield, Loader2, AlertCircle } from "lucide-react";
+import { Building2, Search, ChevronDown, ChevronRight, Shield, Loader2, AlertCircle, ArrowUpDown } from "lucide-react";
 import type { PortVendor } from "@/data/port-vendors";
 
 const sectorColors: Record<string, string> = {
@@ -47,6 +47,16 @@ const US_STATES = [
   "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
 ];
 
+type VendorSortField = "awards" | "amount" | "name";
+type VendorSortDir = "desc" | "asc";
+
+function formatAwardAmount(n: number) {
+  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
+  return `$${n}`;
+}
+
 export default function VendorsDirectoryPage() {
   const [vendors, setVendors] = useState<PortVendor[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -57,13 +67,41 @@ export default function VendorsDirectoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sortField, setSortField] = useState<VendorSortField>("awards");
+  const [sortDir, setSortDir] = useState<VendorSortDir>("desc");
+  const [resultSize, setResultSize] = useState<number>(500);
+  const [dataSource, setDataSource] = useState<"both" | "recipients" | "awards">("both");
+
+  function handleSort(field: VendorSortField) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "desc" ? "asc" : "desc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "name" ? "asc" : "desc");
+    }
+  }
+
+  const sortedVendors = [...vendors].sort((a, b) => {
+    const dir = sortDir === "desc" ? -1 : 1;
+    switch (sortField) {
+      case "awards":
+        return (a.pastPortProjects.length - b.pastPortProjects.length) * dir;
+      case "amount":
+        return (a.annualRevenue - b.annualRevenue) * dir;
+      case "name":
+        return a.name.localeCompare(b.name) * dir;
+      default:
+        return 0;
+    }
+  });
 
   async function handleSearch() {
     setLoading(true);
     setError(null);
 
     try {
-      const body: Record<string, unknown> = { maxPages: 5 };
+      const maxPages = Math.ceil(resultSize / 100);
+      const body: Record<string, unknown> = { maxPages, limit: 100, source: dataSource };
 
       if (selectedNaics.length > 0) {
         body.naicsCodes = selectedNaics;
@@ -120,7 +158,7 @@ export default function VendorsDirectoryPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Vendor Directory</h1>
             <p className="text-sm text-muted-foreground">
-              Search federal contractors by NAICS industry codes using USASpending.gov award data
+              Search federal contractors using USASpending.gov data
             </p>
           </div>
         </div>
@@ -140,7 +178,7 @@ export default function VendorsDirectoryPage() {
               />
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-wrap">
               <select
                 value={selectedState}
                 onChange={(e) => setSelectedState(e.target.value)}
@@ -151,11 +189,30 @@ export default function VendorsDirectoryPage() {
                   <option key={st} value={st}>{st}</option>
                 ))}
               </select>
+              <select
+                value={resultSize}
+                onChange={(e) => setResultSize(Number(e.target.value))}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value={100}>100 vendors</option>
+                <option value={300}>300 vendors</option>
+                <option value={500}>500 vendors</option>
+                <option value={1000}>1,000 vendors</option>
+              </select>
+              <select
+                value={dataSource}
+                onChange={(e) => setDataSource(e.target.value as "both" | "recipients" | "awards")}
+                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="both">All Sources (Max Coverage)</option>
+                <option value="recipients">Top Recipients Only</option>
+                <option value="awards">Award Search (Broadest)</option>
+              </select>
               <Button onClick={handleSearch} disabled={loading} className="gap-2">
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Searching...
+                    Searching {resultSize} vendors...
                   </>
                 ) : (
                   <>
@@ -198,18 +255,39 @@ export default function VendorsDirectoryPage() {
           <div className="text-center py-16 text-muted-foreground">
             <Building2 className="h-12 w-12 mx-auto mb-4 opacity-30" />
             <p className="text-sm">Select NAICS codes or enter a search query, then click &quot;Search Federal Vendors&quot;</p>
-            <p className="text-xs mt-1">Results are pulled from USASpending.gov federal contract award data</p>
+            <p className="text-xs mt-1">Results are pulled from USASpending.gov federal contract data</p>
           </div>
         )}
 
         {hasSearched && (
-          <p className="text-xs text-muted-foreground mb-4">
-            {vendors.length} vendors loaded ({totalRecords.toLocaleString()} total in USASpending.gov)
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-xs text-muted-foreground">
+              {vendors.length} unique vendors loaded ({totalRecords.toLocaleString()} total awards found)
+            </p>
+            {vendors.length > 1 && (
+              <div className="flex items-center gap-2">
+                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground">Sort:</span>
+                {([["awards", "Awards"], ["amount", "Total Amount"], ["name", "Name"]] as const).map(([field, label]) => (
+                  <button
+                    key={field}
+                    onClick={() => handleSort(field)}
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      sortField === field
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {label} {sortField === field && (sortDir === "desc" ? "\u2193" : "\u2191")}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         <div className="space-y-2">
-          {vendors.map((vendor) => {
+          {sortedVendors.map((vendor) => {
             const isOpen = expanded.has(vendor.id);
 
             return (
@@ -239,7 +317,8 @@ export default function VendorsDirectoryPage() {
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-4">
-                    <p className="text-[10px] font-mono text-muted-foreground">UEI: {vendor.id}</p>
+                    <p className="text-sm font-mono font-medium">{formatAwardAmount(vendor.annualRevenue)}</p>
+                    <p className="text-[10px] text-muted-foreground">{vendor.pastPortProjects.length} award{vendor.pastPortProjects.length !== 1 ? "s" : ""}</p>
                   </div>
                 </button>
 
