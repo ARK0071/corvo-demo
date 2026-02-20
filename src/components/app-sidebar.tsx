@@ -30,10 +30,8 @@ const corvusItems = [
 ];
 
 const grantMatchItems = [
+  { title: "Grants", url: "/grants", icon: Award },
   { title: "Grant Intelligence", url: "/grant-match", icon: Anchor },
-  { title: "Grant Upload", url: "/grant-upload", icon: FileUp },
-  { title: "Grants Dashboard", url: "/grants", icon: Award },
-  { title: "Vendor Directory", url: "/vendors-directory", icon: Building2 },
 ];
 
 export default function AppSidebar() {

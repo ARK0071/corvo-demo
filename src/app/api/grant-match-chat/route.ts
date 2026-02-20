@@ -1,7 +1,7 @@
 import { streamText, stepCountIs, convertToModelMessages } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { GRANT_MATCH_SYSTEM_PROMPT } from "@/lib/grant-match-system-prompt";
-import { grantMatchTools } from "@/tools/grant-match/definitions";
+import { grantIntelligenceTools } from "@/tools/grant-intelligence/definitions";
 
 export const maxDuration = 60;
 
@@ -45,7 +45,7 @@ const MAX_MESSAGE_LENGTH = 4000;
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(
-      JSON.stringify({ error: "ANTHROPIC_API_KEY is not configured. Add it to .env.local to use Grant Match Porter." }),
+      JSON.stringify({ error: "ANTHROPIC_API_KEY is not configured. Add it to .env.local to use Corvo Grant Intelligence." }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
@@ -84,20 +84,20 @@ export async function POST(req: Request) {
 
     if (containsInjection(userText)) {
       return new Response(
-        JSON.stringify({ error: "I'm Grant Match Porter, a grant intelligence analyst for port authorities. I can help you find qualified vendors for federal grant programs. What would you like to explore?" }),
+        JSON.stringify({ error: "I'm Corvo, a grant intelligence assistant for port authorities. I can help you evaluate federal grants, score opportunities, and calculate financial scenarios. What would you like to explore?" }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
 
     const modelMessages = await convertToModelMessages(messages, {
-      tools: grantMatchTools,
+      tools: grantIntelligenceTools,
     });
 
     const result = streamText({
       model: anthropic("claude-sonnet-4-5-20250929"),
       system: GRANT_MATCH_SYSTEM_PROMPT,
       messages: modelMessages,
-      tools: grantMatchTools,
+      tools: grantIntelligenceTools,
       stopWhen: stepCountIs(8),
     });
 
