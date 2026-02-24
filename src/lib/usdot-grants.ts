@@ -147,6 +147,7 @@ export async function searchUSDOTGrants(params: {
           id: String(hit.id),
           opportunityNumber: hit.number || "",
           title: hit.title || program.name,
+          source: "Grants.gov (USDOT)",
           agency: program.agency,
           agencyCode: program.agencyCode,
           description: "",

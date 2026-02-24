@@ -148,14 +148,24 @@ async function fetchWithRetry(
   maxRetries: number = 3
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch(url, init);
-    if (res.status === 429 && attempt < maxRetries) {
-      // Exponential backoff: 1s, 2s, 4s
-      const delay = Math.pow(2, attempt) * 1000;
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      continue;
+    try {
+      const res = await fetch(url, init);
+      if (res.status === 429 && attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 4s
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      return res;
+    } catch (err) {
+      // Network errors - retry if attempts remain
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
     }
-    return res;
   }
   // Should never reach here, but satisfy TypeScript
   return fetch(url, init);
@@ -597,36 +607,375 @@ export async function searchVendors(
   // Source 2: Award-based search (much broader vendor coverage)
   if (source === "awards" || source === "both") {
     promises.push(
-      searchAwardVendors({
-        naicsCodes: codes,
-        state: params.state,
-        query: params.query,
-        maxPages,
-        size: 100,
-      })
+      (async () => {
+        const { vendors: awardVendors, totalRecords: awardRecords } = await searchAwardVendors({
+          naicsCodes: codes,
+          state: params.state,
+        });
+        return { vendors: awardVendors, totalRecords: awardRecords };
+      })()
     );
   }
 
   const results = await Promise.all(promises);
 
-  // Merge all vendors
-  let allVendors: PortVendor[] = [];
-  let totalRecords = 0;
-  for (const result of results) {
-    allVendors.push(...result.vendors);
-    totalRecords += result.totalRecords;
-  }
-
-  // Deduplicate by ID (UEI), keeping the one with more data
+  // Combine and deduplicate vendors
   const seen = new Map<string, PortVendor>();
-  for (const v of allVendors) {
-    const existing = seen.get(v.id);
-    if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
-      seen.set(v.id, v);
+  let totalRecords = 0;
+
+  for (const result of results) {
+    totalRecords = Math.max(totalRecords, result.totalRecords);
+    for (const v of result.vendors) {
+      const existing = seen.get(v.id);
+      if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
+        seen.set(v.id, v);
+      }
     }
   }
 
   return { vendors: [...seen.values()], totalRecords };
+}
+
+// ─── Competitive Intelligence: Grant Awards Search ───
+
+export interface GrantAward {
+  awardId: string;
+  recipientName: string;
+  awardAmount: number;
+  awardingAgency: string;
+  cfdaNumber: string | null;
+  cfdaTitle: string | null;
+  placeOfPerformance: {
+    state: string;
+    city?: string;
+  };
+  startDate: string;
+  endDate: string | null;
+  description: string;
+  awardType: string; // "02", "03", "04", "05" for grants
+}
+
+/**
+ * Search grant awards by CFDA number (for specific programs like PSGP, PIDP, etc.)
+ */
+export async function searchGrantAwardsByCFDA(
+  cfdaNumber: string,
+  params: {
+    minAmount?: number;
+    startDate?: string; // YYYY-MM-DD
+    endDate?: string; // YYYY-MM-DD
+    states?: string[]; // State codes
+    limit?: number;
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const cacheKey = `grants:cfda:${cfdaNumber}:${JSON.stringify(params)}`;
+  const cached = getCached<{ awards: GrantAward[]; totalRecords: number }>(cacheKey);
+  if (cached) return cached;
+
+  const filters: any = {
+    award_type_codes: ["02", "03", "04", "05"], // Grant award types
+    time_period: [{
+      start_date: params.startDate || "2019-01-01",
+      end_date: params.endDate || new Date().toISOString().split('T')[0],
+    }],
+  };
+
+  // Add CFDA filter if provided
+  if (cfdaNumber) {
+    filters.cfda_numbers = [cfdaNumber];
+  }
+
+  if (params.minAmount) {
+    filters.award_amounts = [{ lower_bound: params.minAmount }];
+  }
+
+  if (params.states && params.states.length > 0) {
+    filters.place_of_performance_locations = params.states.map(state => ({
+      country: "USA",
+      state: state,
+    }));
+  }
+
+  const res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filters,
+      fields: [
+        "Award ID",
+        "Recipient Name",
+        "Award Amount",
+        "Awarding Agency",
+        "CFDA Number",
+        "CFDA Title",
+        "Place of Performance State Code",
+        "Place of Performance City Name",
+        "Start Date",
+        "End Date",
+        "Description",
+        "Award Type",
+      ],
+      limit: params.limit || 100,
+      page: 1,
+      sort: "Award Amount",
+      order: "desc",
+    }),
+  });
+
+  if (!res.ok) {
+    let errorMsg = `USASpending API returned ${res.status}`;
+    try {
+      const errorBody = await res.json();
+      errorMsg = errorBody.message || errorBody.error || JSON.stringify(errorBody) || errorMsg;
+    } catch (e) {
+      try {
+        const text = await res.text();
+        if (text) errorMsg = text;
+      } catch (e2) {
+        // Ignore text parsing errors
+      }
+    }
+    console.error("USAspending API error:", { status: res.status, errorMsg, filters });
+    // For 422 (bad request), return empty results instead of throwing
+    if (res.status === 422) {
+      console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
+      return { awards: [], totalRecords: 0 };
+    }
+    throw new Error(errorMsg);
+  }
+
+  const data = await res.json();
+  const results = (data.results || []) as any[];
+
+  const awards: GrantAward[] = results.map((r) => ({
+    awardId: r["Award ID"] || String(r.internal_id || ""),
+    recipientName: r["Recipient Name"] || "",
+    awardAmount: r["Award Amount"] || 0,
+    awardingAgency: r["Awarding Agency"] || "",
+    cfdaNumber: r["CFDA Number"] || null,
+    cfdaTitle: r["CFDA Title"] || null,
+    placeOfPerformance: {
+      state: r["Place of Performance State Code"] || "",
+      city: r["Place of Performance City Name"] || undefined,
+    },
+    startDate: r["Start Date"] || "",
+    endDate: r["End Date"] || null,
+    description: r["Description"] || "",
+    awardType: r["Award Type"] || "",
+  }));
+
+  const result = {
+    awards: awards.filter(a => a.awardAmount > 0),
+    totalRecords: data.page_metadata?.total || awards.length,
+  };
+
+  setCache(cacheKey, result);
+  return result;
+}
+
+/**
+ * Search grant awards by keywords (for competitive intelligence on port/maritime grants)
+ */
+export async function searchGrantAwardsByKeywords(
+  keywords: string[],
+  params: {
+    minAmount?: number;
+    startDate?: string;
+    endDate?: string;
+    states?: string[];
+    limit?: number;
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const cacheKey = `grants:keywords:${keywords.join(",")}:${JSON.stringify(params)}`;
+  const cached = getCached<{ awards: GrantAward[]; totalRecords: number }>(cacheKey);
+  if (cached) return cached;
+
+  const filters: any = {
+    award_type_codes: ["02", "03", "04", "05"], // Grant award types
+    time_period: [{
+      start_date: params.startDate || "2019-01-01",
+      end_date: params.endDate || new Date().toISOString().split('T')[0],
+    }],
+  };
+
+  // Add keyword search - USAspending uses keyword in filters
+  if (keywords.length > 0) {
+    filters.keyword = keywords.join(" OR ");
+  }
+
+  if (params.minAmount) {
+    filters.award_amounts = [{ lower_bound: params.minAmount }];
+  }
+
+  if (params.states && params.states.length > 0) {
+    filters.place_of_performance_locations = params.states.map(state => ({
+      country: "USA",
+      state: state,
+    }));
+  }
+
+  const res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filters,
+      fields: [
+        "Award ID",
+        "Recipient Name",
+        "Award Amount",
+        "Awarding Agency",
+        "CFDA Number",
+        "CFDA Title",
+        "Place of Performance State Code",
+        "Place of Performance City Name",
+        "Start Date",
+        "End Date",
+        "Description",
+        "Award Type",
+      ],
+      limit: params.limit || 100,
+      page: 1,
+      sort: "Award Amount",
+      order: "desc",
+    }),
+  });
+
+  if (!res.ok) {
+    let errorMsg = `USASpending API returned ${res.status}`;
+    try {
+      const errorBody = await res.json();
+      errorMsg = errorBody.message || errorBody.error || JSON.stringify(errorBody) || errorMsg;
+    } catch (e) {
+      try {
+        const text = await res.text();
+        if (text) errorMsg = text;
+      } catch (e2) {
+        // Ignore text parsing errors
+      }
+    }
+    console.error("USAspending API error:", { status: res.status, errorMsg, filters });
+    // For 422 (bad request), return empty results instead of throwing
+    if (res.status === 422) {
+      console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
+      return { awards: [], totalRecords: 0 };
+    }
+    throw new Error(errorMsg);
+  }
+
+  const data = await res.json();
+  const results = (data.results || []) as any[];
+
+  const awards: GrantAward[] = results.map((r) => ({
+    awardId: r["Award ID"] || String(r.internal_id || ""),
+    recipientName: r["Recipient Name"] || "",
+    awardAmount: r["Award Amount"] || 0,
+    awardingAgency: r["Awarding Agency"] || "",
+    cfdaNumber: r["CFDA Number"] || null,
+    cfdaTitle: r["CFDA Title"] || null,
+    placeOfPerformance: {
+      state: r["Place of Performance State Code"] || "",
+      city: r["Place of Performance City Name"] || undefined,
+    },
+    startDate: r["Start Date"] || "",
+    endDate: r["End Date"] || null,
+    description: r["Description"] || "",
+    awardType: r["Award Type"] || "",
+  }));
+
+  // Filter for port/maritime-related grants
+  const portKeywords = ["port", "maritime", "harbor", "terminal", "seaport", "waterway", "navigation"];
+  const filteredAwards = awards.filter(award => {
+    const text = `${award.description} ${award.recipientName} ${award.cfdaTitle || ""}`.toLowerCase();
+    return portKeywords.some(keyword => text.includes(keyword));
+  });
+
+  const result = {
+    awards: filteredAwards.filter(a => a.awardAmount > 0),
+    totalRecords: data.page_metadata?.total || filteredAwards.length,
+  };
+
+  setCache(cacheKey, result);
+  return result;
+}
+
+/**
+ * Get competitive intelligence for a specific grant program
+ * Searches USAspending for historical awards matching the grant program
+ */
+export async function getCompetitiveIntelligenceFromUSAspending(
+  programName: string,
+  cfdaNumber?: string,
+  params: {
+    minAmount?: number;
+    years?: number; // How many years back to search
+    states?: string[];
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const years = params.years || 5;
+  const endDate = new Date().toISOString().split('T')[0];
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() - years);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // Try CFDA number first if provided
+  if (cfdaNumber) {
+    try {
+      const result = await searchGrantAwardsByCFDA(cfdaNumber, {
+        minAmount: params.minAmount || 500_000,
+        startDate: startDateStr,
+        endDate,
+        states: params.states,
+        limit: 200,
+      });
+      if (result.awards.length > 0) {
+        return result;
+      }
+    } catch (err) {
+      console.error("Error searching by CFDA:", err);
+    }
+  }
+
+  // Fallback to keyword search
+  const keywords = extractProgramKeywords(programName);
+  return searchGrantAwardsByKeywords(keywords, {
+    minAmount: params.minAmount || 500_000,
+    startDate: startDateStr,
+    endDate,
+    states: params.states,
+    limit: 200,
+  });
+}
+
+/**
+ * Extract search keywords from program name
+ */
+function extractProgramKeywords(programName: string): string[] {
+  const name = programName.toLowerCase();
+  const keywords: string[] = [];
+
+  // Program-specific keywords
+  if (name.includes("pidp") || name.includes("port infrastructure")) {
+    keywords.push("port infrastructure", "maritime", "terminal");
+  }
+  if (name.includes("raise") || name.includes("rebuilding")) {
+    keywords.push("infrastructure", "transportation", "port");
+  }
+  if (name.includes("infra")) {
+    keywords.push("infrastructure", "freight", "port");
+  }
+  if (name.includes("psgp") || name.includes("port security")) {
+    keywords.push("port security", "maritime security");
+  }
+  if (name.includes("crisi") || name.includes("rail")) {
+    keywords.push("rail", "railroad", "intermodal");
+  }
+
+  // Default keywords
+  if (keywords.length === 0) {
+    keywords.push("port", "maritime", "harbor");
+  }
+
+  return keywords;
 }
 
 // ─── NAICS Derivation (reuse from sam-gov) ───

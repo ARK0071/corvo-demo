@@ -13,6 +13,9 @@ import {
   getDeadlineUrgency,
   recommendNextActions,
   compareTwoGrants,
+  matchGrantsToProjectTool,
+  getProjectGrantMatches,
+  getCompetitiveIntelligence,
 } from "./tools";
 
 export const grantIntelligenceTools = {
@@ -96,5 +99,36 @@ export const grantIntelligenceTools = {
     }),
     execute: async (params: { grantId1: string; grantId2: string }) =>
       compareTwoGrants(params),
+  },
+
+  match_grants_to_project: {
+    description:
+      "Find grants that match a specific project based on focus areas, budget, timeline, and description relevance. Returns scored matches sorted by relevance.",
+    inputSchema: z.object({
+      projectId: z.string().describe("Project ID to match grants against"),
+    }),
+    execute: async (params: { projectId: string }) =>
+      matchGrantsToProjectTool(params),
+  },
+
+  get_project_grant_matches: {
+    description:
+      "Find projects that match a specific grant. Returns projects sorted by match score.",
+    inputSchema: z.object({
+      grantId: z.string().describe("Grant opportunity ID to match projects against"),
+    }),
+    execute: async (params: { grantId: string }) =>
+      getProjectGrantMatches(params),
+  },
+
+  // ===== COMPETITIVE INTELLIGENCE =====
+  get_competitive_intelligence: {
+    description:
+      "Get competitive intelligence for a grant: historical award patterns, similar projects that won, geographic patterns, project type success rates, and competitive positioning advice. Uses data from MARAD PIDP, USDOT programs, and other historical award databases.",
+    inputSchema: z.object({
+      grantId: z.string().describe("Grant opportunity ID to analyze"),
+    }),
+    execute: async (params: { grantId: string }) =>
+      getCompetitiveIntelligence(params),
   },
 };

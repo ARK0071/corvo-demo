@@ -319,6 +319,112 @@ export async function searchSamEntities(
   return { vendors, totalRecords: data.totalRecords || 0 };
 }
 
+// ─── SAM.gov Opportunities API ───
+
+const SAM_OPPORTUNITIES_BASE_URL = "https://api.sam.gov/prod/opportunities/v2/search";
+
+export interface SamOpportunity {
+  noticeId: string;
+  title: string;
+  solicitationNumber?: string;
+  department: string;
+  postedDate: string;
+  responseDeadLine?: string;
+  naicsCode?: string[];
+  award?: {
+    date?: string;
+    amount?: number;
+    awardee?: string;
+  };
+  type: "presolicitation" | "solicitation" | "award notice";
+  description?: string;
+}
+
+export interface SamOpportunitiesResponse {
+  totalRecords: number;
+  opportunityData: SamOpportunity[];
+}
+
+export interface SamOpportunitiesSearchParams {
+  keyword?: string;
+  naicsCode?: string;
+  postedFrom?: string; // YYYY-MM-DD
+  postedTo?: string; // YYYY-MM-DD
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Search SAM.gov opportunities (contracts and grants)
+ */
+export async function searchSamOpportunities(
+  params: SamOpportunitiesSearchParams = {}
+): Promise<SamOpportunity[]> {
+  const apiKey = process.env.SAM_GOV_API_KEY;
+  if (!apiKey) {
+    throw new Error("SAM_GOV_API_KEY is not configured. Add it to .env.local.");
+  }
+
+  const queryParams = new URLSearchParams();
+  queryParams.set("api_key", apiKey);
+  
+  // SAM.gov API requires PostedFrom and PostedTo to be mandatory
+  // Set default date range if not provided (last 90 days to future)
+  const now = new Date();
+  const postedFrom = params.postedFrom || new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 90 days ago
+  const postedTo = params.postedTo || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 1 year from now
+  
+  queryParams.set("postedFrom", postedFrom);
+  queryParams.set("postedTo", postedTo);
+  
+  // Limit and offset
+  const limit = Math.min(params.limit || 25, 100); // SAM.gov might have lower limits
+  queryParams.set("limit", String(limit));
+  
+  if (params.offset && params.offset > 0) {
+    queryParams.set("offset", String(params.offset));
+  }
+
+  // Keyword search
+  if (params.keyword) {
+    queryParams.set("keyword", params.keyword);
+  }
+  
+  // NAICS code search
+  if (params.naicsCode) {
+    queryParams.set("naicsCode", params.naicsCode);
+  }
+
+  const url = `${SAM_OPPORTUNITIES_BASE_URL}?${queryParams.toString()}`;
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      let errorMsg = `SAM.gov API returned ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMsg = errorBody?.error?.message || errorBody?.message || errorBody?.error || JSON.stringify(errorBody) || errorMsg;
+      } catch (e) {
+        const text = await response.text().catch(() => "");
+        if (text) errorMsg = text;
+      }
+      console.error("SAM.gov API error details:", { status: response.status, url, errorMsg });
+      throw new Error(errorMsg);
+    }
+
+    const data: SamOpportunitiesResponse = await response.json();
+    return data.opportunityData || [];
+  } catch (error) {
+    console.error("SAM.gov Opportunities API error:", error);
+    throw error;
+  }
+}
+
 // Fetch multiple pages to get more results (respects rate limits)
 export async function searchSamEntitiesMultiPage(
   params: SamSearchParams,

@@ -10,6 +10,9 @@ import {
 import { currentPortProfile } from "@/data/port-profile";
 import { fetchGrantDetails, type DiscoveredGrant } from "@/lib/grants-gov";
 import { scoreGrantForPort, type GrantScore } from "@/data/grant-scoring";
+import { getAllProjects, getProjectById } from "@/data/projects";
+import { matchGrantsToProject, matchGrantToProjects } from "@/data/grant-project-matching";
+import { analyzeCompetitiveIntelligence } from "@/data/competitive-intelligence";
 
 // In-memory cache of grant scores (keyed by grant ID)
 const grantScoreCache = new Map<string, GrantScore>();
@@ -527,5 +530,117 @@ export async function compareTwoGrants(params: {
       strengths: score2.strengths,
       concerns: score2.concerns,
     },
+  };
+}
+
+/**
+ * Match grants to a project
+ */
+export async function matchGrantsToProjectTool(params: { projectId: string }) {
+  const project = getProjectById(params.projectId);
+  if (!project) {
+    return { error: `Project ${params.projectId} not found` };
+  }
+
+  // Get all grants (from pipeline and available grants)
+  const pipelineGrants = getAllPipelineGrants();
+  const allGrants = [...pipelineGrants];
+
+  const matches = matchGrantsToProject(project, allGrants);
+
+  return {
+    projectId: params.projectId,
+    projectName: project.name,
+    matchCount: matches.length,
+    matches: matches.slice(0, 10).map((match) => {
+      const grant = allGrants.find((g) => g.id === match.grantId);
+      return {
+        grantId: match.grantId,
+        grantTitle: grant?.title || "Unknown",
+        matchScore: match.matchScore,
+        recommendation: match.recommendation,
+        reasons: match.reasons,
+        breakdown: match.breakdown,
+      };
+    }),
+  };
+}
+
+/**
+ * Match a grant to projects
+ */
+export async function getProjectGrantMatches(params: { grantId: string }) {
+  // Try to get from pipeline first
+  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId);
+
+  if (!grant) {
+    // Try to fetch from Grants.gov
+    try {
+      grant = await fetchGrantDetails(params.grantId);
+    } catch (error) {
+      return { error: `Grant ${params.grantId} not found` };
+    }
+  }
+
+  if (!grant) {
+    return { error: `Grant ${params.grantId} not found` };
+  }
+
+  const projects = getAllProjects();
+  const matches = matchGrantToProjects(grant, projects);
+
+  return {
+    grantId: params.grantId,
+    grantTitle: grant.title,
+    matchCount: matches.length,
+    matches: matches.slice(0, 10).map((match) => {
+      const project = projects.find((p) => p.id === match.projectId);
+      return {
+        projectId: match.projectId,
+        projectName: project?.name || "Unknown",
+        matchScore: match.matchScore,
+        recommendation: match.recommendation,
+        reasons: match.reasons,
+        breakdown: match.breakdown,
+      };
+    }),
+  };
+}
+
+/**
+ * Get competitive intelligence for a grant
+ */
+export async function getCompetitiveIntelligence(params: { grantId: string }) {
+  // Try to get from pipeline first
+  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId);
+  
+  // If not in pipeline, try to fetch details
+  if (!grant) {
+    try {
+      grant = await fetchGrantDetails(params.grantId);
+    } catch (err) {
+      return { error: `Grant ${params.grantId} not found` };
+    }
+  }
+
+  if (!grant) {
+    return { error: `Grant ${params.grantId} not found` };
+  }
+
+  const competitiveIntel = await analyzeCompetitiveIntelligence(grant);
+  
+  if (!competitiveIntel) {
+    return {
+      grantId: grant.id,
+      grantTitle: grant.title,
+      message: "No competitive intelligence data available for this grant program",
+    };
+  }
+
+  return {
+    grantId: grant.id,
+    grantTitle: grant.title,
+    programName: competitiveIntel.programName,
+    insights: competitiveIntel.insights,
   };
 }

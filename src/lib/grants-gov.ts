@@ -45,6 +45,7 @@ export interface DiscoveredGrant {
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
+  source?: string;               // Data source: "Grants.gov", "Federal Register", "SAM.gov", "Congress.gov", "DOT Navigator", etc.
 }
 
 // Raw API response types
@@ -264,6 +265,7 @@ function mapOpportunityHitToGrant(hit: OpportunityHit): DiscoveredGrant {
     fundingInstruments: [],
     costSharing: false,
     alnNumbers: hit.cfdaList || [],
+    source: "Grants.gov",
   };
 }
 
@@ -295,6 +297,7 @@ function mapOpportunityDetailToGrant(opp: OpportunityDetail["data"]): Discovered
     contactName: syn.agencyContactName,
     contactEmail: syn.agencyContactEmail,
     contactPhone: syn.agencyContactPhone,
+    source: "Grants.gov",
   };
 }
 
