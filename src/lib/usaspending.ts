@@ -715,7 +715,7 @@ export async function searchGrantAwardsByCFDA(
         "Description",
         "Award Type",
       ],
-      limit: params.limit || 100,
+      limit: Math.min(params.limit || 100, 100), // USAspending API max is 100
       page: 1,
       sort: "Award Amount",
       order: "desc",
@@ -723,21 +723,41 @@ export async function searchGrantAwardsByCFDA(
   });
 
   if (!res.ok) {
-    let errorMsg = `USASpending API returned ${res.status}`;
+    const status = res.status;
+    const statusText = res.statusText;
+    let errorMsg = `USASpending API returned ${status} ${statusText}`;
+    let errorDetails: any = null;
+    
     try {
-      const errorBody = await res.json();
-      errorMsg = errorBody.message || errorBody.error || JSON.stringify(errorBody) || errorMsg;
+      // Clone the response to read it without consuming the original
+      const clonedRes = res.clone();
+      const errorBody = await clonedRes.json();
+      errorDetails = errorBody;
+      errorMsg = errorBody.message || errorBody.error || errorBody.detail || JSON.stringify(errorBody) || errorMsg;
     } catch (e) {
       try {
-        const text = await res.text();
-        if (text) errorMsg = text;
+        const clonedRes = res.clone();
+        const text = await clonedRes.text();
+        if (text) {
+          errorDetails = text;
+          errorMsg = text;
+        }
       } catch (e2) {
         // Ignore text parsing errors
       }
     }
-    console.error("USAspending API error:", { status: res.status, errorMsg, filters });
+    
+    console.error("USAspending API error:", {
+      status,
+      statusText,
+      errorMsg,
+      errorDetails,
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    
     // For 422 (bad request), return empty results instead of throwing
-    if (res.status === 422) {
+    if (status === 422) {
       console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
       return { awards: [], totalRecords: 0 };
     }
@@ -798,10 +818,11 @@ export async function searchGrantAwardsByKeywords(
     }],
   };
 
-  // Add keyword search - USAspending uses keyword in filters
-  if (keywords.length > 0) {
-    filters.keyword = keywords.join(" OR ");
-  }
+  // USAspending API doesn't support keyword filter directly
+  // Instead, we can search in description using recipient_search_text or description search
+  // For now, we'll skip keyword filtering and rely on CFDA numbers and other filters
+  // If keywords are provided, we can filter results after fetching
+  // Note: The API might support text search in description, but it's not well documented
 
   if (params.minAmount) {
     filters.award_amounts = [{ lower_bound: params.minAmount }];
@@ -814,48 +835,92 @@ export async function searchGrantAwardsByKeywords(
     }));
   }
 
-  const res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filters,
-      fields: [
-        "Award ID",
-        "Recipient Name",
-        "Award Amount",
-        "Awarding Agency",
-        "CFDA Number",
-        "CFDA Title",
-        "Place of Performance State Code",
-        "Place of Performance City Name",
-        "Start Date",
-        "End Date",
-        "Description",
-        "Award Type",
-      ],
-      limit: params.limit || 100,
-      page: 1,
-      sort: "Award Amount",
-      order: "desc",
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filters,
+        fields: [
+          "Award ID",
+          "Recipient Name",
+          "Award Amount",
+          "Awarding Agency",
+          "CFDA Number",
+          "CFDA Title",
+          "Place of Performance State Code",
+          "Place of Performance City Name",
+          "Start Date",
+          "End Date",
+          "Description",
+          "Award Type",
+        ],
+        limit: params.limit || 100,
+        page: 1,
+        sort: "Award Amount",
+        order: "desc",
+      }),
+    });
+  } catch (fetchError: any) {
+    // Network error or fetch failed
+    console.error("USAspending API network error (searchGrantAwardsByKeywords):", {
+      error: fetchError?.message || String(fetchError),
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    // Return empty results for network errors
+    return { awards: [], totalRecords: 0 };
+  }
 
   if (!res.ok) {
-    let errorMsg = `USASpending API returned ${res.status}`;
+    const status = res.status;
+    const statusText = res.statusText;
+    let errorMsg = `USASpending API returned ${status} ${statusText}`;
+    let errorDetails: any = null;
+    
     try {
-      const errorBody = await res.json();
-      errorMsg = errorBody.message || errorBody.error || JSON.stringify(errorBody) || errorMsg;
+      // Try to read error body - clone if possible, otherwise read directly
+      let errorBody: any;
+      try {
+        const clonedRes = res.clone();
+        errorBody = await clonedRes.json();
+      } catch (cloneError) {
+        // If clone fails, try reading directly
+        errorBody = await res.json();
+      }
+      errorDetails = errorBody;
+      errorMsg = errorBody.message || errorBody.error || errorBody.detail || JSON.stringify(errorBody) || errorMsg;
     } catch (e) {
       try {
-        const text = await res.text();
-        if (text) errorMsg = text;
+        let text: string;
+        try {
+          const clonedRes = res.clone();
+          text = await clonedRes.text();
+        } catch (cloneError) {
+          text = await res.text();
+        }
+        if (text) {
+          errorDetails = text;
+          errorMsg = text;
+        }
       } catch (e2) {
         // Ignore text parsing errors
+        errorDetails = `Could not parse error response: ${e2}`;
       }
     }
-    console.error("USAspending API error:", { status: res.status, errorMsg, filters });
+    
+    console.error("USAspending API error (searchGrantAwardsByKeywords):", {
+      status,
+      statusText,
+      errorMsg,
+      errorDetails,
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    
     // For 422 (bad request), return empty results instead of throwing
-    if (res.status === 422) {
+    if (status === 422) {
       console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
       return { awards: [], totalRecords: 0 };
     }
@@ -925,7 +990,7 @@ export async function getCompetitiveIntelligenceFromUSAspending(
         startDate: startDateStr,
         endDate,
         states: params.states,
-        limit: 200,
+        limit: 100, // USAspending API max is 100
       });
       if (result.awards.length > 0) {
         return result;

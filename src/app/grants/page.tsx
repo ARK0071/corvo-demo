@@ -23,6 +23,7 @@ import {
   Shield,
   Calendar,
   DollarSign,
+  BarChart3,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
@@ -232,10 +233,6 @@ export default function UnifiedGrantsDashboard() {
     // If already has description, just expand
     if (grant.description) {
       setExpandedGrant(grant.id);
-      // Load competitive intelligence if not already loaded
-      if (!competitiveIntelligence.has(grant.id) && !loadingCompetitiveIntel.has(grant.id)) {
-        loadCompetitiveIntelligence(grant);
-      }
       return;
     }
 
@@ -272,11 +269,6 @@ export default function UnifiedGrantsDashboard() {
       );
 
       setExpandedGrant(grant.id);
-      
-      // Load competitive intelligence for this grant
-      if (!competitiveIntelligence.has(grant.id) && !loadingCompetitiveIntel.has(grant.id)) {
-        loadCompetitiveIntelligence(merged);
-      }
     } catch (err) {
       console.error("Error fetching grant details:", err);
     } finally {
@@ -995,9 +987,24 @@ export default function UnifiedGrantsDashboard() {
                           const competitiveIntel = competitiveIntelligence.get(grant.id);
                           const isLoading = loadingCompetitiveIntel.has(grant.id);
                           
-                          // Trigger loading if not already loaded or loading
-                          if (isExpanded && !competitiveIntel && !isLoading) {
-                            loadCompetitiveIntelligence(grant);
+                          // Show button to load competitive intelligence if not loaded
+                          if (!competitiveIntel && !isLoading) {
+                            return (
+                              <div className="mb-4">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    loadCompetitiveIntelligence(grant);
+                                  }}
+                                  className="w-full gap-2"
+                                >
+                                  <BarChart3 className="h-3.5 w-3.5" />
+                                  View Competitive Intelligence
+                                </Button>
+                              </div>
+                            );
                           }
                           
                           if (isLoading) {
