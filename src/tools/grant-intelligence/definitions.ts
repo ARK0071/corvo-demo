@@ -13,6 +13,7 @@ import {
   getDeadlineUrgency,
   recommendNextActions,
   compareTwoGrants,
+  buildGrantApplication,
 } from "./tools";
 
 export const grantIntelligenceTools = {
@@ -96,5 +97,21 @@ export const grantIntelligenceTools = {
     }),
     execute: async (params: { grantId1: string; grantId2: string }) =>
       compareTwoGrants(params),
+  },
+
+  build_grant_application: {
+    description:
+      "Generate a draft grant application narrative for a specific grant. Fetches grant details and uses AI to produce structured application content (executive summary, statement of need, project description, outcomes, capacity, budget narrative). Use when the user wants to apply for a grant or build/start a grant application.",
+    inputSchema: z.object({
+      grantId: z
+        .string()
+        .describe("Grant opportunity ID from Grants.gov (visible in the dashboard)"),
+      portName: z
+        .string()
+        .optional()
+        .describe("Port authority name for personalization (e.g., 'Port of Los Angeles')"),
+    }),
+    execute: async (params: { grantId: string; portName?: string }) =>
+      buildGrantApplication(params),
   },
 };

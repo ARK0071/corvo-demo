@@ -23,6 +23,8 @@ import {
   Shield,
   Calendar,
   DollarSign,
+  FileText,
+  Copy,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
@@ -43,6 +45,13 @@ import { OutreachEmail } from "@/components/grant-match/outreach-email";
 import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
 import { getAllProfiles, getProfile, DEFAULT_PROFILE_ID, type PortProfile, currentPortProfile } from "@/data/port-profile";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 
 const statusColors: Record<string, string> = {
   posted: "bg-green-500/10 text-green-600 dark:text-green-400",
@@ -141,6 +150,13 @@ export default function UnifiedGrantsDashboard() {
   const [vendorError, setVendorError] = useState<string | null>(null);
   const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
   const [expandedEmails, setExpandedEmails] = useState<Set<string>>(new Set());
+
+  // Apply for Grant (AI builder) state
+  const [applyGrantOpen, setApplyGrantOpen] = useState(false);
+  const [applyGrantLoading, setApplyGrantLoading] = useState(false);
+  const [applyGrantContent, setApplyGrantContent] = useState<string | null>(null);
+  const [applyGrantError, setApplyGrantError] = useState<string | null>(null);
+  const [applyGrantTitle, setApplyGrantTitle] = useState("");
 
   // Search grants from Grants.gov + USDOT programs
   async function handleSearch() {
@@ -302,6 +318,49 @@ export default function UnifiedGrantsDashboard() {
   function handleRemoveFromPipeline(grantId: string) {
     removeFromPipeline(grantId);
     setPipelineGrants([...getAllPipelineGrants()]);
+  }
+
+  // Apply for Grant - opens AI builder (streaming)
+  async function handleApplyForGrant(grant: { id: string; title: string }) {
+    setApplyGrantOpen(true);
+    setApplyGrantTitle(grant.title);
+    setApplyGrantContent(null);
+    setApplyGrantError(null);
+    setApplyGrantLoading(true);
+
+    try {
+      const res = await fetch("/api/build-grant-application", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grantId: grant.id,
+          portName: selectedProfile.name,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to build application");
+      }
+
+      setApplyGrantContent("");
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) {
+        setApplyGrantLoading(false);
+        return;
+      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        setApplyGrantContent((prev) => prev + chunk);
+      }
+    } catch (err) {
+      setApplyGrantError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setApplyGrantLoading(false);
+    }
   }
 
   // Load vendors for awarded grant
@@ -814,9 +873,21 @@ export default function UnifiedGrantsDashboard() {
                           </div>
                         )}
 
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleApplyForGrant(grant);
+                            }}
+                            className="gap-1.5"
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                            Apply for Grant
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleAddToPipeline(grant);
@@ -964,6 +1035,16 @@ export default function UnifiedGrantsDashboard() {
                                       {grant.notes ? "Edit Notes" : "Add Notes"}
                                     </Button>
                                   )}
+
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleApplyForGrant(grant)}
+                                    className="h-6 text-[10px] px-2 w-full gap-1"
+                                  >
+                                    <FileText className="h-3 w-3" />
+                                    Apply for Grant
+                                  </Button>
 
                                   <div className="flex gap-1 pt-2 border-t">
                                     {stage !== "eligible" && (
@@ -1257,6 +1338,61 @@ export default function UnifiedGrantsDashboard() {
 
     {/* Corvo Grant Intelligence Chat Sidebar */}
     <GrantIntelligenceChatSidebar />
+
+    {/* Apply for Grant - AI-generated application content */}
+    <Sheet open={applyGrantOpen} onOpenChange={setApplyGrantOpen}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-2xl overflow-y-auto"
+        showCloseButton={true}
+      >
+        <SheetHeader>
+          <SheetTitle>Apply for Grant</SheetTitle>
+          <SheetDescription>
+            {applyGrantTitle}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="mt-4 flex-1">
+          {applyGrantError && (
+            <div className="rounded-md bg-destructive/10 p-4 text-sm text-destructive">
+              {applyGrantError}
+            </div>
+          )}
+          {applyGrantLoading && applyGrantContent === null && (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span>Fetching grant details...</span>
+            </div>
+          )}
+          {applyGrantContent !== null && (
+            <div className="space-y-4">
+              <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm min-h-[8rem]">
+                {applyGrantContent}
+                {applyGrantLoading && (
+                  <span className="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" aria-hidden />
+                )}
+              </div>
+              {applyGrantLoading && (
+                <p className="text-xs text-muted-foreground">Streaming...</p>
+              )}
+              {!applyGrantLoading && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(applyGrantContent ?? "");
+                  }}
+                  className="gap-1.5"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy to Clipboard
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
   </>
   );
 }

@@ -10,6 +10,7 @@ import {
 import { currentPortProfile } from "@/data/port-profile";
 import { fetchGrantDetails, type DiscoveredGrant } from "@/lib/grants-gov";
 import { scoreGrantForPort, type GrantScore } from "@/data/grant-scoring";
+import { buildGrantApplication as buildGrantApplicationCore } from "@/lib/grant-application-builder";
 
 // In-memory cache of grant scores (keyed by grant ID)
 const grantScoreCache = new Map<string, GrantScore>();
@@ -528,4 +529,19 @@ export async function compareTwoGrants(params: {
       concerns: score2.concerns,
     },
   };
+}
+
+/**
+ * Build a grant application narrative using AI.
+ * Uses the configured prompt in grant-application-prompt.ts.
+ */
+export async function buildGrantApplication(params: {
+  grantId: string;
+  portName?: string;
+}): Promise<string> {
+  const portName = params.portName ?? currentPortProfile.name;
+  return buildGrantApplicationCore({
+    grantId: params.grantId,
+    portName,
+  });
 }
