@@ -369,26 +369,77 @@ export async function searchSamOpportunities(
   queryParams.set("api_key", apiKey);
   
   // SAM.gov API requires PostedFrom and PostedTo to be mandatory
-  // Set default date range if not provided (last 90 days to future)
+  // Default: postedFrom = today, postedTo = today + 1 year - 2 days
+  // Example: If today is 02/25/2026, postedFrom = 02/25/2026, postedTo = 02/23/2027
   const now = new Date();
-  const postedFrom = params.postedFrom || new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 90 days ago
-  const postedTo = params.postedTo || new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // 1 year from now
+  let postedFromDate: Date;
+  let postedToDate: Date;
+  
+  if (params.postedFrom) {
+    postedFromDate = new Date(params.postedFrom);
+    postedFromDate.setHours(0, 0, 0, 0); // Normalize to start of day
+  } else {
+    // Default: today's date
+    postedFromDate = new Date(now);
+    postedFromDate.setHours(0, 0, 0, 0); // Set to start of day
+  }
+  
+  if (params.postedTo) {
+    postedToDate = new Date(params.postedTo);
+    postedToDate.setHours(23, 59, 59, 999); // Normalize to end of day
+  } else {
+    // Default: today + 1 year - 2 days
+    postedToDate = new Date(postedFromDate);
+    postedToDate.setFullYear(postedFromDate.getFullYear() + 1); // Add 1 year
+    postedToDate.setDate(postedToDate.getDate() - 2); // Subtract 2 days
+    postedToDate.setHours(23, 59, 59, 999); // Set to end of day
+  }
+  
+  // Validate: postedFrom must be earlier than postedTo
+  if (postedFromDate >= postedToDate) {
+    throw new Error("postedFrom date must be earlier than postedTo date");
+  }
+  
+  // Validate: dates cannot be 365 days or more apart
+  const daysDiff = Math.ceil((postedToDate.getTime() - postedFromDate.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysDiff >= 365) {
+    // If user-provided dates are 365 days or more, adjust postedTo to be 1 year - 2 days from postedFrom
+    if (params.postedFrom || params.postedTo) {
+      console.warn(`Date range is ${daysDiff} days (must be < 365). Adjusting postedTo to be 1 year - 2 days from postedFrom.`);
+      postedToDate = new Date(postedFromDate);
+      postedToDate.setFullYear(postedFromDate.getFullYear() + 1); // Add 1 year
+      postedToDate.setDate(postedToDate.getDate() - 2); // Subtract 2 days
+      postedToDate.setHours(23, 59, 59, 999);
+    } else {
+      throw new Error("Date range must be less than 365 days (1 year)");
+    }
+  }
+  
+  // Convert dates to MM/DD/YYYY format for SAM.gov API
+  const formatDateForSam = (date: Date): string => {
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const year = date.getFullYear();
+    return `${month}/${day}/${year}`;
+  };
+  
+  const postedFrom = formatDateForSam(postedFromDate);
+  const postedTo = formatDateForSam(postedToDate);
   
   queryParams.set("postedFrom", postedFrom);
   queryParams.set("postedTo", postedTo);
   
-  // Limit and offset
-  const limit = Math.min(params.limit || 25, 100); // SAM.gov might have lower limits
+  // Limit and offset - keep at 100 as requested
+  const limit = 100;
   queryParams.set("limit", String(limit));
   
   if (params.offset && params.offset > 0) {
     queryParams.set("offset", String(params.offset));
   }
 
-  // Keyword search
-  if (params.keyword) {
-    queryParams.set("keyword", params.keyword);
-  }
+  // Keyword search - use default if not provided
+  const keyword = params.keyword || "port OR maritime OR infrastructure OR grant";
+  queryParams.set("keyword", keyword);
   
   // NAICS code search
   if (params.naicsCode) {

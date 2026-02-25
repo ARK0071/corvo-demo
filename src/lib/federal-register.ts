@@ -63,12 +63,8 @@ export async function searchFederalRegister(
 
   // Build query string
   // Use the provided query, or default to grant-related terms
-  if (params.query) {
-    queryParams.set("q", params.query);
-  } else {
-    // Default search for grant opportunities
-    queryParams.set("q", "funding opportunity OR NOFO OR grant program");
-  }
+  const query = params.query || "port OR maritime OR infrastructure OR transportation OR grant OR funding opportunity OR NOFO";
+  queryParams.set("q", query);
 
   // Filter by document type (NOTICE for NOFOs)
   queryParams.set("per_page", String(params.per_page || 100));

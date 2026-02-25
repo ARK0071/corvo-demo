@@ -38,7 +38,7 @@ export async function POST(req: Request) {
       maxPages?: number;
       state?: string;
       query?: string;
-      source?: "recipients" | "awards" | "both";
+      source?: "recipients" | "awards" | "sam" | "both" | "all";
     };
 
     // Derive NAICS codes from grant focus areas if not provided directly
@@ -51,7 +51,8 @@ export async function POST(req: Request) {
     }
 
     const cappedMaxPages = Math.min(maxPages || 5, 10);
-    const dataSource = source || "both";
+    // Default to "all" for comprehensive vendor search (USAspending + SAM)
+    const dataSource = source || "all";
 
     const result = await searchVendors({
       naicsCodes: codes,

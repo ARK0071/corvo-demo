@@ -148,7 +148,8 @@ export async function searchGrants(params: GrantsSearchParams): Promise<{
     startRecordNum: params.startRecordNum || 0,
   };
 
-  if (params.keyword) requestBody.keyword = params.keyword;
+  // Use provided keyword or default to port/maritime/infrastructure terms
+  requestBody.keyword = params.keyword || "port OR maritime OR infrastructure OR transportation OR grant";
   if (params.agency) requestBody.agencies = params.agency;
   if (params.oppStatuses && params.oppStatuses.length > 0) {
     requestBody.oppStatuses = params.oppStatuses.join("|");

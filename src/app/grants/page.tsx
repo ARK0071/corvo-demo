@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,7 @@ import {
   createProject,
   updateProject,
   deleteProject,
+  initializePortFreeportProjects,
   type Project,
 } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects, type GrantProjectMatch } from "@/data/grant-project-matching";
@@ -160,6 +161,12 @@ export default function UnifiedGrantsDashboard() {
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
   const [projectMatches, setProjectMatches] = useState<Map<string, GrantProjectMatch[]>>(new Map());
+
+  // Initialize Port Freeport default projects on mount
+  useEffect(() => {
+    initializePortFreeportProjects();
+    setProjects([...getAllProjects()]); // Refresh projects list
+  }, []);
 
   // Competitive intelligence state (Map of grantId -> CompetitiveInsight)
   const [competitiveIntelligence, setCompetitiveIntelligence] = useState<Map<string, CompetitiveInsight>>(new Map());

@@ -1,5 +1,6 @@
 import type { PortVendor } from "@/data/port-vendors";
 import { NAICS_SECTOR_MAP, NAICS_DESCRIPTIONS, PORT_NAICS_CODES, FOCUS_TO_NAICS } from "./naics";
+import { searchSamEntitiesMultiPage } from "./sam-gov";
 
 // ─── USASpending.gov API Client ───
 
@@ -548,7 +549,7 @@ export interface VendorSearchParams {
   maxPages?: number;
   state?: string;
   query?: string;
-  source?: "recipients" | "awards" | "both";
+  source?: "recipients" | "awards" | "sam" | "both" | "all";
 }
 
 export async function searchVendors(
@@ -570,7 +571,7 @@ export async function searchVendors(
   const promises: Promise<{ vendors: PortVendor[]; totalRecords: number }>[] = [];
 
   // Source 1: Top recipients by spending category (current approach)
-  if (source === "recipients" || source === "both") {
+  if (source === "recipients" || source === "both" || source === "all") {
     promises.push(
       (async () => {
         const { results: recipients, totalRecords } = await searchRecipientsByNaics(codes!, limit, maxPages);
@@ -605,7 +606,7 @@ export async function searchVendors(
   }
 
   // Source 2: Award-based search (much broader vendor coverage)
-  if (source === "awards" || source === "both") {
+  if (source === "awards" || source === "both" || source === "all") {
     promises.push(
       (async () => {
         const { vendors: awardVendors, totalRecords: awardRecords } = await searchAwardVendors({
@@ -617,16 +618,54 @@ export async function searchVendors(
     );
   }
 
-  const results = await Promise.all(promises);
+  // Source 3: SAM.gov entities search (active registrations)
+  if (source === "sam" || source === "all") {
+    promises.push(
+      (async () => {
+        // Check if SAM API key is available
+        if (!process.env.SAM_GOV_API_KEY) {
+          console.warn("SAM_GOV_API_KEY not configured. Skipping SAM API vendor search.");
+          return { vendors: [], totalRecords: 0 };
+        }
+
+        try {
+          const { vendors: samVendors, totalRecords: samRecords } = await searchSamEntitiesMultiPage(
+            {
+              naicsCodes: codes,
+              state: params.state,
+              query: params.query,
+              size: Math.min(limit, 100), // SAM API max is 100 per page
+            },
+            maxPages
+          );
+          return { vendors: samVendors, totalRecords: samRecords };
+        } catch (error) {
+          console.error("SAM API vendor search failed:", error);
+          // Return empty results on error - don't fail entire search
+          return { vendors: [], totalRecords: 0 };
+        }
+      })()
+    );
+  }
+
+  const results = await Promise.allSettled(promises);
 
   // Combine and deduplicate vendors
   const seen = new Map<string, PortVendor>();
   let totalRecords = 0;
 
   for (const result of results) {
-    totalRecords = Math.max(totalRecords, result.totalRecords);
-    for (const v of result.vendors) {
+    if (result.status === "rejected") {
+      console.error("Vendor search source failed:", result.reason);
+      continue;
+    }
+
+    const { vendors, totalRecords: sourceTotal } = result.value;
+    totalRecords = Math.max(totalRecords, sourceTotal);
+    
+    for (const v of vendors) {
       const existing = seen.get(v.id);
+      // Prefer vendor with more past projects (more complete data)
       if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
         seen.set(v.id, v);
       }

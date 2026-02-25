@@ -350,9 +350,10 @@ function findSimilarProjects(
 
 /**
  * Analyze geographic patterns in awards
+ * Accepts any award-like object with amount and location
  */
 function analyzeGeographicPatterns(
-  awards: Array<PIDPAward | USDOTAward>
+  awards: Array<{ amount: number; location: { state: string; city?: string } }>
 ): {
   topStates: Array<{ state: string; count: number; totalFunding: number }>;
   regionalFocus: string;

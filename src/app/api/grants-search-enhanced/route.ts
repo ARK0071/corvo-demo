@@ -67,12 +67,11 @@ export async function POST(request: NextRequest) {
     // Execute searches in parallel
     const searchPromises: Promise<any>[] = [];
 
-    // 1. Main Grants.gov search
-    const mainKeyword = params.keyword || "port OR maritime OR transportation OR infrastructure OR seaport";
+    // 1. Main Grants.gov search (default keyword handled in searchGrants)
     searchPromises.push(
       searchGrants({
         ...params,
-        keyword: mainKeyword,
+        keyword: params.keyword, // Will use default in searchGrants if not provided
       }).then((result) => ({ type: "grants_gov", result }))
     );
 
@@ -102,7 +101,7 @@ export async function POST(request: NextRequest) {
     // Always search Federal Register, even without keyword (uses default search)
     searchPromises.push(
       searchFederalRegister({
-        query: params.keyword || "port OR maritime OR infrastructure OR grant",
+        query: params.keyword, // Will use default in searchFederalRegister if not provided
         agencies: ["DOT", "DHS", "EPA", "DOC", "DOE", "USDA", "DOD"],
         per_page: 50,
       })
@@ -121,8 +120,8 @@ export async function POST(request: NextRequest) {
     if (process.env.SAM_GOV_API_KEY) {
       searchPromises.push(
         searchSamOpportunities({
-          keyword: params.keyword || "port OR maritime OR infrastructure",
-          limit: 50,
+          keyword: params.keyword, // Will use default in searchSamOpportunities if not provided
+          limit: 100, // Keep limit at 100 as requested
         })
           .then((opportunities) => {
             console.log(`SAM.gov returned ${opportunities.length} opportunities`);
