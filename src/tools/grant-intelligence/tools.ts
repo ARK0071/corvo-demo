@@ -13,6 +13,7 @@ import { scoreGrantForPort, type GrantScore } from "@/data/grant-scoring";
 import { getAllProjects, getProjectById } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects } from "@/data/grant-project-matching";
 import { analyzeCompetitiveIntelligence } from "@/data/competitive-intelligence";
+import { buildGrantApplication as buildGrantApplicationCore } from "@/lib/grant-application-builder";
 
 // In-memory cache of grant scores (keyed by grant ID)
 const grantScoreCache = new Map<string, GrantScore>();
@@ -613,7 +614,7 @@ export async function getProjectGrantMatches(params: { grantId: string }) {
 export async function getCompetitiveIntelligence(params: { grantId: string }) {
   // Try to get from pipeline first
   let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId) ?? null;
-  
+
   // If not in pipeline, try to fetch details
   if (!grant) {
     try {
@@ -628,7 +629,7 @@ export async function getCompetitiveIntelligence(params: { grantId: string }) {
   }
 
   const competitiveIntel = await analyzeCompetitiveIntelligence(grant as DiscoveredGrant);
-  
+
   if (!competitiveIntel) {
     return {
       grantId: grant.id,
@@ -643,4 +644,19 @@ export async function getCompetitiveIntelligence(params: { grantId: string }) {
     programName: competitiveIntel.programName,
     insights: competitiveIntel.insights,
   };
+}
+
+/**
+ * Build a grant application narrative using AI.
+ * Uses the configured prompt in grant-application-prompt.ts.
+ */
+export async function buildGrantApplication(params: {
+  grantId: string;
+  portName?: string;
+}): Promise<string> {
+  const portName = params.portName ?? currentPortProfile.name;
+  return buildGrantApplicationCore({
+    grantId: params.grantId,
+    portName,
+  });
 }
