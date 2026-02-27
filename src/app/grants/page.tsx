@@ -1358,30 +1358,30 @@ export default function UnifiedGrantsDashboard() {
               {applyGrantError}
             </div>
           )}
-          {applyGrantLoading && applyGrantContent === null && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span>Fetching grant details...</span>
-            </div>
-          )}
           {applyGrantContent !== null && (
             <div className="space-y-4">
-              <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm min-h-[8rem]">
-                {applyGrantContent}
-                {applyGrantLoading && (
-                  <span className="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" aria-hidden />
-                )}
-              </div>
-              {applyGrantLoading && (
-                <p className="text-xs text-muted-foreground">Streaming...</p>
+              {!applyGrantLoading && (applyGrantContent.trimStart().toLowerCase().startsWith("<!doctype") || applyGrantContent.trimStart().toLowerCase().startsWith("<html")) ? (
+                <div className="rounded-md border bg-muted/30 overflow-hidden min-h-[24rem]">
+                  <iframe
+                    title="Grant application guide"
+                    srcDoc={applyGrantContent}
+                    className="w-full min-h-[24rem] border-0 bg-white"
+                    sandbox="allow-same-origin allow-scripts"
+                  />
+                </div>
+              ) : (
+                <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm min-h-[8rem]">
+                  {applyGrantContent}
+                  {applyGrantLoading && (
+                    <span className="inline-block w-2 h-4 ml-0.5 bg-primary animate-pulse" aria-hidden />
+                  )}
+                </div>
               )}
               {!applyGrantLoading && (
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    navigator.clipboard.writeText(applyGrantContent ?? "");
-                  }}
+                  onClick={() => navigator.clipboard.writeText(applyGrantContent ?? "")}
                   className="gap-1.5"
                 >
                   <Copy className="h-3.5 w-3.5" />
