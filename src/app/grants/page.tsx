@@ -30,9 +30,6 @@ import {
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
-import { getDemoContext } from "@/data/demoContext";
-import { buildSmartContext } from "@/lib/smartMatch/contextBuilder";
-import { rerankGrants } from "@/lib/smartMatch/ranker";
 import type { SmartMatchResult } from "@/lib/smartMatch/ranker";
 import {
   getAllPipelineGrants,
@@ -125,6 +122,41 @@ const eligibilityColors: Record<string, string> = {
   not_eligible: "bg-red-500/10 text-red-600 dark:text-red-400",
 };
 
+// Hard-negative filters for vendors (words that immediately exclude a vendor)
+const VENDOR_HARD_NEGATIVE_KEYWORDS = [
+  // Education-only vendors
+  "elementary school",
+  "middle school",
+  "high school",
+  "k-12",
+  "school district",
+  // Pure healthcare providers
+  "hospital",
+  "clinic",
+  "nursing home",
+  "home health",
+  // Individual social services
+  "daycare",
+  "child care",
+  "assisted living",
+  "boeing",
+];
+
+function isHardNegativeVendor(vendor: PortVendor): boolean {
+  const text = [
+    vendor.name,
+    vendor.sector,
+    vendor.headquarters,
+    vendor.description,
+    ...vendor.capabilities,
+    ...vendor.certifications,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return VENDOR_HARD_NEGATIVE_KEYWORDS.some((kw) => text.includes(kw));
+}
+
 function formatCurrency(n: number) {
   if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(0)}M`;
@@ -175,8 +207,8 @@ function UnifiedGrantsDashboard() {
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
 
-  // Smart Match state
-  const [matchMode, setMatchMode] = useState<"manual" | "smart">("manual");
+  // Smart Match disabled (legacy state kept for compatibility)
+  const matchMode: "manual" = "manual";
   const [smartMatchResults, setSmartMatchResults] = useState<Map<string, SmartMatchResult>>(new Map());
 
   // Pipeline tab state
@@ -185,8 +217,8 @@ function UnifiedGrantsDashboard() {
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [notesText, setNotesText] = useState("");
 
-  // Vendor Outreach tab state
-  const [selectedAwardedGrant, setSelectedAwardedGrant] = useState<string | null>(null);
+  // Vendor Outreach tab state (now project-driven)
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [vendors, setVendors] = useState<PortVendor[]>([]);
   const [matches, setMatches] = useState<GrantVendorMatch[]>([]);
   const [loadingVendors, setLoadingVendors] = useState(false);
@@ -221,22 +253,8 @@ function UnifiedGrantsDashboard() {
 
     try {
       let keyword = searchQuery.trim();
-      const rows = matchMode === "smart" ? 100 : 50;
+      const rows = 100;
       const statuses = selectedStatuses.length > 0 ? selectedStatuses : undefined;
-
-      // In smart mode, build context first to generate AI keywords
-      let smartContext: Awaited<ReturnType<typeof buildSmartContext>> | null = null;
-      if (matchMode === "smart") {
-        console.log("[Smart Match] Building context to generate keywords...");
-        const demoContext = getDemoContext();
-        smartContext = await buildSmartContext(demoContext);
-        const aiKeywords = smartContext.derived.keywords;
-        if (aiKeywords.length > 0) {
-          keyword = aiKeywords.slice(0, 8).join(" ");
-          setSearchQuery(keyword);
-          console.log("[Smart Match] Search bar populated with AI keywords:", keyword);
-        }
-      }
 
       const cacheKey = JSON.stringify({ keyword, statuses, rows });
 
@@ -273,23 +291,8 @@ function UnifiedGrantsDashboard() {
         searchCache.set(cacheKey, { grants, totalCount: totalCountValue });
       }
 
-      // Apply Smart Match reranking (keeps "Why Matched" reasons)
-      if (matchMode === "smart" && smartContext) {
-        console.log("[Smart Match] Reranking", grants.length, "grants to top 20...");
-        const reranked = rerankGrants(grants, smartContext, 20);
-        grants = reranked;
-
-        const smartMatchMap = new Map<string, SmartMatchResult>();
-        for (const grant of reranked) {
-          if (grant.smartMatch) {
-            smartMatchMap.set(grant.id, grant.smartMatch);
-          }
-        }
-        setSmartMatchResults(smartMatchMap);
-        console.log("[Smart Match] Stored results for", smartMatchMap.size, "grants");
-      } else {
-        setSmartMatchResults(new Map());
-      }
+      // Smart Match disabled – always use raw Grants.gov results
+      setSmartMatchResults(new Map());
 
       setDiscoveredGrants(grants);
       setTotalCount(totalCountValue);
@@ -481,12 +484,12 @@ function UnifiedGrantsDashboard() {
     }
   }
 
-  // Load vendors for awarded grant
-  async function handleLoadVendors(grantId: string) {
-    const grant = pipelineGrants.find((g) => g.id === grantId);
-    if (!grant) return;
+  // Load vendors for selected project
+  async function handleLoadVendorsForProject(projectId: string) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
 
-    setSelectedAwardedGrant(grantId);
+    setSelectedProjectId(projectId);
     setLoadingVendors(true);
     setVendorError(null);
 
@@ -495,8 +498,8 @@ function UnifiedGrantsDashboard() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          focusAreas: grant.focusAreas,
-          eligibleActivities: grant.eligibleActivities,
+          focusAreas: project.focusAreas,
+          eligibleActivities: project.focusAreas,
           maxPages: 5,
         }),
       });
@@ -508,32 +511,35 @@ function UnifiedGrantsDashboard() {
 
       const { vendors: samVendors } = await res.json() as { vendors: PortVendor[]; totalRecords: number };
 
-      if (samVendors.length === 0) {
+      // Apply hard negative filter to vendors
+      const filteredVendors = samVendors.filter((v) => !isHardNegativeVendor(v));
+
+      if (filteredVendors.length === 0) {
         throw new Error("No federal vendors found for this grant's focus areas.");
       }
 
-      addPortVendors(samVendors);
-      setVendors(samVendors);
+      addPortVendors(filteredVendors);
+      setVendors(filteredVendors);
 
-      // Convert PipelineGrant to GrantProgram format for scoring
+      // Convert Project to GrantProgram-like format for scoring
       const grantForScoring = {
-        id: grant.id,
-        name: grant.title,
-        shortName: grant.opportunityNumber,
-        agency: grant.agency,
-        description: grant.description,
-        totalFunding: grant.totalFunding,
-        minAward: grant.awardFloor,
-        maxAward: grant.awardCeiling,
+        id: project.id,
+        name: project.name,
+        shortName: project.projectType,
+        agency: selectedProfile.name,
+        description: project.description,
+        totalFunding: project.budget,
+        minAward: 0,
+        maxAward: project.budget,
         matchRequirement: 0,
-        eligibleActivities: grant.eligibleActivities,
-        deadline: grant.closeDate,
+        eligibleActivities: project.focusAreas,
+        deadline: project.endDate ?? "",
         status: "open" as const,
-        applicationUrl: grant.applicationUrl,
-        focusAreas: grant.focusAreas,
+        applicationUrl: "",
+        focusAreas: project.focusAreas,
       };
 
-      const newMatches = scoreVendorsForGrant(samVendors, grantForScoring);
+      const newMatches = scoreVendorsForGrant(filteredVendors, grantForScoring);
       newMatches.sort((a, b) => b.overallScore - a.overallScore);
       setMatches(newMatches.slice(0, 20));
     } catch (err) {
@@ -548,8 +554,6 @@ function UnifiedGrantsDashboard() {
       prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
     );
   }
-
-  const awardedGrants = getAwardedGrants();
 
   return (
     <>
@@ -570,7 +574,7 @@ function UnifiedGrantsDashboard() {
                 {activeTab === "discover" && "Search and discover federal grant opportunities"}
                 {activeTab === "pipeline" && "Track your grant applications through each stage"}
                 {activeTab === "projects" && "Manage port projects and match them to grants"}
-                {activeTab === "outreach" && "Find and contact vendors for awarded grants"}
+                {activeTab === "outreach" && "Find and contact vendors for priority projects"}
               </p>
             </div>
           </div>
@@ -613,65 +617,17 @@ function UnifiedGrantsDashboard() {
                   </div>
                 </div>
 
-                {/* Match Mode Toggle */}
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-muted-foreground">Match Mode:</span>
-                  <div className="flex gap-1 bg-muted rounded-md p-1">
-                    <button
-                      onClick={() => setMatchMode("manual")}
-                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                        matchMode === "manual"
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Manual
-                    </button>
-                    <button
-                      onClick={() => setMatchMode("smart")}
-                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                        matchMode === "smart"
-                          ? "bg-background text-foreground shadow-sm"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      Smart Match
-                    </button>
-                  </div>
-                </div>
-
-                {/* Context Chips (Smart Match mode only) */}
-                {matchMode === "smart" && (() => {
-                  const demoContext = getDemoContext();
-                  return (
-                    <div className="flex flex-wrap gap-2 items-center">
-                      <span className="text-xs text-muted-foreground">Context used:</span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {demoContext.projects.length} active projects
-                      </Badge>
-                      {demoContext.spendSignals.topCategoriesL2.slice(0, 3).map((cat) => (
-                        <Badge key={cat.category} variant="outline" className="text-[10px]">
-                          {cat.category}
-                        </Badge>
-                      ))}
-                      <Badge variant="outline" className="text-[10px]">
-                        AI-powered keywords
-                      </Badge>
-                    </div>
-                  );
-                })()}
-
                 <div className="flex gap-2">
                   <Button onClick={handleSearch} disabled={searching} className="gap-2">
                     {searching ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        {matchMode === "smart" ? "Building smart context..." : "Searching grants..."}
+                        Searching grants...
                       </>
                     ) : (
                       <>
                         <Search className="h-4 w-4" />
-                        {matchMode === "smart" ? "Smart Search" : "Search Federal Grants"}
+                        Search Federal Grants
                       </>
                     )}
                   </Button>
@@ -762,12 +718,19 @@ function UnifiedGrantsDashboard() {
                 // Filter grants
                 let filtered = discoveredGrants;
 
-                // Filter out very low-scoring grants (completely irrelevant)
+                // Filter out clearly irrelevant grants
                 filtered = filtered.filter((grant) => {
                   const score = grantScores.get(grant.id);
-                  // Only show grants with score >= 35 (excludes health/education grants)
-                  // Score 35+ means at least some alignment with port priorities
-                  return !score || score.overallScore >= 35;
+                  // If we never scored it (e.g. hard-negative filtered out), don't show it
+                  if (!score) return false;
+
+                  // If alignment is 0, the grant doesn't match port priorities at all
+                  if (score.alignmentScore <= 0) {
+                    return false;
+                  }
+
+                  // Only show grants with overall score >= 35 (excludes most irrelevant grants)
+                  return score.overallScore >= 35;
                 });
 
                 if (showOnlyEligible) {
@@ -1324,7 +1287,6 @@ function UnifiedGrantsDashboard() {
                                         size="sm"
                                         onClick={() => {
                                           setActiveTab("outreach");
-                                          handleLoadVendors(grant.id);
                                         }}
                                         className="h-6 text-[10px] px-2 flex-1 gap-1"
                                       >
@@ -1676,32 +1638,32 @@ function UnifiedGrantsDashboard() {
           {/* TAB 4: VENDOR OUTREACH */}
           {activeTab === "outreach" && (
             <div className="mt-2">
-            {awardedGrants.length === 0 ? (
+            {projects.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                <p className="text-sm">No awarded grants yet</p>
+                <p className="text-sm">No projects defined yet</p>
                 <p className="text-xs mt-1">
-                  Move grants to "Awarded" status in the Pipeline tab to match vendors
+                  Create projects in the Projects tab to match vendors against them.
                 </p>
               </div>
             ) : (
               <div>
                 <Card className="p-5 mb-6">
-                  <label className="text-sm font-medium mb-2 block">Select Awarded Grant</label>
+                  <label className="text-sm font-medium mb-2 block">Select Project</label>
                   <select
-                    value={selectedAwardedGrant || ""}
+                    value={selectedProjectId || ""}
                     onChange={(e) => {
-                      const grantId = e.target.value;
-                      if (grantId) {
-                        handleLoadVendors(grantId);
+                      const projectId = e.target.value;
+                      if (projectId) {
+                        handleLoadVendorsForProject(projectId);
                       }
                     }}
                     className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                   >
-                    <option value="">Choose a grant...</option>
-                    {awardedGrants.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.title} - {formatCurrency(g.awardCeiling)}
+                    <option value="">Choose a project...</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} - {formatCurrency(p.budget)}
                       </option>
                     ))}
                   </select>
@@ -1733,7 +1695,7 @@ function UnifiedGrantsDashboard() {
 
                         const isOpen = expandedVendors.has(vendor.id);
                         const emailOpen = expandedEmails.has(vendor.id);
-                        const selectedGrant = pipelineGrants.find((g) => g.id === selectedAwardedGrant);
+                        const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
                         return (
                           <Card key={vendor.id} className="overflow-hidden">
@@ -1854,25 +1816,25 @@ function UnifiedGrantsDashboard() {
                                   {emailOpen ? "Hide" : "Show"} Outreach Email
                                 </Button>
 
-                                {emailOpen && selectedGrant && (
+                                {emailOpen && selectedProject && (
                                   <div className="mt-3">
                                     <OutreachEmail
                                       match={match}
                                       grant={{
-                                        id: selectedGrant.id,
-                                        name: selectedGrant.title,
-                                        shortName: selectedGrant.opportunityNumber,
-                                        agency: selectedGrant.agency,
-                                        description: selectedGrant.description,
-                                        totalFunding: selectedGrant.totalFunding,
-                                        minAward: selectedGrant.awardFloor,
-                                        maxAward: selectedGrant.awardCeiling,
+                                        id: selectedProject.id,
+                                        name: selectedProject.name,
+                                        shortName: selectedProject.projectType,
+                                        agency: selectedProfile.name,
+                                        description: selectedProject.description,
+                                        totalFunding: selectedProject.budget,
+                                        minAward: 0,
+                                        maxAward: selectedProject.budget,
                                         matchRequirement: 0,
-                                        eligibleActivities: selectedGrant.eligibleActivities,
-                                        deadline: selectedGrant.closeDate,
+                                        eligibleActivities: selectedProject.focusAreas,
+                                        deadline: selectedProject.endDate ?? "",
                                         status: "open",
-                                        applicationUrl: selectedGrant.applicationUrl,
-                                        focusAreas: selectedGrant.focusAreas,
+                                        applicationUrl: "",
+                                        focusAreas: selectedProject.focusAreas,
                                       }}
                                       vendor={vendor}
                                     />

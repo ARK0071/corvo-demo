@@ -52,8 +52,49 @@ const ELIGIBILITY_KEYWORDS = {
 const STOP_WORDS = new Set([
   "and", "the", "for", "with", "from", "that", "this", "also", "into", "such",
   "other", "through", "including", "related", "based", "using", "under", "over",
-  "improvement", "development", "program", "project", "infrastructure",
+  "improvement", "program", "project",
 ]);
+
+const HARD_NEGATIVE_KEYWORDS = [
+  // Education-focused programs
+  "k-12",
+  "elementary school",
+  "middle school",
+  "high school",
+  "school district",
+  "university",
+  "college",
+  "higher education",
+  "students",
+  // Individual social services
+  "housing voucher",
+  "affordable housing",
+  "medicaid",
+  "medicare",
+  "supplemental nutrition assistance",
+  "snap benefits",
+  "veterans housing",
+  "nuclear",
+  "pregnant",
+  "lifespan",
+  "aids",
+  "clinical",
+  "cybersecurity",
+
+];
+
+function isHardNegativeGrant(grant: DiscoveredGrant): boolean {
+  const text = [
+    grant.title,
+    grant.description,
+    ...grant.fundingCategories,
+    ...grant.eligibility,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return HARD_NEGATIVE_KEYWORDS.some((kw) => text.includes(kw));
+}
 
 function extractKeywords(text: string): string[] {
   return text
@@ -353,9 +394,25 @@ export function scoreGrantsForPort(
   grants: DiscoveredGrant[],
   profile: PortProfile = currentPortProfile
 ): GrantScore[] {
-  return grants
+  const scored = grants
+    .filter((grant) => !isHardNegativeGrant(grant))
     .map((grant) => scoreGrantForPort(grant, profile))
     .sort((a, b) => b.overallScore - a.overallScore);
+
+  // Debug logging: top 10 scored grants
+  if (process.env.NODE_ENV !== "production") {
+    console.log(
+      "[GrantScoring] Top grants:",
+      scored.slice(0, 10).map((g) => ({
+        id: g.grantId,
+        title: g.grant.title,
+        overallScore: g.overallScore,
+        recommendation: g.recommendation,
+      }))
+    );
+  }
+
+  return scored;
 }
 
 /**
