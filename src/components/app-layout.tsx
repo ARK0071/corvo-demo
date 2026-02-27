@@ -26,12 +26,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <Link
                 href="/grants?tab=pipeline"
                 className="relative flex items-center justify-center h-8 w-8 rounded-full hover:bg-muted transition-colors"
-                aria-label={`${upcomingCount} upcoming deadlines`}
+                aria-label={upcomingCount > 0 ? `${upcomingCount} upcoming deadlines` : "Pipeline"}
               >
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                  {upcomingCount > 99 ? "99+" : upcomingCount}
-                </span>
+                {upcomingCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-black text-[10px] font-bold text-white dark:bg-white dark:text-black">
+                    {upcomingCount > 99 ? "99+" : upcomingCount}
+                  </span>
+                )}
               </Link>
               <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8">
                 {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
