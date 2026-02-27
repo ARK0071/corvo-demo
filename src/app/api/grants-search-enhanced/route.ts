@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
+import { searchGrants, fetchGrantDetails, type GrantsSearchParams } from "@/lib/grants-gov";
 import { searchUSDOTGrants, enhanceUSDOTGrant, buildUSDOTSearchQuery } from "@/lib/usdot-grants";
 import { searchFederalRegister } from "@/lib/federal-register";
 import { searchGovConOpportunities } from "@/lib/govcon";
@@ -113,7 +113,20 @@ export async function POST(request: NextRequest) {
         })
     );
 
-    // 5. GovCon opportunities search (if API key is available)
+    // 5. Featured/Priority Grants - Always include specific high-priority grants
+    searchPromises.push(
+      fetchGrantDetails(356561)
+        .then((grant) => {
+          console.log(`Featured grant 356561 fetched successfully`);
+          return { type: "featured", result: { grants: [grant], totalCount: 1 } };
+        })
+        .catch((err) => {
+          console.error("Featured grant fetch error:", err);
+          return { type: "featured", result: { grants: [], totalCount: 0 } };
+        })
+    );
+
+    // 6. GovCon opportunities search (if API key is available)
     // Always search GovCon if API key exists (uses default keyword if needed)
     if (process.env.GOVCON_API_KEY) {
       searchPromises.push(
@@ -208,9 +221,15 @@ export async function POST(request: NextRequest) {
     }, {} as Record<string, number>);
     console.log("Grants by source:", sourceBreakdown);
 
-    // Sort by relevance (DOT grants first if DOT-focused search)
+    // Sort by relevance (Featured grants first, then DOT grants)
     grants.sort((a, b) => {
-      // Prioritize DOT grants
+      // Prioritize featured grants (grant 356561)
+      const aIsFeatured = a.id === "356561";
+      const bIsFeatured = b.id === "356561";
+      if (aIsFeatured && !bIsFeatured) return -1;
+      if (!aIsFeatured && bIsFeatured) return 1;
+
+      // Then prioritize DOT grants
       const aIsDOT = a.agencyCode === "DOT";
       const bIsDOT = b.agencyCode === "DOT";
       if (aIsDOT && !bIsDOT) return -1;
@@ -228,6 +247,7 @@ export async function POST(request: NextRequest) {
           grants_gov: sourcesUsed.has("grants_gov") || sourcesUsed.has("grants_gov_dot"),
           usdot_programs: sourcesUsed.has("usdot"),
           federal_register: sourcesUsed.has("federal_register"),
+          featured: sourcesUsed.has("featured"),
           govcon: sourcesUsed.has("govcon"),
         },
       },
