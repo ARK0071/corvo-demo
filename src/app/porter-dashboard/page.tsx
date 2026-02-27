@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -86,30 +86,38 @@ export default function PorterDashboardPage() {
   }, []);
 
   // Pipeline stage counts
-  const eligible = getStageCount("eligible");
-  const applied = getStageCount("applied");
-  const underReview = getStageCount("under_review");
-  const awarded = getStageCount("awarded");
-  const rejected = getStageCount("rejected");
-  const totalPipeline = pipeline.length;
+  const stageCounts = useMemo(() => ({
+    eligible: getStageCount("eligible"),
+    applied: getStageCount("applied"),
+    underReview: getStageCount("under_review"),
+    awarded: getStageCount("awarded"),
+    rejected: getStageCount("rejected"),
+    total: pipeline.length,
+  }), [pipeline]);
 
   // Upcoming deadlines (next 30 days)
-  const upcoming = pipeline
-    .filter((g) => {
-      const d = daysUntil(g.closeDate);
-      return d !== null && d >= 0 && d <= 30;
-    })
-    .sort((a, b) => new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime())
-    .slice(0, 5);
+  const upcoming = useMemo(() =>
+    pipeline
+      .filter((g) => {
+        const d = daysUntil(g.closeDate);
+        return d !== null && d >= 0 && d <= 30;
+      })
+      .sort((a, b) => new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime())
+      .slice(0, 5),
+    [pipeline]
+  );
 
   // Total potential funding in pipeline
-  const potentialFunding = pipeline.reduce(
-    (s, g) => s + (g.awardCeiling || g.totalFunding || 0),
-    0
-  );
-  const awardedFunding = pipeline
-    .filter((g) => g.stage === "awarded")
-    .reduce((s, g) => s + (g.awardCeiling || g.totalFunding || 0), 0);
+  const fundingStats = useMemo(() => {
+    const potentialFunding = pipeline.reduce(
+      (s, g) => s + (g.awardCeiling || g.totalFunding || 0),
+      0
+    );
+    const awardedFunding = pipeline
+      .filter((g) => g.stage === "awarded")
+      .reduce((s, g) => s + (g.awardCeiling || g.totalFunding || 0), 0);
+    return { potentialFunding, awardedFunding };
+  }, [pipeline]);
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
@@ -129,27 +137,27 @@ export default function PorterDashboardPage() {
         <KpiCard
           icon={<Layers className="h-4 w-4" />}
           label="Pipeline"
-          value={String(totalPipeline)}
+          value={String(stageCounts.total)}
           href="/grants?tab=pipeline"
         />
         <KpiCard
           icon={<CheckCircle2 className="h-4 w-4" />}
           label="Awarded"
-          value={String(awarded)}
+          value={String(stageCounts.awarded)}
           accent="text-emerald-600 dark:text-emerald-400"
           href="/grants?tab=pipeline"
         />
         <KpiCard
           icon={<Clock className="h-4 w-4" />}
           label="Under Review"
-          value={String(underReview)}
+          value={String(stageCounts.underReview)}
           accent="text-amber-600 dark:text-amber-400"
           href="/grants?tab=pipeline"
         />
         <KpiCard
           icon={<DollarSign className="h-4 w-4" />}
           label="Potential Funding"
-          value={fmt(potentialFunding)}
+          value={fmt(fundingStats.potentialFunding)}
           href="/grants?tab=pipeline"
         />
         <KpiCard
@@ -184,7 +192,7 @@ export default function PorterDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {totalPipeline === 0 ? (
+            {stageCounts.total === 0 ? (
               <EmptyHint
                 text="No grants in pipeline yet."
                 linkLabel="Discover Grants"
@@ -192,11 +200,11 @@ export default function PorterDashboardPage() {
               />
             ) : (
               <div className="space-y-2">
-                <FunnelRow label="Eligible" count={eligible} total={totalPipeline} color="bg-blue-500" />
-                <FunnelRow label="Applied" count={applied} total={totalPipeline} color="bg-purple-500" />
-                <FunnelRow label="Under Review" count={underReview} total={totalPipeline} color="bg-amber-500" />
-                <FunnelRow label="Awarded" count={awarded} total={totalPipeline} color="bg-emerald-500" />
-                <FunnelRow label="Rejected" count={rejected} total={totalPipeline} color="bg-red-500" />
+                <FunnelRow label="Eligible" count={stageCounts.eligible} total={stageCounts.total} color="bg-blue-500" />
+                <FunnelRow label="Applied" count={stageCounts.applied} total={stageCounts.total} color="bg-purple-500" />
+                <FunnelRow label="Under Review" count={stageCounts.underReview} total={stageCounts.total} color="bg-amber-500" />
+                <FunnelRow label="Awarded" count={stageCounts.awarded} total={stageCounts.total} color="bg-emerald-500" />
+                <FunnelRow label="Rejected" count={stageCounts.rejected} total={stageCounts.total} color="bg-red-500" />
               </div>
             )}
           </CardContent>

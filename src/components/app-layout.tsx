@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Sun, Moon, Calendar } from "lucide-react";
@@ -10,7 +11,7 @@ import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
-  const upcomingCount = getUpcomingDeadlineCount();
+  const upcomingCount = useMemo(() => getUpcomingDeadlineCount(), []);
 
   return (
     <SidebarProvider>
@@ -29,7 +30,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 aria-label={`${upcomingCount} upcoming deadlines`}
               >
                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
+                <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-foreground text-[10px] font-bold text-background">
                   {upcomingCount > 99 ? "99+" : upcomingCount}
                 </span>
               </Link>

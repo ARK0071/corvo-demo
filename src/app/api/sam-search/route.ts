@@ -9,6 +9,9 @@ const rateLimit = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW = 60_000;
 const RATE_LIMIT_MAX = 10;
 
+const responseCache = new Map<string, { data: any; expiresAt: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
   const entry = rateLimit.get(ip);
@@ -55,6 +58,16 @@ export async function POST(req: Request) {
     // Default to "all" for comprehensive vendor search (USAspending + SAM)
     const dataSource = source || "all";
 
+    // Check cache first
+    const cacheKey = JSON.stringify({ codes, limit, maxPages: cappedMaxPages, state, query, source: dataSource });
+    const cached = responseCache.get(cacheKey);
+    if (cached && Date.now() < cached.expiresAt) {
+      return new Response(
+        JSON.stringify(cached.data),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     const result = await searchVendors({
       naicsCodes: codes,
       focusAreas,
@@ -66,8 +79,13 @@ export async function POST(req: Request) {
       source: dataSource,
     });
 
+    const responseData = { vendors: result.vendors, totalRecords: result.totalRecords };
+
+    // Cache the response
+    responseCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + CACHE_TTL });
+
     return new Response(
-      JSON.stringify({ vendors: result.vendors, totalRecords: result.totalRecords }),
+      JSON.stringify(responseData),
       { status: 200, headers: { "Content-Type": "application/json" } }
     );
   } catch (error: unknown) {

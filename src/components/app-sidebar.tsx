@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp, BarChart3, Newspaper, Search, Layers, FolderKanban, Users, ChevronDown } from "lucide-react";
@@ -67,7 +67,12 @@ function AppSidebarInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const collapsed = state === "collapsed";
-  const upcomingCount = getUpcomingDeadlineCount();
+  const upcomingCount = useMemo(() => getUpcomingDeadlineCount(), []);
+
+  const checkIsActive = useCallback(
+    (itemUrl: string) => isItemActive(itemUrl, pathname, searchParams),
+    [pathname, searchParams]
+  );
 
   return (
     <Sidebar collapsible="icon" className={collapsed ? "w-14" : "w-64"}>
@@ -86,7 +91,7 @@ function AppSidebarInner() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {corvusItems.map((item) => {
-                    const isActive = isItemActive(item.url, pathname, searchParams);
+                    const isActive = checkIsActive(item.url);
                     return (
                       <SidebarMenuItem key={item.title}>
                         <SidebarMenuButton asChild>
@@ -105,7 +110,7 @@ function AppSidebarInner() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {grantMatchItems.map((item) => {
-                    const isActive = isItemActive(item.url, pathname, searchParams);
+                    const isActive = checkIsActive(item.url);
                     const isPipeline = item.title === "Pipeline";
                     return (
                       <SidebarMenuItem key={item.title}>
@@ -116,7 +121,7 @@ function AppSidebarInner() {
                               <>
                                 <span className="flex-1">{item.title}</span>
                                 {isPipeline && (
-                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
                                     {upcomingCount > 99 ? "99+" : upcomingCount}
                                   </span>
                                 )}
@@ -148,7 +153,7 @@ function AppSidebarInner() {
                   <SidebarGroupContent>
                     <SidebarMenu>
                       {corvusItems.map((item) => {
-                        const isActive = isItemActive(item.url, pathname, searchParams);
+                        const isActive = checkIsActive(item.url);
                         return (
                           <SidebarMenuItem key={item.title}>
                             <SidebarMenuButton asChild>
@@ -180,7 +185,7 @@ function AppSidebarInner() {
                   <SidebarGroupContent>
                     <SidebarMenu>
                       {grantMatchItems.map((item) => {
-                        const isActive = isItemActive(item.url, pathname, searchParams);
+                        const isActive = checkIsActive(item.url);
                         const isPipeline = item.title === "Pipeline";
                         return (
                           <SidebarMenuItem key={item.title}>
@@ -189,7 +194,7 @@ function AppSidebarInner() {
                                 <item.icon className="mr-2 h-4 w-4 shrink-0" />
                                 <span className="flex-1">{item.title}</span>
                                 {isPipeline && (
-                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
                                     {upcomingCount > 99 ? "99+" : upcomingCount}
                                   </span>
                                 )}
