@@ -221,15 +221,9 @@ export async function POST(request: NextRequest) {
     }, {} as Record<string, number>);
     console.log("Grants by source:", sourceBreakdown);
 
-    // Sort by relevance (Featured grants first, then DOT grants)
+    // Sort by relevance (DOT grants first if DOT-focused search)
     grants.sort((a, b) => {
-      // Prioritize featured grants (grant 356561)
-      const aIsFeatured = a.id === "356561";
-      const bIsFeatured = b.id === "356561";
-      if (aIsFeatured && !bIsFeatured) return -1;
-      if (!aIsFeatured && bIsFeatured) return 1;
-
-      // Then prioritize DOT grants
+      // Prioritize DOT grants
       const aIsDOT = a.agencyCode === "DOT";
       const bIsDOT = b.agencyCode === "DOT";
       if (aIsDOT && !bIsDOT) return -1;
