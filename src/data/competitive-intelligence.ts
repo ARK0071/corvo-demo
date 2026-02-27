@@ -50,6 +50,12 @@ export interface CompetitiveInsight {
       portRisks: string[];
       recommendation: string;
     };
+    usaspendingData?: {
+      totalAwards: number;
+      totalFunding: number;
+      topRecipients: Array<{ recipient: string; awardCount: number; totalAmount: number; location: string }>;
+      recentAwards: Array<{ recipient: string; amount: number; year: number; location: string; description: string }>;
+    };
   };
 }
 
@@ -341,10 +347,8 @@ function findSimilarProjects(
       project: item.award.project,
       amount: item.award.amount,
       year: item.award.year,
-      location: "location" in item.award 
-        ? `${item.award.location.city || ""} ${item.award.location.state}`.trim()
-        : `${item.award.location.state}`,
-      projectType: "projectType" in item.award ? item.award.projectType : undefined,
+      location: `${item.award.location.city || ""} ${item.award.location.state}`.trim(),
+      projectType: item.award.projectType,
     }));
 }
 
@@ -509,10 +513,11 @@ function formatCurrency(amount: number): string {
 /**
  * Get competitive intelligence summary for multiple grants
  */
-export function getCompetitiveIntelligenceSummary(grants: DiscoveredGrant[]) {
-  const insights = grants
-    .map(grant => analyzeCompetitiveIntelligence(grant))
-    .filter((ci): ci is CompetitiveInsight => ci !== null);
+export async function getCompetitiveIntelligenceSummary(grants: DiscoveredGrant[]) {
+  const settled = await Promise.all(
+    grants.map(grant => analyzeCompetitiveIntelligence(grant))
+  );
+  const insights = settled.filter((ci): ci is CompetitiveInsight => ci !== null);
 
   return {
     totalGrants: grants.length,

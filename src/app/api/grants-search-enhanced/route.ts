@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
 import { searchUSDOTGrants, enhanceUSDOTGrant, buildUSDOTSearchQuery } from "@/lib/usdot-grants";
 import { searchFederalRegister } from "@/lib/federal-register";
-import { searchSamOpportunities } from "@/lib/sam-gov";
-import { searchTexasGrants } from "@/lib/brave-search";
-import { searchTexasGrantsTavily } from "@/lib/tavily-search";
+import { searchGovConOpportunities } from "@/lib/govcon";
 
 /**
  * POST /api/grants-search-enhanced
@@ -115,92 +113,53 @@ export async function POST(request: NextRequest) {
         })
     );
 
-    // 5. SAM.gov opportunities search (if API key is available)
-    // Always search SAM.gov if API key exists (uses default keyword if needed)
-    if (process.env.SAM_GOV_API_KEY) {
+    // 5. GovCon opportunities search (if API key is available)
+    // Always search GovCon if API key exists (uses default keyword if needed)
+    if (process.env.GOVCON_API_KEY) {
       searchPromises.push(
-        searchSamOpportunities({
-          keyword: params.keyword, // Will use default in searchSamOpportunities if not provided
-          limit: 100, // Keep limit at 100 as requested
+        searchGovConOpportunities({
+          keywords: params.keyword || undefined,
+          limit: 50,
         })
           .then((opportunities) => {
-            console.log(`SAM.gov returned ${opportunities.length} opportunities`);
-            // Map SAM opportunities to DiscoveredGrant format
+            console.log(`GovCon returned ${opportunities.length} opportunities`);
             const grants = opportunities
-              .filter((opp) => opp.type === "solicitation" || opp.type === "presolicitation")
-              .map((opp) => ({
-                id: `sam-${opp.noticeId}`,
-                opportunityNumber: opp.solicitationNumber || opp.noticeId,
-                title: opp.title,
-                agency: opp.department,
-                agencyCode: opp.department.substring(0, 10).toUpperCase(),
-                description: opp.description || opp.title,
-                awardFloor: 0,
-                awardCeiling: opp.award?.amount || 0,
-                totalFunding: opp.award?.amount || 0,
-                closeDate: opp.responseDeadLine || "",
-                postDate: opp.postedDate,
-                status: opp.type === "presolicitation" ? "forecasted" : "posted",
-                applicationUrl: `https://sam.gov/opp/${opp.noticeId}/view`,
-                eligibility: [],
-                fundingCategories: [],
-                fundingInstruments: [],
-                costSharing: false,
-                alnNumbers: [],
-                source: "SAM.gov",
-              }));
-            console.log(`SAM.gov mapped to ${grants.length} grants`);
-            return { type: "sam_gov", result: { grants, totalCount: grants.length } };
+              .filter((opp) => {
+                const nt = (opp.notice_type || "").toLowerCase();
+                return nt.includes("solicitation") || nt.includes("presolicitation");
+              })
+              .map((opp) => {
+                const nt = (opp.notice_type || "").toLowerCase();
+                return {
+                  id: `govcon-${opp.notice_id}`,
+                  opportunityNumber: opp.solicitation_number || opp.notice_id,
+                  title: opp.title,
+                  agency: opp.agency || "",
+                  agencyCode: (opp.agency || "").substring(0, 10).toUpperCase(),
+                  description: opp.description_text || opp.title,
+                  awardFloor: 0,
+                  awardCeiling: opp.award_amount || 0,
+                  totalFunding: opp.award_amount || 0,
+                  closeDate: opp.response_deadline || "",
+                  postDate: opp.posted_date || "",
+                  status: nt.includes("presolicitation") ? "forecasted" : "posted",
+                  applicationUrl: opp.sam_url || `https://sam.gov/opp/${opp.notice_id}/view`,
+                  eligibility: [],
+                  fundingCategories: [],
+                  fundingInstruments: [],
+                  costSharing: false,
+                  alnNumbers: [],
+                  contactName: opp.contact_name,
+                  contactEmail: opp.contact_email,
+                  source: "GovCon",
+                };
+              });
+            console.log(`GovCon mapped to ${grants.length} grants`);
+            return { type: "govcon", result: { grants, totalCount: grants.length } };
           })
           .catch((err) => {
-            console.error("SAM.gov opportunities search error:", err);
-            return { type: "sam_gov", result: { grants: [], totalCount: 0 } };
-          })
-      );
-    }
-
-    // 6. Brave Search for niche Texas grants (if API key is available)
-    if (process.env.BRAVE_SEARCH_API_KEY) {
-      const searchKeywords = params.keyword 
-        ? params.keyword.split(/\s+/).filter(k => k.length > 2)
-        : ["port", "maritime", "infrastructure"];
-      
-      searchPromises.push(
-        searchTexasGrants(searchKeywords, {
-          includeStateAgencies: true,
-          includeRegional: true,
-          includeFoundations: true,
-          includeLocal: true,
-          freshness: "pm", // Past month
-        })
-          .then((grants) => {
-            console.log(`Brave Search returned ${grants.length} niche Texas grants`);
-            return { type: "brave_search", result: { grants, totalCount: grants.length } };
-          })
-          .catch((err) => {
-            console.error("Brave Search error:", err);
-            return { type: "brave_search", result: { grants: [], totalCount: 0 } };
-          })
-      );
-    }
-
-    // 7. Tavily Search for deep research on Texas grants (if API key is available)
-    if (process.env.TAVILY_API_KEY) {
-      const searchKeywords = params.keyword 
-        ? params.keyword.split(/\s+/).filter(k => k.length > 2)
-        : ["port", "maritime", "infrastructure"];
-      
-      searchPromises.push(
-        searchTexasGrantsTavily(searchKeywords, {
-          maxResults: 15,
-        })
-          .then((grants) => {
-            console.log(`Tavily Search returned ${grants.length} research-based grants`);
-            return { type: "tavily_search", result: { grants, totalCount: grants.length } };
-          })
-          .catch((err) => {
-            console.error("Tavily Search error:", err);
-            return { type: "tavily_search", result: { grants: [], totalCount: 0 } };
+            console.error("GovCon opportunities search error:", err);
+            return { type: "govcon", result: { grants: [], totalCount: 0 } };
           })
       );
     }
@@ -269,9 +228,7 @@ export async function POST(request: NextRequest) {
           grants_gov: sourcesUsed.has("grants_gov") || sourcesUsed.has("grants_gov_dot"),
           usdot_programs: sourcesUsed.has("usdot"),
           federal_register: sourcesUsed.has("federal_register"),
-          sam_gov: sourcesUsed.has("sam_gov"),
-          brave_search: sourcesUsed.has("brave_search"),
-          tavily_search: sourcesUsed.has("tavily_search"),
+          govcon: sourcesUsed.has("govcon"),
         },
       },
       { status: 200 }

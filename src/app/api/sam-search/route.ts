@@ -1,4 +1,5 @@
-import { searchVendors, deriveNaicsFromGrant } from "@/lib/usaspending";
+import { searchVendors } from "@/lib/usaspending";
+import { deriveNaicsFromGrant } from "@/lib/govcon";
 import { PORT_NAICS_CODES } from "@/lib/naics";
 import type { PortVendor } from "@/data/port-vendors";
 

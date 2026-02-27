@@ -571,7 +571,7 @@ export async function matchGrantsToProjectTool(params: { projectId: string }) {
  */
 export async function getProjectGrantMatches(params: { grantId: string }) {
   // Try to get from pipeline first
-  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId);
+  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId) ?? null;
 
   if (!grant) {
     // Try to fetch from Grants.gov
@@ -612,7 +612,7 @@ export async function getProjectGrantMatches(params: { grantId: string }) {
  */
 export async function getCompetitiveIntelligence(params: { grantId: string }) {
   // Try to get from pipeline first
-  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId);
+  let grant: PipelineGrant | DiscoveredGrant | null = getPipelineGrantById(params.grantId) ?? null;
   
   // If not in pipeline, try to fetch details
   if (!grant) {
@@ -627,7 +627,7 @@ export async function getCompetitiveIntelligence(params: { grantId: string }) {
     return { error: `Grant ${params.grantId} not found` };
   }
 
-  const competitiveIntel = await analyzeCompetitiveIntelligence(grant);
+  const competitiveIntel = await analyzeCompetitiveIntelligence(grant as DiscoveredGrant);
   
   if (!competitiveIntel) {
     return {

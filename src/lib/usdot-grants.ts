@@ -162,7 +162,7 @@ export async function searchUSDOTGrants(params: {
           fundingCategories: program.focus_areas,
           fundingInstruments: ["Grant", "Cooperative Agreement"],
           costSharing: program.match_required,
-          alnNumbers: program.alnNumber ? [program.alnNumber] : [],
+          alnNumbers: "alnNumber" in program && program.alnNumber ? [program.alnNumber] : [],
         }));
       })
       .catch((err) => {

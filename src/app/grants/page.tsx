@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+// Tabs UI removed — sidebar drives navigation via ?tab= param
 import {
   Award,
   Search,
@@ -27,6 +28,10 @@ import {
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
+import { getDemoContext } from "@/data/demoContext";
+import { buildSmartContext } from "@/lib/smartMatch/contextBuilder";
+import { rerankGrants } from "@/lib/smartMatch/ranker";
+import type { SmartMatchResult } from "@/lib/smartMatch/ranker";
 import {
   getAllPipelineGrants,
   addToPipeline,
@@ -42,7 +47,7 @@ import type { PortVendor } from "@/data/port-vendors";
 import { addPortVendors } from "@/data/port-vendors";
 import { OutreachEmail } from "@/components/grant-match/outreach-email";
 import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
-import { getAllProfiles, getProfile, DEFAULT_PROFILE_ID, type PortProfile, currentPortProfile } from "@/data/port-profile";
+import { currentPortProfile } from "@/data/port-profile";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
   getAllProjects,
@@ -53,7 +58,6 @@ import {
   type Project,
 } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects, type GrantProjectMatch } from "@/data/grant-project-matching";
-import { analyzeCompetitiveIntelligence, type CompetitiveInsight } from "@/data/competitive-intelligence";
 import { ProjectForm } from "@/components/projects/project-form";
 import { Edit, Trash2 } from "lucide-react";
 
@@ -119,12 +123,31 @@ function formatCurrency(n: number) {
   return `$${n}`;
 }
 
-export default function UnifiedGrantsDashboard() {
-  const [activeTab, setActiveTab] = useState("discover");
+const VALID_TABS = ["discover", "pipeline", "projects", "outreach"] as const;
 
-  // Multi-tenant profile selection
-  const [selectedProfileId, setSelectedProfileId] = useState(DEFAULT_PROFILE_ID);
-  const selectedProfile = getProfile(selectedProfileId) || currentPortProfile;
+export default function GrantsPage() {
+  return (
+    <Suspense>
+      <UnifiedGrantsDashboard />
+    </Suspense>
+  );
+}
+
+function UnifiedGrantsDashboard() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const tabParam = searchParams.get("tab");
+  const activeTab = VALID_TABS.includes(tabParam as any) ? tabParam! : "discover";
+
+  const setActiveTab = useCallback(
+    (tab: string) => {
+      router.push(`/grants?tab=${tab}`, { scroll: false });
+    },
+    [router]
+  );
+
+  const selectedProfile = currentPortProfile;
 
   // Discover tab state
   const [searchQuery, setSearchQuery] = useState("");
@@ -133,12 +156,19 @@ export default function UnifiedGrantsDashboard() {
   const [grantScores, setGrantScores] = useState<Map<string, GrantScore>>(new Map());
   const [showOnlyEligible, setShowOnlyEligible] = useState(false);
   const [sortBy, setSortBy] = useState<"relevance" | "score" | "deadline" | "funding">("relevance");
+
+  // Client-side grant search cache (avoids redundant API calls for same query)
+  const [searchCache] = useState(() => new Map<string, { grants: DiscoveredGrant[]; totalCount: number }>());
   const [totalCount, setTotalCount] = useState(0);
   const [searching, setSearching] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
+
+  // Smart Match state
+  const [matchMode, setMatchMode] = useState<"manual" | "smart">("manual");
+  const [smartMatchResults, setSmartMatchResults] = useState<Map<string, SmartMatchResult>>(new Map());
 
   // Pipeline tab state
   const [pipelineGrants, setPipelineGrants] = useState<PipelineGrant[]>(getAllPipelineGrants());
@@ -168,9 +198,6 @@ export default function UnifiedGrantsDashboard() {
     setProjects([...getAllProjects()]); // Refresh projects list
   }, []);
 
-  // Competitive intelligence state (Map of grantId -> CompetitiveInsight)
-  const [competitiveIntelligence, setCompetitiveIntelligence] = useState<Map<string, CompetitiveInsight>>(new Map());
-  const [loadingCompetitiveIntel, setLoadingCompetitiveIntel] = useState<Set<string>>(new Set());
 
   // Search grants from Grants.gov + USDOT programs
   async function handleSearch() {
@@ -178,31 +205,81 @@ export default function UnifiedGrantsDashboard() {
     setSearchError(null);
 
     try {
-      // Use enhanced search that includes USDOT-specific programs
-      const keyword = searchQuery.trim();
+      let keyword = searchQuery.trim();
+      const rows = matchMode === "smart" ? 100 : 50;
+      const statuses = selectedStatuses.length > 0 ? selectedStatuses : undefined;
 
-      const res = await fetch("/api/grants-search-enhanced", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          keyword,
-          oppStatuses: selectedStatuses.length > 0 ? selectedStatuses : undefined,
-          rows: 100, // Increased to get more results
-          includeDOTPrograms: true, // Enable USDOT-specific searches
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to search grants");
+      // In smart mode, build context first to generate AI keywords
+      let smartContext: Awaited<ReturnType<typeof buildSmartContext>> | null = null;
+      if (matchMode === "smart") {
+        console.log("[Smart Match] Building context to generate keywords...");
+        const demoContext = getDemoContext();
+        smartContext = await buildSmartContext(demoContext);
+        const aiKeywords = smartContext.derived.keywords;
+        if (aiKeywords.length > 0) {
+          keyword = aiKeywords.slice(0, 8).join(" ");
+          setSearchQuery(keyword);
+          console.log("[Smart Match] Search bar populated with AI keywords:", keyword);
+        }
       }
 
-      const data = await res.json() as { grants: DiscoveredGrant[]; totalCount: number };
-      setDiscoveredGrants(data.grants);
-      setTotalCount(data.totalCount);
+      const cacheKey = JSON.stringify({ keyword, statuses, rows });
 
-      // Automatically score grants for selected port profile
-      scoreGrants(data.grants);
+      let grants: DiscoveredGrant[];
+      let totalCountValue: number;
+
+      const cached = searchCache.get(cacheKey);
+      if (cached) {
+        console.log("[Grant Search] Cache hit for:", cacheKey);
+        grants = cached.grants;
+        totalCountValue = cached.totalCount;
+      } else {
+        console.log("[Grant Search] Cache miss, fetching from API...");
+        const res = await fetch("/api/grants-search-enhanced", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            keyword,
+            oppStatuses: statuses,
+            rows,
+            includeDOTPrograms: true,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to search grants");
+        }
+
+        const data = await res.json() as { grants: DiscoveredGrant[]; totalCount: number };
+        grants = data.grants;
+        totalCountValue = data.totalCount;
+
+        searchCache.set(cacheKey, { grants, totalCount: totalCountValue });
+      }
+
+      // Apply Smart Match reranking (keeps "Why Matched" reasons)
+      if (matchMode === "smart" && smartContext) {
+        console.log("[Smart Match] Reranking", grants.length, "grants to top 20...");
+        const reranked = rerankGrants(grants, smartContext, 20);
+        grants = reranked;
+
+        const smartMatchMap = new Map<string, SmartMatchResult>();
+        for (const grant of reranked) {
+          if (grant.smartMatch) {
+            smartMatchMap.set(grant.id, grant.smartMatch);
+          }
+        }
+        setSmartMatchResults(smartMatchMap);
+        console.log("[Smart Match] Stored results for", smartMatchMap.size, "grants");
+      } else {
+        setSmartMatchResults(new Map());
+      }
+
+      setDiscoveredGrants(grants);
+      setTotalCount(totalCountValue);
+
+      scoreGrants(grants);
     } catch (err) {
       setSearchError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -280,34 +357,6 @@ export default function UnifiedGrantsDashboard() {
       console.error("Error fetching grant details:", err);
     } finally {
       setFetchingDetails((prev) => {
-        const next = new Set(prev);
-        next.delete(grant.id);
-        return next;
-      });
-    }
-  }
-
-  // Load competitive intelligence for a grant
-  async function loadCompetitiveIntelligence(grant: DiscoveredGrant) {
-    if (competitiveIntelligence.has(grant.id) || loadingCompetitiveIntel.has(grant.id)) {
-      return;
-    }
-
-    setLoadingCompetitiveIntel((prev) => new Set(prev).add(grant.id));
-
-    try {
-      const intel = await analyzeCompetitiveIntelligence(grant);
-      if (intel) {
-        setCompetitiveIntelligence((prev) => {
-          const next = new Map(prev);
-          next.set(grant.id, intel);
-          return next;
-        });
-      }
-    } catch (err) {
-      console.error("Error loading competitive intelligence:", err);
-    } finally {
-      setLoadingCompetitiveIntel((prev) => {
         const next = new Set(prev);
         next.delete(grant.id);
         return next;
@@ -449,75 +498,30 @@ export default function UnifiedGrantsDashboard() {
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-6xl px-6 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="mb-6">
           <div className="flex items-center gap-3">
             <Award className="h-6 w-6 text-muted-foreground" />
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Grants Dashboard</h1>
+              <h1 className="text-2xl font-semibold tracking-tight">
+                {activeTab === "discover" && "Discover Grants"}
+                {activeTab === "pipeline" && "Grant Pipeline"}
+                {activeTab === "projects" && "Projects"}
+                {activeTab === "outreach" && "Vendor Outreach"}
+              </h1>
               <p className="text-sm text-muted-foreground">
-                Discover federal grants, track applications, and match vendors
+                {activeTab === "discover" && "Search and discover federal grant opportunities"}
+                {activeTab === "pipeline" && "Track your grant applications through each stage"}
+                {activeTab === "projects" && "Manage port projects and match them to grants"}
+                {activeTab === "outreach" && "Find and contact vendors for awarded grants"}
               </p>
             </div>
           </div>
-
-          {/* Profile Selector */}
-          <div className="flex items-center gap-2">
-            <label htmlFor="profile-selector" className="text-sm text-muted-foreground whitespace-nowrap">
-              Port Authority:
-            </label>
-            <select
-              id="profile-selector"
-              value={selectedProfileId}
-              onChange={(e) => {
-                setSelectedProfileId(e.target.value);
-                // Re-score grants if any exist
-                if (discoveredGrants.length > 0) {
-                  scoreGrants(discoveredGrants);
-                }
-              }}
-              className="rounded-md border border-input bg-background text-foreground px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {getAllProfiles().map(({ id, profile }) => (
-                <option key={id} value={id} className="bg-background text-foreground">
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
-        {/* Four Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
-            <TabsTrigger value="discover">Discover</TabsTrigger>
-            <TabsTrigger value="pipeline">
-              Pipeline
-              {pipelineGrants.length > 0 && (
-                <Badge variant="secondary" className="ml-2 text-[10px]">
-                  {pipelineGrants.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="projects">
-              Projects
-              {projects.length > 0 && (
-                <Badge variant="secondary" className="ml-2 text-[10px]">
-                  {projects.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="outreach">
-              Vendor Outreach
-              {awardedGrants.length > 0 && (
-                <Badge variant="secondary" className="ml-2 text-[10px]">
-                  {awardedGrants.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          {/* TAB 1: DISCOVER */}
-          <TabsContent value="discover" className="mt-6">
+        {/* Tab content — tab selection driven by URL ?tab= param, sidebar provides navigation */}
+        <div className="w-full">
+          {activeTab === "discover" && (
+            <div className="mt-2">
             <Card className="p-5 mb-6">
               <div className="space-y-4">
                 <div className="relative">
@@ -551,17 +555,65 @@ export default function UnifiedGrantsDashboard() {
                   </div>
                 </div>
 
+                {/* Match Mode Toggle */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground">Match Mode:</span>
+                  <div className="flex gap-1 bg-muted rounded-md p-1">
+                    <button
+                      onClick={() => setMatchMode("manual")}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                        matchMode === "manual"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Manual
+                    </button>
+                    <button
+                      onClick={() => setMatchMode("smart")}
+                      className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
+                        matchMode === "smart"
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Smart Match
+                    </button>
+                  </div>
+                </div>
+
+                {/* Context Chips (Smart Match mode only) */}
+                {matchMode === "smart" && (() => {
+                  const demoContext = getDemoContext();
+                  return (
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="text-xs text-muted-foreground">Context used:</span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {demoContext.projects.length} active projects
+                      </Badge>
+                      {demoContext.spendSignals.topCategoriesL2.slice(0, 3).map((cat) => (
+                        <Badge key={cat.category} variant="outline" className="text-[10px]">
+                          {cat.category}
+                        </Badge>
+                      ))}
+                      <Badge variant="outline" className="text-[10px]">
+                        AI-powered keywords
+                      </Badge>
+                    </div>
+                  );
+                })()}
+
                 <div className="flex gap-2">
                   <Button onClick={handleSearch} disabled={searching} className="gap-2">
                     {searching ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Searching grants...
+                        {matchMode === "smart" ? "Building smart context..." : "Searching grants..."}
                       </>
                     ) : (
                       <>
                         <Search className="h-4 w-4" />
-                        Search Federal Grants
+                        {matchMode === "smart" ? "Smart Search" : "Search Federal Grants"}
                       </>
                     )}
                   </Button>
@@ -713,6 +765,7 @@ export default function UnifiedGrantsDashboard() {
                   const isFetching = fetchingDetails.has(grant.id);
                   const inPipeline = isInPipeline(grant.id);
                   const score = grantScores.get(grant.id);
+                  const smartMatch = smartMatchResults.get(grant.id);
 
                 return (
                   <Card key={grant.id} className="overflow-hidden">
@@ -782,7 +835,7 @@ export default function UnifiedGrantsDashboard() {
                           {grant.awardCeiling > 0 ? formatCurrency(grant.awardCeiling) : "TBD"}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
-                          {grant.closeDate || "No deadline"}
+                          {smartMatch?.deadlineNote || grant.closeDate || "No deadline"}
                         </p>
                       </div>
                     </button>
@@ -838,6 +891,30 @@ export default function UnifiedGrantsDashboard() {
                                 <Badge key={e} variant="outline" className="text-[10px]">{e}</Badge>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Smart Match Why Bullets */}
+                        {smartMatch && smartMatch.why.length > 0 && (
+                          <div className="mb-4 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
+                            <div className="flex items-center gap-2 mb-2">
+                              <BarChart3 className="h-3 w-3 text-purple-600" />
+                              <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">Why Matched</span>
+                            </div>
+                            <ul className="space-y-1">
+                              {smartMatch.why.map((reason, i) => (
+                                <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                                  <span className="text-purple-600 dark:text-purple-400 mt-0.5">•</span>
+                                  {reason}
+                                </li>
+                              ))}
+                            </ul>
+                            {smartMatch.bestProject && (
+                              <div className="mt-2 pt-2 border-t border-purple-500/10">
+                                <span className="text-[9px] text-muted-foreground">Best Project Match: </span>
+                                <span className="text-xs font-medium">{smartMatch.bestProject.name}</span>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -989,157 +1066,6 @@ export default function UnifiedGrantsDashboard() {
                           return null;
                         })()}
 
-                        {/* Competitive Intelligence */}
-                        {(() => {
-                          const competitiveIntel = competitiveIntelligence.get(grant.id);
-                          const isLoading = loadingCompetitiveIntel.has(grant.id);
-                          
-                          // Show button to load competitive intelligence if not loaded
-                          if (!competitiveIntel && !isLoading) {
-                            return (
-                              <div className="mb-4">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    loadCompetitiveIntelligence(grant);
-                                  }}
-                                  className="w-full gap-2"
-                                >
-                                  <BarChart3 className="h-3.5 w-3.5" />
-                                  View Competitive Intelligence
-                                </Button>
-                              </div>
-                            );
-                          }
-                          
-                          if (isLoading) {
-                            return (
-                              <div className="mb-4 p-3 rounded-md bg-muted/30 border">
-                                <div className="flex items-center gap-2">
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  <span className="text-xs text-muted-foreground">Loading competitive intelligence...</span>
-                                </div>
-                              </div>
-                            );
-                          }
-                          
-                          if (!competitiveIntel) return null;
-
-                          return (
-                            <div className="mb-4 p-3 rounded-md bg-muted/30 border">
-                              <div className="flex items-center justify-between mb-3">
-                                <span className="text-xs font-semibold">Competitive Intelligence</span>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {competitiveIntel.programName}
-                                </Badge>
-                              </div>
-
-                              {/* Historical Awards Stats */}
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-                                <div>
-                                  <span className="text-[9px] text-muted-foreground uppercase">Total Awards</span>
-                                  <p className="text-sm font-mono font-bold">{competitiveIntel.insights.historicalAwards.count}</p>
-                                </div>
-                                <div>
-                                  <span className="text-[9px] text-muted-foreground uppercase">Avg Award</span>
-                                  <p className="text-sm font-mono font-bold">{formatCurrency(competitiveIntel.insights.historicalAwards.averageAward)}</p>
-                                </div>
-                                <div>
-                                  <span className="text-[9px] text-muted-foreground uppercase">Median</span>
-                                  <p className="text-sm font-mono font-bold">{formatCurrency(competitiveIntel.insights.historicalAwards.medianAward)}</p>
-                                </div>
-                                <div>
-                                  <span className="text-[9px] text-muted-foreground uppercase">Range</span>
-                                  <p className="text-sm font-mono font-bold text-[10px]">
-                                    {formatCurrency(competitiveIntel.insights.historicalAwards.minAward)} - {formatCurrency(competitiveIntel.insights.historicalAwards.maxAward)}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Similar Projects */}
-                              {competitiveIntel.insights.similarProjects.length > 0 && (
-                                <div className="mb-3">
-                                  <span className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                                    Similar Winning Projects ({competitiveIntel.insights.similarProjects.length})
-                                  </span>
-                                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                                    {competitiveIntel.insights.similarProjects.slice(0, 3).map((project, i) => (
-                                      <div key={i} className="text-xs p-2 rounded bg-background/50 border">
-                                        <div className="flex items-start justify-between gap-2">
-                                          <div className="flex-1 min-w-0">
-                                            <p className="font-medium truncate">{project.recipient}</p>
-                                            <p className="text-[10px] text-muted-foreground truncate">{project.project}</p>
-                                          </div>
-                                          <div className="text-right shrink-0">
-                                            <p className="font-mono text-[10px] font-semibold">{formatCurrency(project.amount)}</p>
-                                            <p className="text-[9px] text-muted-foreground">{project.year}</p>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Geographic Patterns */}
-                              {competitiveIntel.insights.geographicPatterns.topStates.length > 0 && (
-                                <div className="mb-3">
-                                  <span className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                                    Top States ({competitiveIntel.insights.geographicPatterns.regionalFocus})
-                                  </span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {competitiveIntel.insights.geographicPatterns.topStates.map((state) => (
-                                      <Badge key={state.state} variant="outline" className="text-[10px]">
-                                        {state.state}: {state.count} awards
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {/* Competitive Position */}
-                              <div className="border-t pt-2 mt-2">
-                                <span className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1.5 block">
-                                  Competitive Position
-                                </span>
-                                <div className="mb-2">
-                                  <Badge variant="outline" className="text-[10px] mb-1.5">
-                                    {competitiveIntel.insights.competitivePosition.recommendation}
-                                  </Badge>
-                                </div>
-                                {competitiveIntel.insights.competitivePosition.portAdvantages.length > 0 && (
-                                  <div className="mb-1.5">
-                                    <span className="text-[9px] text-muted-foreground">Advantages:</span>
-                                    <ul className="mt-0.5 space-y-0.5">
-                                      {competitiveIntel.insights.competitivePosition.portAdvantages.map((adv, i) => (
-                                        <li key={i} className="text-[10px] text-green-600 dark:text-green-400 flex items-start gap-1">
-                                          <CheckCircle2 className="h-2.5 w-2.5 mt-0.5 shrink-0" />
-                                          {adv}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                                {competitiveIntel.insights.competitivePosition.portRisks.length > 0 && (
-                                  <div>
-                                    <span className="text-[9px] text-muted-foreground">Considerations:</span>
-                                    <ul className="mt-0.5 space-y-0.5">
-                                      {competitiveIntel.insights.competitivePosition.portRisks.map((risk, i) => (
-                                        <li key={i} className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
-                                          <AlertCircle className="h-2.5 w-2.5 mt-0.5 shrink-0" />
-                                          {risk}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
-
                         <div className="flex gap-2">
                           <Button
                             size="sm"
@@ -1177,13 +1103,15 @@ export default function UnifiedGrantsDashboard() {
               <div className="text-center py-16 text-muted-foreground">
                 <Award className="h-12 w-12 mx-auto mb-4 opacity-30" />
                 <p className="text-sm">Search for federal grant opportunities</p>
-                <p className="text-xs mt-1">Results from Grants.gov, Federal Register, SAM.gov, and other sources</p>
+                <p className="text-xs mt-1">Results from Grants.gov, Federal Register, GovCon, and other sources</p>
               </div>
             )}
-          </TabsContent>
+            </div>
+          )}
 
           {/* TAB 2: PIPELINE */}
-          <TabsContent value="pipeline" className="mt-6">
+          {activeTab === "pipeline" && (
+            <div className="mt-2">
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {(["eligible", "applied", "under_review", "awarded", "rejected"] as PipelineStage[]).map((stage) => {
                 const stageGrants = pipelineGrants.filter((g) => g.stage === stage);
@@ -1360,10 +1288,12 @@ export default function UnifiedGrantsDashboard() {
                 </p>
               </div>
             )}
-          </TabsContent>
+            </div>
+          )}
 
           {/* TAB 3: PROJECTS */}
-          <TabsContent value="projects" className="mt-6">
+          {activeTab === "projects" && (
+            <div className="mt-2">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-lg font-semibold">Port Projects</h2>
@@ -1660,10 +1590,12 @@ export default function UnifiedGrantsDashboard() {
                 }}
               />
             )}
-          </TabsContent>
+            </div>
+          )}
 
           {/* TAB 4: VENDOR OUTREACH */}
-          <TabsContent value="outreach" className="mt-6">
+          {activeTab === "outreach" && (
+            <div className="mt-2">
             {awardedGrants.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
                 <Users className="h-12 w-12 mx-auto mb-4 opacity-30" />
@@ -1876,8 +1808,9 @@ export default function UnifiedGrantsDashboard() {
                 )}
               </div>
             )}
-          </TabsContent>
-        </Tabs>
+            </div>
+          )}
+        </div>
       </div>
     </div>
 

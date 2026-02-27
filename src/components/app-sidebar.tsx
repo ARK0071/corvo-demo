@@ -1,8 +1,9 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp } from "lucide-react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp, BarChart3, Newspaper, Search, Layers, FolderKanban, Users } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -30,13 +31,39 @@ const corvusItems = [
 ];
 
 const grantMatchItems = [
-  { title: "Grants", url: "/grants", icon: Award },
+  { title: "Dashboard", url: "/porter-dashboard", icon: LayoutDashboard },
+  { title: "Discover", url: "/grants?tab=discover", icon: Search },
+  { title: "Pipeline", url: "/grants?tab=pipeline", icon: Layers },
+  { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },
+  { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },
   { title: "Grant Intelligence", url: "/grant-match", icon: Anchor },
+  { title: "Competitive Intel", url: "/competitive-intel", icon: BarChart3 },
+  { title: "Newsroom", url: "/newsroom", icon: Newspaper },
 ];
 
+function isItemActive(itemUrl: string, pathname: string, searchParams: URLSearchParams): boolean {
+  const [itemPath, itemQuery] = itemUrl.split("?");
+  if (pathname !== itemPath) return false;
+  if (!itemQuery) return true;
+  const itemParams = new URLSearchParams(itemQuery);
+  for (const [key, value] of itemParams) {
+    if (searchParams.get(key) !== value) return false;
+  }
+  return true;
+}
+
 export default function AppSidebar() {
+  return (
+    <Suspense>
+      <AppSidebarInner />
+    </Suspense>
+  );
+}
+
+function AppSidebarInner() {
   const { state } = useSidebar();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const collapsed = state === "collapsed";
 
   return (
@@ -55,7 +82,7 @@ export default function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {corvusItems.map((item) => {
-                const isActive = pathname === item.url;
+                const isActive = isItemActive(item.url, pathname, searchParams);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild>
@@ -82,7 +109,7 @@ export default function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {grantMatchItems.map((item) => {
-                const isActive = pathname === item.url;
+                const isActive = isItemActive(item.url, pathname, searchParams);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton asChild>

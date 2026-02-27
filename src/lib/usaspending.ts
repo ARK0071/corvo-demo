@@ -1,6 +1,6 @@
 import type { PortVendor } from "@/data/port-vendors";
 import { NAICS_SECTOR_MAP, NAICS_DESCRIPTIONS, PORT_NAICS_CODES, FOCUS_TO_NAICS } from "./naics";
-import { searchSamEntitiesMultiPage } from "./sam-gov";
+import { searchGovConEntitiesMultiPage, deriveNaicsFromGrant } from "./govcon";
 
 // ─── USASpending.gov API Client ───
 
@@ -150,14 +150,14 @@ async function fetchWithRetry(
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(url, init);
-      if (res.status === 429 && attempt < maxRetries) {
-        // Exponential backoff: 1s, 2s, 4s
-        const delay = Math.pow(2, attempt) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        continue;
-      }
-      return res;
+    const res = await fetch(url, init);
+    if (res.status === 429 && attempt < maxRetries) {
+      // Exponential backoff: 1s, 2s, 4s
+      const delay = Math.pow(2, attempt) * 1000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
+    }
+    return res;
     } catch (err) {
       // Network errors - retry if attempts remain
       if (attempt < maxRetries) {
@@ -618,22 +618,22 @@ export async function searchVendors(
     );
   }
 
-  // Source 3: SAM.gov entities search (active registrations)
+  // Source 3: GovCon entities search (active registrations)
   if (source === "sam" || source === "all") {
     promises.push(
       (async () => {
         // Check if SAM API key is available
-        if (!process.env.SAM_GOV_API_KEY) {
-          console.warn("SAM_GOV_API_KEY not configured. Skipping SAM API vendor search.");
+        if (!process.env.GOVCON_API_KEY) {
+          console.warn("GOVCON_API_KEY not configured. Skipping GovCon API vendor search.");
           return { vendors: [], totalRecords: 0 };
         }
 
         try {
-          const { vendors: samVendors, totalRecords: samRecords } = await searchSamEntitiesMultiPage(
+          const { vendors: samVendors, totalRecords: samRecords } = await searchGovConEntitiesMultiPage(
             {
-              naicsCodes: codes,
-              state: params.state,
-              query: params.query,
+        naicsCodes: codes,
+        state: params.state,
+        query: params.query,
               size: Math.min(limit, 100), // SAM API max is 100 per page
             },
             maxPages
@@ -664,10 +664,10 @@ export async function searchVendors(
     totalRecords = Math.max(totalRecords, sourceTotal);
     
     for (const v of vendors) {
-      const existing = seen.get(v.id);
+    const existing = seen.get(v.id);
       // Prefer vendor with more past projects (more complete data)
-      if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
-        seen.set(v.id, v);
+    if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
+      seen.set(v.id, v);
       }
     }
   }
@@ -1082,25 +1082,5 @@ function extractProgramKeywords(programName: string): string[] {
   return keywords;
 }
 
-// ─── NAICS Derivation (reuse from sam-gov) ───
-
-export function deriveNaicsFromGrant(focusAreas: string[], eligibleActivities: string[]): string[] {
-  const codes = new Set<string>();
-  const allText = [...focusAreas, ...eligibleActivities].map((t) => t.toLowerCase());
-
-  for (const text of allText) {
-    for (const [keyword, naicsCodes] of Object.entries(FOCUS_TO_NAICS)) {
-      if (text.includes(keyword)) {
-        for (const code of naicsCodes) {
-          codes.add(code);
-        }
-      }
-    }
-  }
-
-  if (codes.size === 0) {
-    return PORT_NAICS_CODES;
-  }
-
-  return [...codes];
-}
+// ─── NAICS Derivation (reuse from govcon) ───
+// Note: deriveNaicsFromGrant is imported from govcon.ts
