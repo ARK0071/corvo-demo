@@ -3,7 +3,9 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp, BarChart3, Newspaper, Search, Layers, FolderKanban, Users } from "lucide-react";
+import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp, BarChart3, Newspaper, Search, Layers, FolderKanban, Users, ChevronDown } from "lucide-react";
+import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
+import { Collapsible } from "radix-ui";
 import {
   Sidebar,
   SidebarContent,
@@ -65,6 +67,7 @@ function AppSidebarInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const collapsed = state === "collapsed";
+  const upcomingCount = getUpcomingDeadlineCount();
 
   return (
     <Sidebar collapsible="icon" className={collapsed ? "w-14" : "w-64"}>
@@ -77,60 +80,131 @@ function AppSidebarInner() {
         </span>
       </SidebarHeader>
       <SidebarContent>
-        <SidebarGroup>
-          {!collapsed && <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Corvus</SidebarGroupLabel>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {corvusItems.map((item) => {
-                const isActive = isItemActive(item.url, pathname, searchParams);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <Link
-                        href={item.url}
-                        className={
-                          isActive
-                            ? "bg-muted text-primary font-medium"
-                            : "hover:bg-muted/50"
-                        }
-                      >
-                        <item.icon className="mr-2 h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          {!collapsed && <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Porter</SidebarGroupLabel>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {grantMatchItems.map((item) => {
-                const isActive = isItemActive(item.url, pathname, searchParams);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild>
-                      <Link
-                        href={item.url}
-                        className={
-                          isActive
-                            ? "bg-muted text-primary font-medium"
-                            : "hover:bg-muted/50"
-                        }
-                      >
-                        <item.icon className="mr-2 h-4 w-4" />
-                        {!collapsed && <span>{item.title}</span>}
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {collapsed ? (
+          <>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {corvusItems.map((item) => {
+                    const isActive = isItemActive(item.url, pathname, searchParams);
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton asChild>
+                          <Link href={item.url} className={isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}>
+                            <item.icon className="mr-2 h-4 w-4" />
+                            {!collapsed && <span>{item.title}</span>}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {grantMatchItems.map((item) => {
+                    const isActive = isItemActive(item.url, pathname, searchParams);
+                    const isPipeline = item.title === "Pipeline";
+                    return (
+                      <SidebarMenuItem key={item.title}>
+                        <SidebarMenuButton asChild>
+                          <Link href={item.url} className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
+                            <item.icon className="mr-2 h-4 w-4 shrink-0" />
+                            {!collapsed && (
+                              <>
+                                <span className="flex-1">{item.title}</span>
+                                {isPipeline && (
+                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                                    {upcomingCount > 99 ? "99+" : upcomingCount}
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        ) : (
+          <>
+            <SidebarGroup>
+              <Collapsible.Root defaultOpen className="group/collapsible">
+                <Collapsible.Trigger asChild>
+                  <SidebarMenuButton className="w-full justify-between group-data-[collapsible=icon]:hidden">
+                    <span className="flex items-center gap-2">
+                      <Feather className="h-4 w-4" />
+                      <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground p-0 font-normal">Corvus</SidebarGroupLabel>
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=closed]:-rotate-90" />
+                  </SidebarMenuButton>
+                </Collapsible.Trigger>
+                <Collapsible.Content>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {corvusItems.map((item) => {
+                        const isActive = isItemActive(item.url, pathname, searchParams);
+                        return (
+                          <SidebarMenuItem key={item.title}>
+                            <SidebarMenuButton asChild>
+                              <Link href={item.url} className={isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}>
+                                <item.icon className="mr-2 h-4 w-4" />
+                                <span>{item.title}</span>
+                              </Link>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            </SidebarGroup>
+            <SidebarGroup>
+              <Collapsible.Root defaultOpen className="group/collapsible">
+                <Collapsible.Trigger asChild>
+                  <SidebarMenuButton className="w-full justify-between group-data-[collapsible=icon]:hidden">
+                    <span className="flex items-center gap-2">
+                      <Anchor className="h-4 w-4" />
+                      <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground p-0 font-normal">Porter</SidebarGroupLabel>
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=closed]:-rotate-90" />
+                  </SidebarMenuButton>
+                </Collapsible.Trigger>
+                <Collapsible.Content>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {grantMatchItems.map((item) => {
+                        const isActive = isItemActive(item.url, pathname, searchParams);
+                        const isPipeline = item.title === "Pipeline";
+                        return (
+                          <SidebarMenuItem key={item.title}>
+                            <SidebarMenuButton asChild>
+                              <Link href={item.url} className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
+                                <item.icon className="mr-2 h-4 w-4 shrink-0" />
+                                <span className="flex-1">{item.title}</span>
+                                {isPipeline && (
+                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-[10px] font-bold text-destructive-foreground">
+                                    {upcomingCount > 99 ? "99+" : upcomingCount}
+                                  </span>
+                                )}
+                              </Link>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </Collapsible.Content>
+              </Collapsible.Root>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
     </Sidebar>
   );
