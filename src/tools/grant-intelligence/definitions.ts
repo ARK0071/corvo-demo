@@ -13,6 +13,10 @@ import {
   getDeadlineUrgency,
   recommendNextActions,
   compareTwoGrants,
+  matchGrantsToProjectTool,
+  getProjectGrantMatches,
+  getCompetitiveIntelligence,
+  buildGrantApplication,
 } from "./tools";
 
 export const grantIntelligenceTools = {
@@ -96,5 +100,52 @@ export const grantIntelligenceTools = {
     }),
     execute: async (params: { grantId1: string; grantId2: string }) =>
       compareTwoGrants(params),
+  },
+
+  match_grants_to_project: {
+    description:
+      "Find grants that match a specific project based on focus areas, budget, timeline, and description relevance. Returns scored matches sorted by relevance.",
+    inputSchema: z.object({
+      projectId: z.string().describe("Project ID to match grants against"),
+    }),
+    execute: async (params: { projectId: string }) =>
+      matchGrantsToProjectTool(params),
+  },
+
+  get_project_grant_matches: {
+    description:
+      "Find projects that match a specific grant. Returns projects sorted by match score.",
+    inputSchema: z.object({
+      grantId: z.string().describe("Grant opportunity ID to match projects against"),
+    }),
+    execute: async (params: { grantId: string }) =>
+      getProjectGrantMatches(params),
+  },
+
+  // ===== COMPETITIVE INTELLIGENCE =====
+  get_competitive_intelligence: {
+    description:
+      "Get competitive intelligence for a grant: historical award patterns, similar projects that won, geographic patterns, project type success rates, and competitive positioning advice. Uses data from MARAD PIDP, USDOT programs, and other historical award databases.",
+    inputSchema: z.object({
+      grantId: z.string().describe("Grant opportunity ID to analyze"),
+    }),
+    execute: async (params: { grantId: string }) =>
+      getCompetitiveIntelligence(params),
+  },
+
+  build_grant_application: {
+    description:
+      "Generate a draft grant application narrative for a specific grant. Fetches grant details and uses AI to produce structured application content (executive summary, statement of need, project description, outcomes, capacity, budget narrative). Use when the user wants to apply for a grant or build/start a grant application.",
+    inputSchema: z.object({
+      grantId: z
+        .string()
+        .describe("Grant opportunity ID from Grants.gov (visible in the dashboard)"),
+      portName: z
+        .string()
+        .optional()
+        .describe("Port authority name for personalization (e.g., 'Port of Los Angeles')"),
+    }),
+    execute: async (params: { grantId: string; portName?: string }) =>
+      buildGrantApplication(params),
   },
 };

@@ -1,5 +1,6 @@
 import type { PortVendor } from "@/data/port-vendors";
 import { NAICS_SECTOR_MAP, NAICS_DESCRIPTIONS, PORT_NAICS_CODES, FOCUS_TO_NAICS } from "./naics";
+import { searchGovConEntitiesMultiPage, deriveNaicsFromGrant } from "./govcon";
 
 // ─── USASpending.gov API Client ───
 
@@ -148,6 +149,7 @@ async function fetchWithRetry(
   maxRetries: number = 3
 ): Promise<Response> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
     const res = await fetch(url, init);
     if (res.status === 429 && attempt < maxRetries) {
       // Exponential backoff: 1s, 2s, 4s
@@ -156,6 +158,15 @@ async function fetchWithRetry(
       continue;
     }
     return res;
+    } catch (err) {
+      // Network errors - retry if attempts remain
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
   }
   // Should never reach here, but satisfy TypeScript
   return fetch(url, init);
@@ -538,7 +549,7 @@ export interface VendorSearchParams {
   maxPages?: number;
   state?: string;
   query?: string;
-  source?: "recipients" | "awards" | "both";
+  source?: "recipients" | "awards" | "sam" | "both" | "all";
 }
 
 export async function searchVendors(
@@ -560,7 +571,7 @@ export async function searchVendors(
   const promises: Promise<{ vendors: PortVendor[]; totalRecords: number }>[] = [];
 
   // Source 1: Top recipients by spending category (current approach)
-  if (source === "recipients" || source === "both") {
+  if (source === "recipients" || source === "both" || source === "all") {
     promises.push(
       (async () => {
         const { results: recipients, totalRecords } = await searchRecipientsByNaics(codes!, limit, maxPages);
@@ -595,59 +606,481 @@ export async function searchVendors(
   }
 
   // Source 2: Award-based search (much broader vendor coverage)
-  if (source === "awards" || source === "both") {
+  if (source === "awards" || source === "both" || source === "all") {
     promises.push(
-      searchAwardVendors({
-        naicsCodes: codes,
-        state: params.state,
-        query: params.query,
-        maxPages,
-        size: 100,
-      })
+      (async () => {
+        const { vendors: awardVendors, totalRecords: awardRecords } = await searchAwardVendors({
+          naicsCodes: codes,
+          state: params.state,
+        });
+        return { vendors: awardVendors, totalRecords: awardRecords };
+      })()
     );
   }
 
-  const results = await Promise.all(promises);
+  // Source 3: GovCon entities search (active registrations)
+  if (source === "sam" || source === "all") {
+    promises.push(
+      (async () => {
+        // Check if SAM API key is available
+        if (!process.env.GOVCON_API_KEY) {
+          console.warn("GOVCON_API_KEY not configured. Skipping GovCon API vendor search.");
+          return { vendors: [], totalRecords: 0 };
+        }
 
-  // Merge all vendors
-  let allVendors: PortVendor[] = [];
-  let totalRecords = 0;
-  for (const result of results) {
-    allVendors.push(...result.vendors);
-    totalRecords += result.totalRecords;
+        try {
+          const { vendors: samVendors, totalRecords: samRecords } = await searchGovConEntitiesMultiPage(
+            {
+        naicsCodes: codes,
+        state: params.state,
+        query: params.query,
+              size: Math.min(limit, 100), // SAM API max is 100 per page
+            },
+            maxPages
+          );
+          return { vendors: samVendors, totalRecords: samRecords };
+        } catch (error) {
+          console.error("SAM API vendor search failed:", error);
+          // Return empty results on error - don't fail entire search
+          return { vendors: [], totalRecords: 0 };
+        }
+      })()
+    );
   }
 
-  // Deduplicate by ID (UEI), keeping the one with more data
+  const results = await Promise.allSettled(promises);
+
+  // Combine and deduplicate vendors
   const seen = new Map<string, PortVendor>();
-  for (const v of allVendors) {
+  let totalRecords = 0;
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error("Vendor search source failed:", result.reason);
+      continue;
+    }
+
+    const { vendors, totalRecords: sourceTotal } = result.value;
+    totalRecords = Math.max(totalRecords, sourceTotal);
+    
+    for (const v of vendors) {
     const existing = seen.get(v.id);
+      // Prefer vendor with more past projects (more complete data)
     if (!existing || v.pastPortProjects.length > existing.pastPortProjects.length) {
       seen.set(v.id, v);
+      }
     }
   }
 
   return { vendors: [...seen.values()], totalRecords };
 }
 
-// ─── NAICS Derivation (reuse from sam-gov) ───
+// ─── Competitive Intelligence: Grant Awards Search ───
 
-export function deriveNaicsFromGrant(focusAreas: string[], eligibleActivities: string[]): string[] {
-  const codes = new Set<string>();
-  const allText = [...focusAreas, ...eligibleActivities].map((t) => t.toLowerCase());
+export interface GrantAward {
+  awardId: string;
+  recipientName: string;
+  awardAmount: number;
+  awardingAgency: string;
+  cfdaNumber: string | null;
+  cfdaTitle: string | null;
+  placeOfPerformance: {
+    state: string;
+    city?: string;
+  };
+  startDate: string;
+  endDate: string | null;
+  description: string;
+  awardType: string; // "02", "03", "04", "05" for grants
+}
 
-  for (const text of allText) {
-    for (const [keyword, naicsCodes] of Object.entries(FOCUS_TO_NAICS)) {
-      if (text.includes(keyword)) {
-        for (const code of naicsCodes) {
-          codes.add(code);
+/**
+ * Search grant awards by CFDA number (for specific programs like PSGP, PIDP, etc.)
+ */
+export async function searchGrantAwardsByCFDA(
+  cfdaNumber: string,
+  params: {
+    minAmount?: number;
+    startDate?: string; // YYYY-MM-DD
+    endDate?: string; // YYYY-MM-DD
+    states?: string[]; // State codes
+    limit?: number;
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const cacheKey = `grants:cfda:${cfdaNumber}:${JSON.stringify(params)}`;
+  const cached = getCached<{ awards: GrantAward[]; totalRecords: number }>(cacheKey);
+  if (cached) return cached;
+
+  const filters: any = {
+    award_type_codes: ["02", "03", "04", "05"], // Grant award types
+    time_period: [{
+      start_date: params.startDate || "2019-01-01",
+      end_date: params.endDate || new Date().toISOString().split('T')[0],
+    }],
+  };
+
+  // Add CFDA filter if provided
+  if (cfdaNumber) {
+    filters.cfda_numbers = [cfdaNumber];
+  }
+
+  if (params.minAmount) {
+    filters.award_amounts = [{ lower_bound: params.minAmount }];
+  }
+
+  if (params.states && params.states.length > 0) {
+    filters.place_of_performance_locations = params.states.map(state => ({
+      country: "USA",
+      state: state,
+    }));
+  }
+
+  const res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      filters,
+      fields: [
+        "Award ID",
+        "Recipient Name",
+        "Award Amount",
+        "Awarding Agency",
+        "CFDA Number",
+        "CFDA Title",
+        "Place of Performance State Code",
+        "Place of Performance City Name",
+        "Start Date",
+        "End Date",
+        "Description",
+        "Award Type",
+      ],
+      limit: Math.min(params.limit || 100, 100), // USAspending API max is 100
+      page: 1,
+      sort: "Award Amount",
+      order: "desc",
+    }),
+  });
+
+  if (!res.ok) {
+    const status = res.status;
+    const statusText = res.statusText;
+    let errorMsg = `USASpending API returned ${status} ${statusText}`;
+    let errorDetails: any = null;
+    
+    try {
+      // Clone the response to read it without consuming the original
+      const clonedRes = res.clone();
+      const errorBody = await clonedRes.json();
+      errorDetails = errorBody;
+      errorMsg = errorBody.message || errorBody.error || errorBody.detail || JSON.stringify(errorBody) || errorMsg;
+    } catch (e) {
+      try {
+        const clonedRes = res.clone();
+        const text = await clonedRes.text();
+        if (text) {
+          errorDetails = text;
+          errorMsg = text;
         }
+      } catch (e2) {
+        // Ignore text parsing errors
       }
+    }
+    
+    console.error("USAspending API error:", {
+      status,
+      statusText,
+      errorMsg,
+      errorDetails,
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    
+    // For 422 (bad request), return empty results instead of throwing
+    if (status === 422) {
+      console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
+      return { awards: [], totalRecords: 0 };
+    }
+    throw new Error(errorMsg);
+  }
+
+  const data = await res.json();
+  const results = (data.results || []) as any[];
+
+  const awards: GrantAward[] = results.map((r) => ({
+    awardId: r["Award ID"] || String(r.internal_id || ""),
+    recipientName: r["Recipient Name"] || "",
+    awardAmount: r["Award Amount"] || 0,
+    awardingAgency: r["Awarding Agency"] || "",
+    cfdaNumber: r["CFDA Number"] || null,
+    cfdaTitle: r["CFDA Title"] || null,
+    placeOfPerformance: {
+      state: r["Place of Performance State Code"] || "",
+      city: r["Place of Performance City Name"] || undefined,
+    },
+    startDate: r["Start Date"] || "",
+    endDate: r["End Date"] || null,
+    description: r["Description"] || "",
+    awardType: r["Award Type"] || "",
+  }));
+
+  const result = {
+    awards: awards.filter(a => a.awardAmount > 0),
+    totalRecords: data.page_metadata?.total || awards.length,
+  };
+
+  setCache(cacheKey, result);
+  return result;
+}
+
+/**
+ * Search grant awards by keywords (for competitive intelligence on port/maritime grants)
+ */
+export async function searchGrantAwardsByKeywords(
+  keywords: string[],
+  params: {
+    minAmount?: number;
+    startDate?: string;
+    endDate?: string;
+    states?: string[];
+    limit?: number;
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const cacheKey = `grants:keywords:${keywords.join(",")}:${JSON.stringify(params)}`;
+  const cached = getCached<{ awards: GrantAward[]; totalRecords: number }>(cacheKey);
+  if (cached) return cached;
+
+  const filters: any = {
+    award_type_codes: ["02", "03", "04", "05"], // Grant award types
+    time_period: [{
+      start_date: params.startDate || "2019-01-01",
+      end_date: params.endDate || new Date().toISOString().split('T')[0],
+    }],
+  };
+
+  // USAspending API doesn't support keyword filter directly
+  // Instead, we can search in description using recipient_search_text or description search
+  // For now, we'll skip keyword filtering and rely on CFDA numbers and other filters
+  // If keywords are provided, we can filter results after fetching
+  // Note: The API might support text search in description, but it's not well documented
+
+  if (params.minAmount) {
+    filters.award_amounts = [{ lower_bound: params.minAmount }];
+  }
+
+  if (params.states && params.states.length > 0) {
+    filters.place_of_performance_locations = params.states.map(state => ({
+      country: "USA",
+      state: state,
+    }));
+  }
+
+  let res: Response;
+  try {
+    res = await fetchWithRetry(`${BASE_URL}/search/spending_by_award/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filters,
+        fields: [
+          "Award ID",
+          "Recipient Name",
+          "Award Amount",
+          "Awarding Agency",
+          "CFDA Number",
+          "CFDA Title",
+          "Place of Performance State Code",
+          "Place of Performance City Name",
+          "Start Date",
+          "End Date",
+          "Description",
+          "Award Type",
+        ],
+        limit: params.limit || 100,
+        page: 1,
+        sort: "Award Amount",
+        order: "desc",
+      }),
+    });
+  } catch (fetchError: any) {
+    // Network error or fetch failed
+    console.error("USAspending API network error (searchGrantAwardsByKeywords):", {
+      error: fetchError?.message || String(fetchError),
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    // Return empty results for network errors
+    return { awards: [], totalRecords: 0 };
+  }
+
+  if (!res.ok) {
+    const status = res.status;
+    const statusText = res.statusText;
+    let errorMsg = `USASpending API returned ${status} ${statusText}`;
+    let errorDetails: any = null;
+    
+    try {
+      // Try to read error body - clone if possible, otherwise read directly
+      let errorBody: any;
+      try {
+        const clonedRes = res.clone();
+        errorBody = await clonedRes.json();
+      } catch (cloneError) {
+        // If clone fails, try reading directly
+        errorBody = await res.json();
+      }
+      errorDetails = errorBody;
+      errorMsg = errorBody.message || errorBody.error || errorBody.detail || JSON.stringify(errorBody) || errorMsg;
+    } catch (e) {
+      try {
+        let text: string;
+        try {
+          const clonedRes = res.clone();
+          text = await clonedRes.text();
+        } catch (cloneError) {
+          text = await res.text();
+        }
+        if (text) {
+          errorDetails = text;
+          errorMsg = text;
+        }
+      } catch (e2) {
+        // Ignore text parsing errors
+        errorDetails = `Could not parse error response: ${e2}`;
+      }
+    }
+    
+    console.error("USAspending API error (searchGrantAwardsByKeywords):", {
+      status,
+      statusText,
+      errorMsg,
+      errorDetails,
+      filters: JSON.stringify(filters, null, 2),
+      url: `${BASE_URL}/search/spending_by_award/`,
+    });
+    
+    // For 422 (bad request), return empty results instead of throwing
+    if (status === 422) {
+      console.warn("USAspending API returned 422 - invalid request format. Returning empty results.");
+      return { awards: [], totalRecords: 0 };
+    }
+    throw new Error(errorMsg);
+  }
+
+  const data = await res.json();
+  const results = (data.results || []) as any[];
+
+  const awards: GrantAward[] = results.map((r) => ({
+    awardId: r["Award ID"] || String(r.internal_id || ""),
+    recipientName: r["Recipient Name"] || "",
+    awardAmount: r["Award Amount"] || 0,
+    awardingAgency: r["Awarding Agency"] || "",
+    cfdaNumber: r["CFDA Number"] || null,
+    cfdaTitle: r["CFDA Title"] || null,
+    placeOfPerformance: {
+      state: r["Place of Performance State Code"] || "",
+      city: r["Place of Performance City Name"] || undefined,
+    },
+    startDate: r["Start Date"] || "",
+    endDate: r["End Date"] || null,
+    description: r["Description"] || "",
+    awardType: r["Award Type"] || "",
+  }));
+
+  // Filter for port/maritime-related grants
+  const portKeywords = ["port", "maritime", "harbor", "terminal", "seaport", "waterway", "navigation"];
+  const filteredAwards = awards.filter(award => {
+    const text = `${award.description} ${award.recipientName} ${award.cfdaTitle || ""}`.toLowerCase();
+    return portKeywords.some(keyword => text.includes(keyword));
+  });
+
+  const result = {
+    awards: filteredAwards.filter(a => a.awardAmount > 0),
+    totalRecords: data.page_metadata?.total || filteredAwards.length,
+  };
+
+  setCache(cacheKey, result);
+  return result;
+}
+
+/**
+ * Get competitive intelligence for a specific grant program
+ * Searches USAspending for historical awards matching the grant program
+ */
+export async function getCompetitiveIntelligenceFromUSAspending(
+  programName: string,
+  cfdaNumber?: string,
+  params: {
+    minAmount?: number;
+    years?: number; // How many years back to search
+    states?: string[];
+  } = {}
+): Promise<{ awards: GrantAward[]; totalRecords: number }> {
+  const years = params.years || 5;
+  const endDate = new Date().toISOString().split('T')[0];
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() - years);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // Try CFDA number first if provided
+  if (cfdaNumber) {
+    try {
+      const result = await searchGrantAwardsByCFDA(cfdaNumber, {
+        minAmount: params.minAmount || 500_000,
+        startDate: startDateStr,
+        endDate,
+        states: params.states,
+        limit: 100, // USAspending API max is 100
+      });
+      if (result.awards.length > 0) {
+        return result;
+      }
+    } catch (err) {
+      console.error("Error searching by CFDA:", err);
     }
   }
 
-  if (codes.size === 0) {
-    return PORT_NAICS_CODES;
+  // Fallback to keyword search
+  const keywords = extractProgramKeywords(programName);
+  return searchGrantAwardsByKeywords(keywords, {
+    minAmount: params.minAmount || 500_000,
+    startDate: startDateStr,
+    endDate,
+    states: params.states,
+    limit: 200,
+  });
+}
+
+/**
+ * Extract search keywords from program name
+ */
+function extractProgramKeywords(programName: string): string[] {
+  const name = programName.toLowerCase();
+  const keywords: string[] = [];
+
+  // Program-specific keywords
+  if (name.includes("pidp") || name.includes("port infrastructure")) {
+    keywords.push("port infrastructure", "maritime", "terminal");
+  }
+  if (name.includes("raise") || name.includes("rebuilding")) {
+    keywords.push("infrastructure", "transportation", "port");
+  }
+  if (name.includes("infra")) {
+    keywords.push("infrastructure", "freight", "port");
+  }
+  if (name.includes("psgp") || name.includes("port security")) {
+    keywords.push("port security", "maritime security");
+  }
+  if (name.includes("crisi") || name.includes("rail")) {
+    keywords.push("rail", "railroad", "intermodal");
   }
 
-  return [...codes];
+  // Default keywords
+  if (keywords.length === 0) {
+    keywords.push("port", "maritime", "harbor");
+  }
+
+  return keywords;
 }
+
+// ─── NAICS Derivation (reuse from govcon) ───
+// Note: deriveNaicsFromGrant is imported from govcon.ts

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
+import { searchGrants, fetchGrantDetails, type GrantsSearchParams } from "@/lib/grants-gov";
 import { searchUSDOTGrants, enhanceUSDOTGrant, buildUSDOTSearchQuery } from "@/lib/usdot-grants";
+import { searchFederalRegister } from "@/lib/federal-register";
+import { searchGovConOpportunities } from "@/lib/govcon";
 
 /**
  * POST /api/grants-search-enhanced
@@ -61,15 +63,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Execute searches in parallel
-    const searchPromises = [];
+    const searchPromises: Promise<any>[] = [];
 
-    // 1. Main Grants.gov search
-    const mainKeyword = params.keyword || "port OR maritime OR transportation OR infrastructure OR seaport";
+    // 1. Main Grants.gov search (default keyword handled in searchGrants)
     searchPromises.push(
       searchGrants({
         ...params,
-        keyword: mainKeyword,
-      })
+        keyword: params.keyword, // Will use default in searchGrants if not provided
+      }).then((result) => ({ type: "grants_gov", result }))
     );
 
     // 2. DOT-specific search (if enabled and not already searching DOT specifically)
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
           ...params,
           keyword: buildUSDOTSearchQuery(),
           agency: "DOT",
-        })
+        }).then((result) => ({ type: "grants_gov_dot", result }))
       );
 
       // 3. Also search by specific DOT program names
@@ -90,29 +91,135 @@ export async function POST(request: NextRequest) {
             : params.oppStatuses?.includes("forecasted")
               ? "forecasted"
               : "all",
-        })
+        }).then((grants) => ({ type: "usdot", result: { grants, totalCount: grants.length } }))
       );
     }
 
-    const results = await Promise.all(searchPromises);
+    // 4. Federal Register search (for early NOFO detection)
+    // Always search Federal Register, even without keyword (uses default search)
+    searchPromises.push(
+      searchFederalRegister({
+        query: params.keyword, // Will use default in searchFederalRegister if not provided
+        agencies: ["DOT", "DHS", "EPA", "DOC", "DOE", "USDA", "DOD"],
+        per_page: 50,
+      })
+        .then((grants) => {
+          console.log(`Federal Register returned ${grants.length} grants`);
+          return { type: "federal_register", result: { grants, totalCount: grants.length } };
+        })
+        .catch((err) => {
+          console.error("Federal Register search error:", err);
+          return { type: "federal_register", result: { grants: [], totalCount: 0 } };
+        })
+    );
+
+    // 5. Featured/Priority Grants - Always include specific high-priority grants
+    searchPromises.push(
+      fetchGrantDetails(356561)
+        .then((grant) => {
+          console.log(`Featured grant 356561 fetched successfully`);
+          return { type: "featured", result: { grants: [grant], totalCount: 1 } };
+        })
+        .catch((err) => {
+          console.error("Featured grant fetch error:", err);
+          return { type: "featured", result: { grants: [], totalCount: 0 } };
+        })
+    );
+
+    // 6. GovCon opportunities search (if API key is available)
+    // Always search GovCon if API key exists (uses default keyword if needed)
+    if (process.env.GOVCON_API_KEY) {
+      searchPromises.push(
+        searchGovConOpportunities({
+          keywords: params.keyword || undefined,
+          limit: 50,
+        })
+          .then((opportunities) => {
+            console.log(`GovCon returned ${opportunities.length} opportunities`);
+            const grants = opportunities
+              .filter((opp) => {
+                const nt = (opp.notice_type || "").toLowerCase();
+                return nt.includes("solicitation") || nt.includes("presolicitation");
+              })
+              .map((opp) => {
+                const nt = (opp.notice_type || "").toLowerCase();
+                return {
+                  id: `govcon-${opp.notice_id}`,
+                  opportunityNumber: opp.solicitation_number || opp.notice_id,
+                  title: opp.title,
+                  agency: opp.agency || "",
+                  agencyCode: (opp.agency || "").substring(0, 10).toUpperCase(),
+                  description: opp.description_text || opp.title,
+                  awardFloor: 0,
+                  awardCeiling: opp.award_amount || 0,
+                  totalFunding: opp.award_amount || 0,
+                  closeDate: opp.response_deadline || "",
+                  postDate: opp.posted_date || "",
+                  status: nt.includes("presolicitation") ? "forecasted" : "posted",
+                  applicationUrl: opp.sam_url || `https://sam.gov/opp/${opp.notice_id}/view`,
+                  eligibility: [],
+                  fundingCategories: [],
+                  fundingInstruments: [],
+                  costSharing: false,
+                  alnNumbers: [],
+                  contactName: opp.contact_name,
+                  contactEmail: opp.contact_email,
+                  source: "GovCon",
+                };
+              });
+            console.log(`GovCon mapped to ${grants.length} grants`);
+            return { type: "govcon", result: { grants, totalCount: grants.length } };
+          })
+          .catch((err) => {
+            console.error("GovCon opportunities search error:", err);
+            return { type: "govcon", result: { grants: [], totalCount: 0 } };
+          })
+      );
+    }
+
+    const results = await Promise.allSettled(searchPromises);
 
     // Combine and deduplicate results
     const allGrants = new Map<string, any>();
     let totalCount = 0;
+    const sourcesUsed = new Set<string>();
 
     for (const result of results) {
-      totalCount = Math.max(totalCount, result.totalCount || 0);
+      if (result.status === "rejected") {
+        console.error("Search promise rejected:", result.reason);
+        continue;
+      }
 
-      for (const grant of result.grants || []) {
-        if (!allGrants.has(grant.id)) {
+      const { type, result: searchResult } = result.value;
+      sourcesUsed.add(type);
+
+      if (searchResult?.totalCount) {
+        totalCount = Math.max(totalCount, searchResult.totalCount);
+      }
+
+      for (const grant of searchResult?.grants || []) {
+        // Use a combination of ID and source for deduplication
+        // This allows same grant from different sources to be shown
+        const dedupeKey = grant.source ? `${grant.id}-${grant.source}` : grant.id;
+        
+        if (!allGrants.has(dedupeKey)) {
           // Enhance DOT grants with typical funding amounts
           const enhanced = enhanceUSDOTGrant(grant);
-          allGrants.set(grant.id, enhanced);
+          allGrants.set(dedupeKey, enhanced);
         }
       }
     }
 
     const grants = Array.from(allGrants.values());
+
+    // Debug logging
+    console.log(`Total grants from all sources: ${grants.length}`);
+    const sourceBreakdown = grants.reduce((acc, g) => {
+      const source = g.source || "unknown";
+      acc[source] = (acc[source] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+    console.log("Grants by source:", sourceBreakdown);
 
     // Sort by relevance (DOT grants first if DOT-focused search)
     grants.sort((a, b) => {
@@ -131,8 +238,11 @@ export async function POST(request: NextRequest) {
         grants,
         totalCount: Math.max(totalCount, grants.length),
         sources: {
-          grants_gov: true,
-          usdot_programs: includeDOTPrograms,
+          grants_gov: sourcesUsed.has("grants_gov") || sourcesUsed.has("grants_gov_dot"),
+          usdot_programs: sourcesUsed.has("usdot"),
+          federal_register: sourcesUsed.has("federal_register"),
+          featured: sourcesUsed.has("featured"),
+          govcon: sourcesUsed.has("govcon"),
         },
       },
       { status: 200 }

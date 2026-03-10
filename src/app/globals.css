@@ -163,3 +163,104 @@
   will-change: contents;
   contain: layout style;
 }
+
+/* CSS-only streaming cursor - no React re-renders */
+.streaming-cursor::after {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 20px;
+  background-color: hsl(var(--primary));
+  margin-left: 2px;
+  animation: cursor-blink 1s ease-in-out infinite;
+  vertical-align: text-bottom;
+  transform: translateZ(0);
+}
+
+@keyframes cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Optimize grant draft content rendering */
+.grant-draft-content {
+  contain: layout style paint;
+  content-visibility: auto;
+  transform: translateZ(0);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+  color: hsl(var(--foreground) / 0.95);
+}
+
+/* Grant draft HTML elements styling */
+.grant-draft-content h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin-top: 32px;
+  margin-bottom: 16px;
+  letter-spacing: 0.025em;
+  color: hsl(var(--foreground));
+}
+
+.grant-draft-content h2:first-child {
+  margin-top: 0;
+}
+
+.grant-draft-content h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 12px;
+  color: hsl(var(--foreground));
+}
+
+.grant-draft-content p {
+  margin-bottom: 12px;
+  line-height: 1.8;
+}
+
+.grant-draft-content ul,
+.grant-draft-content ol {
+  margin-bottom: 16px;
+  padding-left: 24px;
+}
+
+.grant-draft-content li {
+  margin-bottom: 8px;
+  line-height: 1.7;
+}
+
+.grant-draft-content li p {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.grant-draft-content strong {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.grant-draft-content em {
+  font-style: italic;
+  color: hsl(var(--muted-foreground));
+}
+
+.grant-draft-content a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: text-decoration-thickness 0.2s;
+}
+
+.grant-draft-content a:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* Dark mode link adjustments */
+@media (prefers-color-scheme: dark) {
+  .grant-draft-content a {
+    color: hsl(var(--primary));
+  }
+}
