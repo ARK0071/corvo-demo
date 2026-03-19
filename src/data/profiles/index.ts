@@ -12,11 +12,13 @@
 import type { PortProfile } from "../port-profile";
 import { portFreeportProfile } from "./port-freeport";
 import { portOfLosAngelesProfile } from "./port-of-los-angeles";
+import { lawaProfile } from "./lawa";
 
 // Registry of all available port profiles
 export const AVAILABLE_PROFILES: Record<string, PortProfile> = {
   "port-freeport": portFreeportProfile,
   "port-of-los-angeles": portOfLosAngelesProfile,
+  "lawa": lawaProfile,
   // Add new profiles here:
   // "port-of-seattle": portOfSeattleProfile,
   // "port-of-houston": portOfHoustonProfile,

@@ -138,16 +138,15 @@ export function isInPipeline(id: string): boolean {
 }
 
 /**
- * Count grants with upcoming deadlines (within next 30 days, not yet awarded/rejected)
+ * Get count of grants with deadlines in the next 30 days
  */
 export function getUpcomingDeadlineCount(): number {
-  const now = new Date();
+  const now = Date.now();
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
   return pipelineGrants.filter((g) => {
-    if (g.stage === "awarded" || g.stage === "rejected") return false;
     if (!g.closeDate) return false;
-    const deadline = new Date(g.closeDate);
-    const daysUntil = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-    return daysUntil >= 0 && daysUntil <= 30;
+    const d = new Date(g.closeDate).getTime();
+    return !isNaN(d) && d >= now && d <= now + thirtyDays;
   }).length;
 }
 

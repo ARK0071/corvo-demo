@@ -33,6 +33,15 @@ const ELIGIBILITY_KEYWORDS = {
     "seaport",
     "maritime",
   ],
+  airportAuthority: [
+    "airport",
+    "aviation",
+    "aeronautics",
+    "airport authority",
+    "airport operator",
+    "FAA",
+    "air carrier",
+  ],
   stateLocal: [
     "state government",
     "local government",
@@ -113,15 +122,27 @@ function scoreEligibility(grant: DiscoveredGrant, profile: PortProfile): {
 } {
   const eligibilityText = grant.eligibility.join(" ").toLowerCase();
   const reasons: string[] = [];
+  const isAirport = profile.classification.toLowerCase().includes("airport");
 
-  // Check for explicit port authority eligibility
-  const portKeywordMatch = ELIGIBILITY_KEYWORDS.portAuthority.some((kw) =>
-    eligibilityText.includes(kw)
-  );
+  // Check for explicit port authority or airport authority eligibility
+  if (isAirport) {
+    const airportKeywordMatch = ELIGIBILITY_KEYWORDS.airportAuthority.some((kw) =>
+      eligibilityText.includes(kw.toLowerCase())
+    );
 
-  if (portKeywordMatch) {
-    reasons.push("Explicitly eligible for port authorities");
-    return { score: 100, status: "eligible", reasons };
+    if (airportKeywordMatch) {
+      reasons.push("Explicitly eligible for airport authorities");
+      return { score: 100, status: "eligible", reasons };
+    }
+  } else {
+    const portKeywordMatch = ELIGIBILITY_KEYWORDS.portAuthority.some((kw) =>
+      eligibilityText.includes(kw)
+    );
+
+    if (portKeywordMatch) {
+      reasons.push("Explicitly eligible for port authorities");
+      return { score: 100, status: "eligible", reasons };
+    }
   }
 
   // Check for special district (which port authorities typically are)
@@ -271,33 +292,52 @@ function scoreCompetitiveness(grant: DiscoveredGrant, profile: PortProfile): {
   const factors: string[] = [];
   let score = 50; // Base competitiveness
 
-  // Location advantage (Texas/Gulf Coast)
+  // Location advantage
   const grantText = `${grant.title} ${grant.description}`.toLowerCase();
+  const isAirport = profile.classification.toLowerCase().includes("airport");
+  const locationTerms = [
+    profile.location.state.toLowerCase(),
+    profile.location.city.toLowerCase(),
+    profile.location.region.toLowerCase(),
+    "region",
+  ];
 
-  if (
-    grantText.includes("texas") ||
-    grantText.includes("gulf coast") ||
-    grantText.includes("region")
-  ) {
+  if (locationTerms.some((term) => grantText.includes(term))) {
     score += 15;
-    factors.push("Regional focus matches Port Freeport location");
+    factors.push(`Regional focus matches ${profile.name} location`);
   }
 
-  // Transportation/port focus
-  const transportationFocus =
-    grant.fundingCategories.some((c) => c.toLowerCase().includes("transport")) ||
-    grantText.includes("port") ||
-    grantText.includes("maritime");
+  // Sector focus — port/maritime or airport/aviation depending on profile
+  const sectorFocus = isAirport
+    ? grant.fundingCategories.some((c) => c.toLowerCase().includes("transport")) ||
+      grantText.includes("airport") ||
+      grantText.includes("aviation") ||
+      grantText.includes("faa")
+    : grant.fundingCategories.some((c) => c.toLowerCase().includes("transport")) ||
+      grantText.includes("port") ||
+      grantText.includes("maritime");
 
-  if (transportationFocus) {
+  if (sectorFocus) {
     score += 20;
-    factors.push("Direct port/maritime focus");
+    factors.push(isAirport ? "Direct airport/aviation focus" : "Direct port/maritime focus");
+  }
+
+  // Penalize grants that target the opposite sector
+  const wrongSector = isAirport
+    ? grantText.includes("port") && !grantText.includes("airport") && !grantText.includes("transport")
+      || grantText.includes("maritime") || grantText.includes("seaport")
+    : grantText.includes("airport") && !grantText.includes("port")
+      || grantText.includes("aviation") || grantText.includes("faa");
+
+  if (wrongSector) {
+    score -= 25;
+    factors.push(isAirport ? "Grant targets port/maritime sector — low relevance for airports" : "Grant targets airport/aviation sector — low relevance for ports");
   }
 
   // Certifications match
   if (profile.certifications.length > 0) {
     score += 10;
-    factors.push("Strong existing certifications (Green Marine, ISO 14001)");
+    factors.push(`Strong existing certifications (${profile.certifications.slice(0, 2).join(", ")})`);
   }
 
   // Past experience
@@ -330,8 +370,17 @@ export function scoreGrantForPort(
   // Determine recommendation
   let recommendation: GrantScore["recommendation"];
 
-  // If alignment is very low (< 20), the grant is likely irrelevant
-  if (alignment.score < 20) {
+  // Check for sector mismatch (port grant for airport profile or vice versa)
+  const grantFullText = `${grant.title} ${grant.description}`.toLowerCase();
+  const isAirportProfile = profile.classification.toLowerCase().includes("airport");
+  const sectorMismatch = isAirportProfile
+    ? (grantFullText.includes("port") || grantFullText.includes("maritime") || grantFullText.includes("seaport"))
+      && !grantFullText.includes("airport") && !grantFullText.includes("aviation") && !grantFullText.includes("transport")
+    : (grantFullText.includes("airport") || grantFullText.includes("aviation"))
+      && !grantFullText.includes("port") && !grantFullText.includes("maritime");
+
+  // If alignment is very low (< 20) or sector mismatch, the grant is likely irrelevant
+  if (alignment.score < 20 || sectorMismatch) {
     recommendation = "not_recommended";
   } else if (overallScore >= 75 && eligibility.status === "eligible") {
     recommendation = "highly_recommended";

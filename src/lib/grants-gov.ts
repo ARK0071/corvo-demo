@@ -45,7 +45,7 @@ export interface DiscoveredGrant {
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
-  source?: string;               // Data source: "Grants.gov", "Federal Register", "SAM.gov", "Congress.gov", "DOT Navigator", etc.
+  source?: string;                // Data source (e.g., "USDOT", "Grants.gov")
 }
 
 // Raw API response types
@@ -148,8 +148,7 @@ export async function searchGrants(params: GrantsSearchParams): Promise<{
     startRecordNum: params.startRecordNum || 0,
   };
 
-  // Use provided keyword or default to port/maritime/infrastructure terms
-  requestBody.keyword = params.keyword || "port OR maritime OR infrastructure OR transportation OR grant";
+  if (params.keyword) requestBody.keyword = params.keyword;
   if (params.agency) requestBody.agencies = params.agency;
   if (params.oppStatuses && params.oppStatuses.length > 0) {
     requestBody.oppStatuses = params.oppStatuses.join("|");
@@ -266,7 +265,6 @@ function mapOpportunityHitToGrant(hit: OpportunityHit): DiscoveredGrant {
     fundingInstruments: [],
     costSharing: false,
     alnNumbers: hit.cfdaList || [],
-    source: "Grants.gov",
   };
 }
 
@@ -298,7 +296,6 @@ function mapOpportunityDetailToGrant(opp: OpportunityDetail["data"]): Discovered
     contactName: syn.agencyContactName,
     contactEmail: syn.agencyContactEmail,
     contactPhone: syn.agencyContactPhone,
-    source: "Grants.gov",
   };
 }
 

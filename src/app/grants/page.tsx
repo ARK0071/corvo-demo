@@ -46,14 +46,14 @@ import type { PortVendor } from "@/data/port-vendors";
 import { addPortVendors } from "@/data/port-vendors";
 import { OutreachEmail } from "@/components/grant-match/outreach-email";
 import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
-import { currentPortProfile } from "@/data/port-profile";
+import { useProfile } from "@/components/profile-provider";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
   getAllProjects,
   createProject,
   updateProject,
   deleteProject,
-  initializePortFreeportProjects,
+  initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects, type GrantProjectMatch } from "@/data/grant-project-matching";
@@ -170,6 +170,7 @@ export default function GrantsPage() {
 function UnifiedGrantsDashboard() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { profile: selectedProfile, profileId } = useProfile();
 
   const tabParam = searchParams.get("tab");
   const activeTab = VALID_TABS.includes(tabParam as any) ? tabParam! : "discover";
@@ -180,8 +181,6 @@ function UnifiedGrantsDashboard() {
     },
     [router]
   );
-
-  const selectedProfile = currentPortProfile;
 
   // Discover tab state
   const [searchQuery, setSearchQuery] = useState("");
@@ -226,11 +225,11 @@ function UnifiedGrantsDashboard() {
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
   const [projectMatches, setProjectMatches] = useState<Map<string, GrantProjectMatch[]>>(new Map());
 
-  // Initialize Port Freeport default projects on mount
+  // Initialize projects for the active profile (re-runs on profile switch)
   useEffect(() => {
-    initializePortFreeportProjects();
-    setProjects([...getAllProjects()]); // Refresh projects list
-  }, []);
+    initializeProjectsForProfile(profileId);
+    setProjects([...getAllProjects()]);
+  }, [profileId]);
 
   // Search grants from Grants.gov + USDOT programs
   async function handleSearch() {

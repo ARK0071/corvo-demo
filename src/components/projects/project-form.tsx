@@ -1,30 +1,30 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { X } from "lucide-react";
-import type { Project, ProjectStatus, ProjectPriority, ProjectType } from "@/data/projects";
+import type { Project } from "@/data/projects";
 
 interface ProjectFormProps {
   project?: Project;
-  onSave: (project: Omit<Project, "id" | "createdAt" | "updatedAt">) => void;
+  onSave: (data: Omit<Project, "id">) => void;
   onCancel: () => void;
 }
 
-const PROJECT_TYPES: ProjectType[] = [
+const PROJECT_TYPES = [
   "infrastructure",
-  "equipment",
-  "environmental",
-  "security",
-  "technology",
-  "maintenance",
   "expansion",
+  "equipment",
+  "security",
   "resilience",
+  "environmental",
+  "technology",
   "other",
 ];
 
-const PROJECT_STATUSES: ProjectStatus[] = [
+const STATUSES: Project["status"][] = [
   "planning",
   "design",
   "procurement",
@@ -33,294 +33,164 @@ const PROJECT_STATUSES: ProjectStatus[] = [
   "on_hold",
 ];
 
-const PROJECT_PRIORITIES: ProjectPriority[] = ["critical", "high", "medium", "low"];
+const PRIORITIES: Project["priority"][] = ["critical", "high", "medium", "low"];
 
 const COMMON_FOCUS_AREAS = [
-  "zero-emission equipment",
-  "infrastructure modernization",
-  "terminal expansion",
-  "rail infrastructure",
-  "channel deepening",
-  "crane upgrades",
-  "security systems",
-  "resilience",
-  "environmental compliance",
-  "intermodal connectivity",
-  "warehouse expansion",
-  "paving",
-  "dredging",
-  "wharf improvements",
+  "Port infrastructure",
+  "Channel deepening",
+  "Container terminal",
+  "Zero-emission equipment",
+  "Electrification",
+  "Shore power",
+  "Rail infrastructure",
+  "Intermodal connectivity",
+  "Climate resilience",
+  "Port security",
+  "Cybersecurity",
+  "Environmental sustainability",
+  "Freight movement",
+  "Supply chain",
+  "Stormwater management",
+  "Air quality",
+  "Workforce development",
 ];
 
 export function ProjectForm({ project, onSave, onCancel }: ProjectFormProps) {
   const [name, setName] = useState(project?.name || "");
   const [description, setDescription] = useState(project?.description || "");
-  const [focusAreas, setFocusAreas] = useState<string[]>(project?.focusAreas || []);
+  const [projectType, setProjectType] = useState(project?.projectType || "infrastructure");
+  const [status, setStatus] = useState<Project["status"]>(project?.status || "planning");
+  const [priority, setPriority] = useState<Project["priority"]>(project?.priority || "medium");
   const [budget, setBudget] = useState(project?.budget?.toString() || "");
-  const [startDate, setStartDate] = useState(
-    project?.startDate ? project.startDate.split("T")[0] : ""
-  );
-  const [endDate, setEndDate] = useState(
-    project?.endDate ? project.endDate.split("T")[0] : ""
-  );
   const [location, setLocation] = useState(project?.location || "");
-  const [projectType, setProjectType] = useState<ProjectType>(
-    project?.projectType || "infrastructure"
-  );
-  const [status, setStatus] = useState<ProjectStatus>(project?.status || "planning");
-  const [priority, setPriority] = useState<ProjectPriority>(
-    project?.priority || "medium"
-  );
+  const [startDate, setStartDate] = useState(project?.startDate || "");
+  const [endDate, setEndDate] = useState(project?.endDate || "");
+  const [focusAreas, setFocusAreas] = useState<string[]>(project?.focusAreas || []);
   const [notes, setNotes] = useState(project?.notes || "");
-  const [customFocusArea, setCustomFocusArea] = useState("");
 
-  const handleSubmit = (e: React.FormEvent) => {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-
-    if (!name.trim() || !description.trim()) {
-      alert("Please fill in required fields (name and description)");
-      return;
-    }
-
-    const budgetNum = parseFloat(budget.replace(/,/g, "")) || 0;
-
     onSave({
       name: name.trim(),
       description: description.trim(),
-      focusAreas,
-      budget: budgetNum,
-      startDate: startDate || null,
-      endDate: endDate || null,
-      location: location.trim(),
       projectType,
       status,
       priority,
+      budget: parseFloat(budget) || 0,
+      location: location.trim() || undefined,
+      startDate: startDate || undefined,
+      endDate: endDate || undefined,
+      focusAreas,
       notes: notes.trim() || undefined,
     });
-  };
+  }
 
-  const toggleFocusArea = (area: string) => {
+  function toggleFocusArea(area: string) {
     setFocusAreas((prev) =>
       prev.includes(area) ? prev.filter((a) => a !== area) : [...prev, area]
     );
-  };
+  }
 
-  const addCustomFocusArea = () => {
-    if (customFocusArea.trim() && !focusAreas.includes(customFocusArea.trim())) {
-      setFocusAreas((prev) => [...prev, customFocusArea.trim()]);
-      setCustomFocusArea("");
-    }
-  };
+  const inputCls = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold">
-              {project ? "Edit Project" : "Add New Project"}
-            </h2>
-            <Button variant="ghost" size="icon" onClick={onCancel}>
-              <X className="h-4 w-4" />
-            </Button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <Card className="w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">
+            {project ? "Edit Project" : "New Project"}
+          </h2>
+          <Button variant="ghost" size="icon" onClick={onCancel}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="text-sm font-medium block mb-1">Project Name *</label>
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} required />
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name */}
-            <div>
-              <label className="text-sm font-medium mb-1.5 block">Project Name *</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                required
-              />
-            </div>
+          <div>
+            <label className="text-sm font-medium block mb-1">Description</label>
+            <textarea className={`${inputCls} min-h-[80px]`} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
 
-            {/* Description */}
+          <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="text-sm font-medium mb-1.5 block">Description *</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                rows={3}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-                required
-              />
-            </div>
-
-            {/* Focus Areas */}
-            <div>
-              <label className="text-sm font-medium mb-1.5 block">Focus Areas</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {COMMON_FOCUS_AREAS.map((area) => (
-                  <button
-                    key={area}
-                    type="button"
-                    onClick={() => toggleFocusArea(area)}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                      focusAreas.includes(area)
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:bg-muted/80"
-                    }`}
-                  >
-                    {area}
-                  </button>
+              <label className="text-sm font-medium block mb-1">Type</label>
+              <select className={inputCls} value={projectType} onChange={(e) => setProjectType(e.target.value)}>
+                {PROJECT_TYPES.map((t) => (
+                  <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
                 ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={customFocusArea}
-                  onChange={(e) => setCustomFocusArea(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addCustomFocusArea())}
-                  placeholder="Add custom focus area"
-                  className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addCustomFocusArea}>
-                  Add
-                </Button>
-              </div>
-              {focusAreas.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {focusAreas.map((area) => (
-                    <span
-                      key={area}
-                      className="inline-flex items-center gap-1 rounded-md bg-primary/10 text-primary px-2 py-1 text-xs"
-                    >
-                      {area}
-                      <button
-                        type="button"
-                        onClick={() => toggleFocusArea(area)}
-                        className="hover:text-primary/80"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
+              </select>
             </div>
-
-            {/* Budget */}
             <div>
-              <label className="text-sm font-medium mb-1.5 block">Budget ($)</label>
-              <input
-                type="text"
-                value={budget}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/[^0-9.]/g, "");
-                  setBudget(val);
-                }}
-                placeholder="0"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
+              <label className="text-sm font-medium block mb-1">Status</label>
+              <select className={inputCls} value={status} onChange={(e) => setStatus(e.target.value as Project["status"])}>
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                ))}
+              </select>
             </div>
-
-            {/* Timeline */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Start Date</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">End Date</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
-              </div>
-            </div>
-
-            {/* Location */}
             <div>
-              <label className="text-sm font-medium mb-1.5 block">Location</label>
-              <input
-                type="text"
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                placeholder="e.g., Terminal 1, Berth 3"
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
+              <label className="text-sm font-medium block mb-1">Priority</label>
+              <select className={inputCls} value={priority} onChange={(e) => setPriority(e.target.value as Project["priority"])}>
+                {PRIORITIES.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
             </div>
+          </div>
 
-            {/* Project Type, Status, Priority */}
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Type</label>
-                <select
-                  value={projectType}
-                  onChange={(e) => setProjectType(e.target.value as ProjectType)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {PROJECT_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {type.charAt(0).toUpperCase() + type.slice(1).replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Status</label>
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as ProjectStatus)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {PROJECT_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Priority</label>
-                <select
-                  value={priority}
-                  onChange={(e) => setPriority(e.target.value as ProjectPriority)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {PROJECT_PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p.charAt(0).toUpperCase() + p.slice(1)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Notes */}
+          <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className="text-sm font-medium mb-1.5 block">Notes</label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={2}
-                placeholder="Additional notes..."
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
-              />
+              <label className="text-sm font-medium block mb-1">Budget ($)</label>
+              <input className={inputCls} type="number" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="0" />
             </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">Start Date</label>
+              <input className={inputCls} type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-sm font-medium block mb-1">End Date</label>
+              <input className={inputCls} type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+          </div>
 
-            {/* Actions */}
-            <div className="flex gap-2 pt-4">
-              <Button type="submit" className="flex-1">
-                {project ? "Update Project" : "Create Project"}
-              </Button>
-              <Button type="button" variant="outline" onClick={onCancel}>
-                Cancel
-              </Button>
+          <div>
+            <label className="text-sm font-medium block mb-1">Location</label>
+            <input className={inputCls} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g., Velasco Terminal" />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium block mb-1">Focus Areas</label>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {COMMON_FOCUS_AREAS.map((area) => (
+                <Badge
+                  key={area}
+                  variant={focusAreas.includes(area) ? "default" : "outline"}
+                  className="cursor-pointer text-[10px]"
+                  onClick={() => toggleFocusArea(area)}
+                >
+                  {area}
+                </Badge>
+              ))}
             </div>
-          </form>
-        </div>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium block mb-1">Notes</label>
+            <textarea className={`${inputCls} min-h-[60px]`} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button type="submit" disabled={!name.trim()}>
+              {project ? "Update Project" : "Create Project"}
+            </Button>
+          </div>
+        </form>
       </Card>
     </div>
   );
