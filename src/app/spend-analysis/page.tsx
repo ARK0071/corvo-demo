@@ -402,7 +402,7 @@ export default function SpendAnalysisPage() {
       }
     }
 
-    // Search vendors — deduplicate by name, aggregate spend across all locations
+    // Search vendors - deduplicate by name, aggregate spend across all locations
     const seenVendorNames = new Set<string>();
     for (const v of addressableVendors) {
       if (v.name.toLowerCase().includes(q)) {
@@ -461,9 +461,9 @@ export default function SpendAnalysisPage() {
     : isSearching && hasCrossResults ? crossLevelResults.length
     : displayRows.length;
   const topItem = showingVendors
-    ? displayVendorRows[0]?.name || "—"
-    : isSearching && hasCrossResults ? crossLevelResults[0]?.name || "—"
-    : displayRows[0]?.name || "—";
+    ? displayVendorRows[0]?.name || "-"
+    : isSearching && hasCrossResults ? crossLevelResults[0]?.name || "-"
+    : displayRows[0]?.name || "-";
   const pctOfTotal = totalSpendAll > 0 ? (currentScopeSpend / totalSpendAll) * 100 : 0;
 
   // ─── Breadcrumb ───

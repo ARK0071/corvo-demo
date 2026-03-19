@@ -15,7 +15,7 @@ export interface PortVendor {
   description: string;
 }
 
-// Mutable vendor array — populated dynamically from SAM.gov
+// Mutable vendor array - populated dynamically from SAM.gov
 export let portVendors: PortVendor[] = [];
 
 export function setPortVendors(vendors: PortVendor[]): void {

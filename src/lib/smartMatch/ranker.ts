@@ -1,5 +1,5 @@
 /**
- * Smart Match Ranker — types for AI-powered grant ranking (legacy module)
+ * Smart Match Ranker - types for AI-powered grant ranking (legacy module)
  */
 
 export interface SmartMatchResult {

@@ -1,5 +1,5 @@
 /**
- * Newsroom — port grant news aggregation via Brave Search + Tavily.
+ * Newsroom - port grant news aggregation via Brave Search + Tavily.
  * Server-side only.
  */
 
@@ -101,7 +101,7 @@ export async function searchNewsroom(
   const bravePromises: Promise<void>[] = [];
   const tavilyPromises: Promise<void>[] = [];
 
-  // Brave Search — up to 4 queries, past month freshness
+  // Brave Search - up to 4 queries, past month freshness
   if (process.env.BRAVE_SEARCH_API_KEY) {
     for (const q of queries.slice(0, 4)) {
       bravePromises.push(
@@ -130,7 +130,7 @@ export async function searchNewsroom(
     }
   }
 
-  // Tavily — up to 3 queries, advanced depth
+  // Tavily - up to 3 queries, advanced depth
   if (process.env.TAVILY_API_KEY) {
     for (const q of queries.slice(0, 3)) {
       tavilyPromises.push(

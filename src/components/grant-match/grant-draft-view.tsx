@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useProfile } from "@/components/profile-provider";
+import { FEDERAL_FORMS } from "@/data/federal-forms";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -91,6 +93,19 @@ interface ResearchData {
     grantsGovAvailable: boolean;
     braveSearchAvailable: boolean;
     webResultsFound: number;
+    nofoAutoFetched?: boolean;
+    nofoPdfUrl?: string | null;
+    nofoPdfPages?: number;
+    nofoValidation?: {
+      isMatch: boolean;
+      confidence: string;
+      detectedProgram: string;
+      detectedFiscalYear: string;
+      reason: string;
+    } | null;
+    acfrAutoFetched?: boolean;
+    acfrPdfUrl?: string | null;
+    acfrPdfPages?: number;
   };
 }
 
@@ -142,12 +157,14 @@ function formatDollars(n: number): string {
   if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
-  return n > 0 ? `$${n}` : "—";
+  return n > 0 ? `$${n}` : "-";
 }
 
 // ─── Component ───
 
 export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraftViewProps) {
+  const { profile } = useProfile();
+
   // Phase state
   const [phase, setPhase] = useState<Phase>("idle");
   const [researchData, setResearchData] = useState<ResearchData | null>(null);
@@ -172,6 +189,12 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   const [acfrLoading, setAcfrLoading] = useState(false);
   const [acfrFileName, setAcfrFileName] = useState<string | null>(null);
   const [acfrError, setAcfrError] = useState<string | null>(null);
+
+  // NOFO upload state
+  const [nofoLoading, setNofoLoading] = useState(false);
+  const [nofoFileName, setNofoFileName] = useState<string | null>(null);
+  const [nofoError, setNofoError] = useState<string | null>(null);
+  const [nofoUploaded, setNofoUploaded] = useState(false);
 
   // Load drafts from session storage
   useEffect(() => {
@@ -236,12 +259,12 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       setResearchProgress("Fetching grant details from Grants.gov...");
       await new Promise((r) => setTimeout(r, 300)); // UI feedback
 
-      setResearchProgress("Searching web for entity data & NOFO requirements...");
+      setResearchProgress("Searching web & auto-fetching NOFO/ACFR PDFs...");
 
       const res = await fetch("/api/research-grant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grantId, grantTitle, entityName: "Port Freeport" }),
+        body: JSON.stringify({ grantId, grantTitle, entityName: profile.name }),
       });
 
       if (!res.ok) {
@@ -251,6 +274,15 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
       const data: ResearchData = await res.json();
       setResearchData(data);
+
+      // If NOFO was auto-fetched during research, mark as uploaded
+      if (data.metadata?.nofoAutoFetched) {
+        setNofoUploaded(true);
+      }
+      // If ACFR was auto-fetched, mark with filename
+      if (data.metadata?.acfrAutoFetched && data.metadata?.acfrPdfUrl) {
+        setAcfrFileName("Auto-fetched from web");
+      }
 
       // Cache research
       sessionStorage.setItem(`research_${grantId}`, JSON.stringify(data));
@@ -274,26 +306,37 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     setGeneratingProgress("Generating all sections in parallel with Claude Sonnet...");
 
     try {
+      const gr = researchData.grantRequirements;
       const requestBody: any = {
         grantId: currentGrantId,
-        portName: researchData.entityProfile?.name || "Port Freeport",
+        grantTitle: currentGrantTitle,
+        portName: researchData.entityProfile?.name || profile.name,
         entityProfile: researchData.entityProfile,
-      };
-
-      // Pass grant requirements if available
-      if (researchData.grantRequirements?.applicationSections?.length > 0) {
-        requestBody.grantRequirements = {
-          sections: researchData.grantRequirements.applicationSections.map((s: any, i: number) => ({
+        grantRequirements: {
+          programName: currentGrantTitle,
+          agency: researchData.grantDetails?.agency || "",
+          maxAward: gr?.maxAward || researchData.grantDetails?.awardCeiling || 0,
+          costShareRequired: gr?.costShareRequired ?? false,
+          costShareMinimum: gr?.costSharePercentage || 0,
+          costSharePercentage: gr?.costSharePercentage || 0,
+          submissionDeadline: gr?.submissionDeadline || researchData.grantDetails?.closeDate || "",
+          sections: (gr?.applicationSections || []).map((s: any, i: number) => ({
             id: `section-${i}`,
             title: s.title,
             description: s.description,
             maxWords: s.maxWords || 5000,
-            weight: s.weight || Math.round(100 / researchData.grantRequirements.applicationSections.length),
+            weight: s.weight || Math.round(100 / (gr?.applicationSections?.length || 1)),
             evaluationCriteria: s.evaluationCriteria || [],
             requiredElements: [],
           })),
-        };
-      }
+          requiredAttachments: (researchData.forms || []).map((f: any) => ({
+            id: f.id || f.number.toLowerCase().replace(/[^a-z0-9]/g, "-"),
+            name: `${f.number}: ${f.name}`,
+            description: f.notes || f.description || "",
+            required: f.required !== false,
+          })),
+        },
+      };
 
       const res = await fetch("/api/build-grant-application", {
         method: "POST",
@@ -413,6 +456,66 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     }
   }
 
+  // ─── NOFO Upload ───
+
+  async function handleNofoUpload(file: File) {
+    setNofoLoading(true);
+    setNofoError(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/extract-nofo-forms", { method: "POST", body: formData });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to extract NOFO");
+      }
+      const data = await res.json();
+      setNofoFileName(file.name);
+      setNofoUploaded(true);
+
+      // Merge NOFO-extracted requirements into research data
+      if (researchData) {
+        const merged = {
+          ...researchData,
+          grantRequirements: {
+            ...researchData.grantRequirements,
+            applicationSections: data.sections,
+            costShareRequired: data.requirements.costShareRequired,
+            costSharePercentage: data.requirements.costSharePercentage,
+            maxAward: data.requirements.maxAward,
+            submissionDeadline: data.requirements.submissionDeadline,
+            eligibleApplicants: data.requirements.eligibleApplicants,
+            source: "nofo-extracted" as const,
+          },
+          forms: data.forms,
+          researchSummary: {
+            ...researchData.researchSummary,
+            grantDataQuality: "high" as const,
+          },
+        };
+        setResearchData(merged);
+        if (currentGrantId) {
+          sessionStorage.setItem(`research_${currentGrantId}`, JSON.stringify(merged));
+        }
+      }
+    } catch (error) {
+      setNofoError(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setNofoLoading(false);
+    }
+  }
+
+  // ─── Forms management ───
+
+  function handleUpdateForms(updatedForms: any[]) {
+    if (!researchData) return;
+    const merged = { ...researchData, forms: updatedForms };
+    setResearchData(merged);
+    if (currentGrantId) {
+      sessionStorage.setItem(`research_${currentGrantId}`, JSON.stringify(merged));
+    }
+  }
+
   // ─── Draft management ───
 
   function handleDeleteDraft(draftId: string) {
@@ -473,7 +576,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 <html>
 <head>
 <meta charset="utf-8">
-<title>${selectedDraft.grantTitle} — Draft Application</title>
+<title>${selectedDraft.grantTitle}: Draft Application</title>
 <style>
   body { font-family: Georgia, 'Times New Roman', serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #1a1a1a; }
   h1 { font-size: 24px; border-bottom: 2px solid #1a1a1a; padding-bottom: 10px; }
@@ -656,7 +759,7 @@ ${s.content
         </div>
       </div>
 
-      {/* Main Content — Phase Router */}
+      {/* Main Content - Phase Router */}
       <div className="flex-1 flex flex-col bg-background overflow-hidden">
         {phase === "idle" && (
           <IdleView />
@@ -674,6 +777,12 @@ ${s.content
             acfrLoading={acfrLoading}
             acfrFileName={acfrFileName}
             acfrError={acfrError}
+            onNofoUpload={handleNofoUpload}
+            nofoLoading={nofoLoading}
+            nofoFileName={nofoFileName}
+            nofoError={nofoError}
+            nofoUploaded={nofoUploaded}
+            onUpdateForms={handleUpdateForms}
           />
         )}
         {phase === "generating" && (
@@ -741,9 +850,10 @@ function ResearchingView({ progress, grantTitle }: { progress: string; grantTitl
         <p className="text-sm text-muted-foreground">{progress}</p>
         <div className="mt-6 space-y-2 text-xs text-muted-foreground max-w-sm mx-auto">
           <div className="flex items-center gap-2"><Globe className="h-3.5 w-3.5 shrink-0" /> Fetching grant details from Grants.gov</div>
-          <div className="flex items-center gap-2"><Search className="h-3.5 w-3.5 shrink-0" /> Searching web for entity data &amp; NOFO</div>
+          <div className="flex items-center gap-2"><Search className="h-3.5 w-3.5 shrink-0" /> Searching web for entity data &amp; grant info</div>
+          <div className="flex items-center gap-2"><FileDown className="h-3.5 w-3.5 shrink-0" /> Auto-fetching NOFO &amp; ACFR PDFs from web</div>
           <div className="flex items-center gap-2"><Database className="h-3.5 w-3.5 shrink-0" /> Matching required forms from registry</div>
-          <div className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 shrink-0" /> Synthesizing with AI (Haiku — ~$0.02)</div>
+          <div className="flex items-center gap-2"><Zap className="h-3.5 w-3.5 shrink-0" /> Extracting requirements &amp; entity profile with AI</div>
         </div>
       </div>
     </div>
@@ -759,6 +869,12 @@ function ReviewView({
   acfrLoading,
   acfrFileName,
   acfrError,
+  onNofoUpload,
+  nofoLoading,
+  nofoFileName,
+  nofoError,
+  nofoUploaded,
+  onUpdateForms,
 }: {
   research: ResearchData;
   grantTitle: string;
@@ -768,11 +884,18 @@ function ReviewView({
   acfrLoading: boolean;
   acfrFileName: string | null;
   acfrError: string | null;
+  onNofoUpload: (file: File) => void;
+  nofoLoading: boolean;
+  nofoFileName: string | null;
+  nofoError: string | null;
+  nofoUploaded: boolean;
+  onUpdateForms: (forms: any[]) => void;
 }) {
   const [expandedPanel, setExpandedPanel] = useState<string | null>("summary");
   const ep = research.entityProfile;
   const gr = research.grantRequirements;
   const summary = research.researchSummary;
+  const hasRealRequirements = nofoUploaded || gr?.source === "nofo-extracted";
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -793,7 +916,12 @@ function ReviewView({
             <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onRerunResearch}>
               <RefreshCw className="h-3.5 w-3.5" /> Re-research
             </Button>
-            <Button size="sm" className="gap-1.5 bg-[#3d8b8b] hover:bg-[#2d7a7a] text-white" onClick={onGenerateDraft}>
+            <Button
+              size="sm"
+              className={`gap-1.5 text-white ${hasRealRequirements ? "bg-[#3d8b8b] hover:bg-[#2d7a7a]" : "bg-muted-foreground/50 cursor-not-allowed"}`}
+              onClick={onGenerateDraft}
+              disabled={!hasRealRequirements}
+            >
               <Zap className="h-3.5 w-3.5" /> Generate Draft Application
             </Button>
           </div>
@@ -879,7 +1007,7 @@ function ReviewView({
           >
             {expandedPanel === "entity" ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
             <Building2 className="h-4 w-4 text-[#3d8b8b] shrink-0" />
-            <span className="font-semibold text-sm flex-1">Entity Profile — {ep.name}</span>
+            <span className="font-semibold text-sm flex-1">Entity Profile: {ep.name}</span>
             <Badge variant="outline" className={`text-[10px] ${qualityColors[summary.entityDataQuality]}`}>
               {summary.entityDataQuality} quality
             </Badge>
@@ -892,10 +1020,10 @@ function ReviewView({
                   { label: "Operating Budget", value: formatDollars(ep.financials?.operatingBudget || 0) },
                   { label: "Capital Budget", value: formatDollars(ep.financials?.capitalBudget || 0) },
                   { label: "Total Assets", value: formatDollars(ep.financials?.totalAssets || 0) },
-                  { label: "Employees", value: ep.operations?.employeeCount?.toLocaleString() || "—" },
-                  { label: "Annual Tonnage", value: ep.operations?.annualTonnage ? `${(ep.operations.annualTonnage / 1_000_000).toFixed(1)}M tons` : "—" },
-                  { label: "TEUs", value: ep.operations?.annualTEUs?.toLocaleString() || "—" },
-                  { label: "Bond Rating", value: ep.financials?.bondRating || "—" },
+                  { label: "Employees", value: ep.operations?.employeeCount?.toLocaleString() || "-" },
+                  { label: "Annual Tonnage", value: ep.operations?.annualTonnage ? `${(ep.operations.annualTonnage / 1_000_000).toFixed(1)}M tons` : "-" },
+                  { label: "TEUs", value: ep.operations?.annualTEUs?.toLocaleString() || "-" },
+                  { label: "Bond Rating", value: ep.financials?.bondRating || "-" },
                 ].map((item) => (
                   <div key={item.label} className="bg-muted/30 rounded p-2.5">
                     <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{item.label}</div>
@@ -906,8 +1034,8 @@ function ReviewView({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Location</h4>
-                  <p>{ep.location?.city}, {ep.location?.state} ({ep.location?.congressionalDistrict || "—"})</p>
-                  <p className="text-muted-foreground text-xs">{ep.entityType} — {ep.classification}</p>
+                  <p>{ep.location?.city}, {ep.location?.state} ({ep.location?.congressionalDistrict || "-"})</p>
+                  <p className="text-muted-foreground text-xs">{ep.entityType}, {ep.classification}</p>
                 </div>
                 <div>
                   <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Key Facilities</h4>
@@ -936,15 +1064,17 @@ function ReviewView({
           )}
         </Card>
 
-        {/* ACFR Upload — Enrich Entity Profile */}
+        {/* ACFR Upload - Enrich Entity Profile */}
         <Card className="overflow-hidden border-dashed">
           <div className="p-4">
             <div className="flex items-center gap-3">
               <Upload className="h-4 w-4 text-[#3d8b8b] shrink-0" />
               <div className="flex-1 min-w-0">
-                <span className="font-semibold text-sm">Upload ACFR</span>
+                <span className="font-semibold text-sm">{acfrFileName ? "ACFR Data" : "Upload ACFR"}</span>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Upload an Annual Comprehensive Financial Report to enrich entity data with real financials (~$0.03)
+                  {acfrFileName
+                    ? "Entity profile enriched with real financial data from ACFR"
+                    : "Upload an Annual Comprehensive Financial Report to enrich entity data with real financials"}
                 </p>
               </div>
               {acfrFileName ? (
@@ -983,6 +1113,71 @@ function ReviewView({
           </div>
         </Card>
 
+        {/* NOFO Upload - Extract Real Grant Requirements */}
+        <Card className={`overflow-hidden border-dashed ${!hasRealRequirements ? "border-amber-500/50 bg-amber-500/5" : ""}`}>
+          <div className="p-4">
+            <div className="flex items-center gap-3">
+              <ScrollText className="h-4 w-4 text-[#3d8b8b] shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold text-sm">Upload NOFO Document</span>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {hasRealRequirements
+                    ? "NOFO requirements extracted. Sections, forms, and scoring criteria are ready"
+                    : research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
+                    ? `Auto-fetched NOFO did not match (found: ${research.metadata.nofoValidation.detectedProgram}). Upload the correct NOFO`
+                    : "Upload the Notice of Funding Opportunity (NOFO) PDF to extract real application requirements"
+                  }
+                </p>
+              </div>
+              {nofoFileName ? (
+                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20 shrink-0">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> {nofoFileName}
+                </Badge>
+              ) : hasRealRequirements ? (
+                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20 shrink-0">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> Auto-fetched from web
+                </Badge>
+              ) : (
+                <label className={`shrink-0 ${nofoLoading ? "pointer-events-none" : ""}`}>
+                  <Button size="sm" variant="outline" className="gap-1.5 text-xs" asChild disabled={nofoLoading}>
+                    <span>
+                      {nofoLoading ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Extracting...</>
+                      ) : (
+                        <><Upload className="h-3.5 w-3.5" /> Upload NOFO</>
+                      )}
+                    </span>
+                  </Button>
+                  <input
+                    type="file"
+                    accept=".pdf,.txt"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) onNofoUpload(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+            {!hasRealRequirements && !nofoLoading && (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded p-2 flex items-start gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                {research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
+                  ? `The auto-fetched NOFO was for "${research.metadata.nofoValidation.detectedProgram}" (${research.metadata.nofoValidation.detectedFiscalYear}) and was discarded. Please upload the correct NOFO for this grant.`
+                  : "Required before generating a draft. The NOFO contains the real application sections, scoring criteria, and form requirements."
+                }
+              </div>
+            )}
+            {nofoError && (
+              <div className="mt-2 text-xs text-destructive bg-destructive/10 rounded p-2">
+                {nofoError}
+              </div>
+            )}
+          </div>
+        </Card>
+
         {/* Grant Requirements */}
         <Card className="overflow-hidden">
           <button
@@ -992,9 +1187,15 @@ function ReviewView({
             {expandedPanel === "grant" ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
             <ScrollText className="h-4 w-4 text-[#3d8b8b] shrink-0" />
             <span className="font-semibold text-sm flex-1">Grant Requirements</span>
-            <Badge variant="outline" className="text-[10px]">
-              {gr?.applicationSections?.length || 0} sections
-            </Badge>
+            {hasRealRequirements ? (
+              <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
+                NOFO-extracted: {gr?.applicationSections?.length || 0} sections
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] text-amber-600 bg-amber-500/10 border-amber-500/20">
+                AI-estimated: {gr?.applicationSections?.length || 0} sections
+              </Badge>
+            )}
           </button>
           {expandedPanel === "grant" && (
             <div className="border-t px-4 pb-4 pt-3">
@@ -1004,7 +1205,7 @@ function ReviewView({
                     { label: "Max Award", value: formatDollars(research.grantDetails.awardCeiling || gr?.maxAward || 0) },
                     { label: "Total Funding", value: formatDollars(research.grantDetails.totalFunding || 0) },
                     { label: "Cost Share", value: gr?.costShareRequired ? `${gr.costSharePercentage}%` : "None" },
-                    { label: "Deadline", value: research.grantDetails.closeDate || gr?.submissionDeadline || "—" },
+                    { label: "Deadline", value: research.grantDetails.closeDate || gr?.submissionDeadline || "-" },
                   ].map((item) => (
                     <div key={item.label} className="bg-muted/30 rounded p-2.5">
                       <div className="text-[10px] text-muted-foreground uppercase tracking-wider">{item.label}</div>
@@ -1044,7 +1245,7 @@ function ReviewView({
           )}
         </Card>
 
-        {/* Required Forms */}
+        {/* Required Forms - Editable */}
         <Card className="overflow-hidden">
           <button
             className="w-full flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors text-left"
@@ -1061,27 +1262,77 @@ function ReviewView({
             <div className="border-t px-4 pb-4 pt-3">
               <div className="space-y-2">
                 {research.forms.map((form: any, i: number) => (
-                  <div key={i} className="flex items-start gap-3 text-sm border rounded p-3">
+                  <div key={i} className="flex items-start gap-3 text-sm border rounded p-3 group">
                     <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-mono text-xs font-bold">{form.number}</span>
                         <span className="font-medium truncate">{form.name}</span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[9px] cursor-pointer select-none ${
+                            form.required !== false
+                              ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
+                              : "text-muted-foreground bg-muted/30"
+                          }`}
+                          onClick={() => {
+                            const updated = [...research.forms];
+                            updated[i] = { ...updated[i], required: form.required === false };
+                            onUpdateForms(updated);
+                          }}
+                        >
+                          {form.required !== false ? "Required" : "If applicable"}
+                        </Badge>
                       </div>
                       {form.notes && <p className="text-xs text-muted-foreground mt-0.5">{form.notes}</p>}
                     </div>
-                    {form.url && form.url !== "https://www.grants.gov/forms" && (
+                    {form.url && (
                       <a
                         href={form.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1 shrink-0"
                       >
-                        <ExternalLink className="h-3 w-3" /> Download
+                        <ExternalLink className="h-3 w-3" />
+                        {form.url.includes("forms-repository") ? "View Form" : "Download"}
                       </a>
                     )}
+                    <button
+                      className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                      onClick={() => {
+                        const updated = research.forms.filter((_: any, idx: number) => idx !== i);
+                        onUpdateForms(updated);
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 ))}
+              </div>
+              {/* Add form from registry */}
+              <div className="mt-3">
+                <select
+                  className="w-full text-xs border rounded px-2 py-1.5 bg-background text-muted-foreground"
+                  value=""
+                  onChange={(e) => {
+                    const formToAdd = FEDERAL_FORMS.find(f => f.id === e.target.value);
+                    if (formToAdd) {
+                      onUpdateForms([...research.forms, {
+                        ...formToAdd,
+                        notes: "Manually added",
+                        required: formToAdd.requiredLevel === "required",
+                      }]);
+                    }
+                  }}
+                >
+                  <option value="">+ Add a form from registry...</option>
+                  {FEDERAL_FORMS
+                    .filter(f => f.requiredLevel !== "post-award")
+                    .filter(f => !research.forms.some((ef: any) => ef.number === f.number))
+                    .map(f => (
+                      <option key={f.id} value={f.id}>{f.number}: {f.name}</option>
+                    ))}
+                </select>
               </div>
             </div>
           )}
@@ -1129,12 +1380,22 @@ function ReviewView({
         )}
 
         {/* Generate CTA */}
-        <div className="py-4 flex justify-center">
-          <Button size="lg" className="gap-2 bg-[#3d8b8b] hover:bg-[#2d7a7a] text-white px-8" onClick={onGenerateDraft}>
+        <div className="py-4 flex flex-col items-center gap-2">
+          <Button
+            size="lg"
+            className={`gap-2 text-white px-8 ${hasRealRequirements ? "bg-[#3d8b8b] hover:bg-[#2d7a7a]" : "bg-muted-foreground/50 cursor-not-allowed"}`}
+            onClick={onGenerateDraft}
+            disabled={!hasRealRequirements}
+          >
             <Zap className="h-5 w-5" />
             Generate Draft Application
             <ArrowRight className="h-4 w-4" />
           </Button>
+          {!hasRealRequirements && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3" /> Upload the NOFO document above to enable draft generation
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -1151,7 +1412,7 @@ function GeneratingView({ progress }: { progress: string }) {
         <h3 className="text-lg font-semibold mb-2">Generating Application Draft</h3>
         <p className="text-sm text-muted-foreground">{progress}</p>
         <p className="text-xs text-muted-foreground mt-2">
-          Drafting all sections in parallel with Claude Sonnet — typically takes 15-30 seconds
+          Drafting all sections in parallel with Claude Sonnet. Typically takes 15-30 seconds
         </p>
       </div>
     </div>
@@ -1199,7 +1460,7 @@ function DraftView({
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold truncate">{draft.grantTitle}</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {draft.applicantName} — Generated {new Date(draft.generatedAt).toLocaleDateString()}
+              {draft.applicantName}, Generated {new Date(draft.generatedAt).toLocaleDateString()}
             </p>
           </div>
           <div className="flex items-center gap-3 shrink-0">

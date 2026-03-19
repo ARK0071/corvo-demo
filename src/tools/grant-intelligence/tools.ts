@@ -240,7 +240,7 @@ export async function calculateFinancialScenario(params: {
           : matchAsPercentOfBudget < 20
             ? "Affordable with budget planning"
             : matchAsPercentOfBudget < 30
-              ? "Tight — may require financing"
+              ? "Tight - may require financing"
               : "Not affordable from operating budget alone",
     },
   };
@@ -383,7 +383,7 @@ export async function recommendNextActions() {
     recommendations.push({
       priority: "medium",
       action: "Match vendors to awarded grants",
-      reason: `${awardedGrants.length} grant${awardedGrants.length !== 1 ? "s" : ""} awarded — use Vendor Outreach tab to find contractors`,
+      reason: `${awardedGrants.length} grant${awardedGrants.length !== 1 ? "s" : ""} awarded - use Vendor Outreach tab to find contractors`,
     });
   }
 
@@ -393,7 +393,7 @@ export async function recommendNextActions() {
       priority: "low",
       action: "Scan for new grant opportunities",
       reason:
-        "No critical deadlines or pending actions — use Discover tab to search Grants.gov",
+        "No critical deadlines or pending actions - use Discover tab to search Grants.gov",
     });
   }
 

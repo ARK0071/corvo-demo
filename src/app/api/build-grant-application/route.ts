@@ -1,25 +1,25 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { generateText } from "ai";
-import { PORT_FREEPORT_ENTITY, type EntityProfile } from "@/data/entity-profile";
-import { PIDP_FY2026, type GrantRequirements, type GrantSection } from "@/data/grant-requirements";
+import { type EntityProfile } from "@/data/entity-profile";
+import { type GrantRequirements, type GrantSection } from "@/data/grant-requirements";
 
 export const maxDuration = 120;
 
 /**
- * Merge a partial entity profile (from ACFR extraction) with sensible defaults
+ * Merge a partial entity profile with safe empty defaults
  * so the prompt builder doesn't crash on missing fields.
+ * Does NOT inject hardcoded data - only provides structural defaults.
  */
 function mergeWithDefaults(partial: Record<string, any>): EntityProfile {
-  const defaults = PORT_FREEPORT_ENTITY;
   return {
-    name: partial.name || defaults.name,
-    legalName: partial.legalName || partial.name || defaults.legalName,
-    entityType: partial.entityType || defaults.entityType,
-    classification: partial.classification || defaults.classification,
+    name: partial.name || "Unknown Entity",
+    legalName: partial.legalName || partial.name || "Unknown Entity",
+    entityType: partial.entityType || "Unknown",
+    classification: partial.classification || "Unknown",
     uei: partial.uei || "PENDING",
     ein: partial.ein || "PENDING",
-    location: { ...defaults.location, ...(partial.location || {}) },
-    leadership: { ...defaults.leadership, ...(partial.leadership || {}) },
+    location: { city: "", state: "", stateCode: "", county: "", region: "", congressionalDistrict: "", ...(partial.location || {}) },
+    leadership: { executiveDirector: "", cfo: "", boardChair: "", grantsPOC: "", ...(partial.leadership || {}) },
     financials: {
       annualRevenue: partial.financials?.annualRevenue || 0,
       operatingBudget: partial.financials?.operatingBudget || 0,
@@ -123,13 +123,19 @@ function buildSectionPrompt(
   entity: EntityProfile,
   grantReqs: GrantRequirements
 ): string {
+  // Build project context dynamically from entity's current projects
+  const projectLines = entity.currentProjects.length > 0
+    ? entity.currentProjects.map(p => `- ${p.name}: ${p.description} (Cost: $${(p.totalCost / 1_000_000).toFixed(0)}M, Status: ${p.status})`).join("\n")
+    : "No current projects on file. [NEEDS: project details from applicant]";
+
   return `You are an expert federal grant writer specializing in maritime and transportation infrastructure grants. Write the "${section.title}" section for a ${grantReqs.programName} application.
 
 APPLICANT: ${entity.name} (${entity.legalName})
 Location: ${entity.location.city}, ${entity.location.state} (${entity.location.congressionalDistrict})
-Entity Type: ${entity.entityType} — ${entity.classification}
+Entity Type: ${entity.entityType} - ${entity.classification}
 
-PROJECT: Freeport Harbor Channel Improvement Project (FHCIP) — Deepening the Freeport Harbor Channel from 46 ft to 56 ft MLLW in partnership with USACE, combined with Velasco Terminal Phase 2 expansion and zero-emission equipment deployment.
+CURRENT PROJECTS (use these as the basis for this application - select the most relevant project or combination of projects that align with the grant program):
+${projectLines}
 
 GRANT PROGRAM: ${grantReqs.programName}
 Agency: ${grantReqs.agency}
@@ -206,16 +212,16 @@ COMMUNITY IMPACT PROGRAMS:
 ${entity.communityImpact.map(c => `- ${c}`).join("\n")}
 
 INSTRUCTIONS:
-1. Write in formal federal grant prose — the kind a port director or CFO would recognize as a credible first draft.
+1. Write in formal federal grant prose - the kind a port director or CFO would recognize as a credible first draft.
 2. Optimize for the evaluation criteria above. Each criterion should be clearly addressed.
-3. Use specific data from the applicant background. Cite real numbers — tonnage, jobs, economic impact, past awards.
-4. Where data is missing or you need human verification, insert an inline annotation in exactly this format: [NEEDS: specific description of what's missing]. Be specific, not generic — e.g., "[NEEDS: updated Phase 2 construction cost estimate from engineer]" not "[NEEDS: more information]".
+3. Use specific data from the applicant background. Cite real numbers - tonnage, jobs, economic impact, past awards.
+4. Where data is missing or you need human verification, insert an inline annotation in exactly this format: [NEEDS: specific description of what's missing]. Be specific, not generic - e.g., "[NEEDS: updated Phase 2 construction cost estimate from engineer]" not "[NEEDS: more information]".
 5. Stay within the word limit of ${section.maxWords} words.
 6. Do NOT hallucinate data. If a specific number or fact is not provided above, flag it with a [NEEDS: ...] annotation.
-7. Structure with clear paragraphs. Use no markdown headers — this will be rendered as flowing prose sections.
-8. Reference the PIDP statutory priorities and DOT strategic goals where relevant.
+7. Structure with clear paragraphs. Use no markdown headers - this will be rendered as flowing prose sections.
+8. Reference the ${grantReqs.programName} priorities and ${grantReqs.agency || "federal agency"} strategic goals where relevant.
 
-Write the complete section now. Output ONLY the section text — no preamble, no meta-commentary.`;
+Write the complete section now. Output ONLY the section text - no preamble, no meta-commentary.`;
 }
 
 function assessConfidence(
@@ -236,42 +242,50 @@ function assessConfidence(
 }
 
 function assessAttachments(entity: EntityProfile, grantReqs: GrantRequirements): AttachmentStatus[] {
-  return grantReqs.requiredAttachments.map((att) => {
-    switch (att.id) {
-      case "sf424":
-        return { ...att, status: "needs_preparation" as const, notes: "Standard form — populate from entity registration data (UEI, EIN, DUNS)." };
-      case "sf424c":
-        return { ...att, status: "needs_preparation" as const, notes: "Requires detailed construction budget breakdown from project engineer." };
-      case "bca-spreadsheet":
-        return { ...att, status: "needs_preparation" as const, notes: "BCA spreadsheet must be developed using DOT-approved methodology. Consider engaging economic consultant." };
-      case "project-schedule":
-        return { ...att, status: "needs_preparation" as const, notes: "Gantt chart needed from project manager showing milestones through completion." };
-      case "letters-of-support":
-        return { ...att, status: "needs_preparation" as const, notes: "Obtain letters from USACE, TX-14 Congressional office, Brazoria County, BNSF Railway, and local workforce board." };
-      case "environmental-docs":
-        return {
-          ...att,
-          status: "on_file" as const,
-          notes: "NEPA documentation available from USACE for FHCIP. Verify current status and obtain copy of Record of Decision or Finding of No Significant Impact.",
-        };
-      case "financial-statements":
-        return { ...att, status: "on_file" as const, notes: `FY${new Date().getFullYear() - 1} audited financials on file. Bond rating: ${entity.financials.bondRating}.` };
-      case "match-commitment":
-        return {
-          ...att,
-          status: "needs_preparation" as const,
-          notes: `Board resolution needed committing ${grantReqs.costShareMinimum}% match ($${(grantReqs.costShareMinimum * grantReqs.maxAward / 100 / 1_000_000).toFixed(0)}M at max award). Match capacity: $${(entity.financials.matchFundingCapacity / 1_000_000).toFixed(0)}M available.`,
-        };
-      case "maps-drawings":
-        return { ...att, status: "on_file" as const, notes: "Site maps and preliminary engineering drawings available from FHCIP and Velasco Terminal Phase 2 planning." };
-      case "equity-analysis":
-        return { ...att, status: "needs_preparation" as const, notes: "Generate CEJST and EJScreen reports for census tracts 48039-7101, 7102, 7103. Data points available in entity profile." };
-      case "resilience-assessment":
-        return { ...att, status: "needs_preparation" as const, notes: "Compile from existing Port Hurricane Preparedness Plan and FHCIP engineering resilience analysis." };
-      default:
-        return { ...att, status: "missing" as const, notes: "Status unknown — verify with grants team." };
-    }
-  });
+  // If the NOFO provided required attachments, use those
+  if (grantReqs.requiredAttachments.length > 0) {
+    return grantReqs.requiredAttachments.map((att) => {
+      const id = att.id.toLowerCase();
+      // Generic assessment based on common attachment types
+      if (id.includes("sf424") || id.includes("sf-424")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Standard form - populate from entity registration data (UEI, EIN)." };
+      }
+      if (id.includes("budget") || id.includes("sf424c")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Requires detailed budget breakdown from project team." };
+      }
+      if (id.includes("bca") || id.includes("benefit-cost")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Benefit-cost analysis must use agency-approved methodology." };
+      }
+      if (id.includes("financial") || id.includes("audit")) {
+        const bondNote = entity.financials.bondRating && entity.financials.bondRating !== "Not rated"
+          ? ` Bond rating: ${entity.financials.bondRating}.`
+          : "";
+        return { ...att, status: "needs_preparation" as const, notes: `Provide most recent audited financial statements.${bondNote}` };
+      }
+      if (id.includes("letter") || id.includes("support")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Obtain letters from partner agencies, elected officials, and stakeholders." };
+      }
+      if (id.includes("environmental") || id.includes("nepa")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Provide NEPA documentation or status letter from lead federal agency." };
+      }
+      if (id.includes("match") || id.includes("commitment")) {
+        const matchNote = grantReqs.costShareMinimum > 0
+          ? `Board resolution needed committing ${grantReqs.costShareMinimum}% match.`
+          : "Documentation of any committed matching funds.";
+        return { ...att, status: "needs_preparation" as const, notes: matchNote };
+      }
+      if (id.includes("schedule") || id.includes("gantt") || id.includes("timeline")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Project schedule showing milestones and critical path." };
+      }
+      if (id.includes("map") || id.includes("drawing") || id.includes("diagram")) {
+        return { ...att, status: "needs_preparation" as const, notes: "Site maps and relevant engineering or design drawings." };
+      }
+      return { ...att, status: "needs_preparation" as const, notes: "Verify requirements with grants team." };
+    });
+  }
+
+  // No attachments specified - return empty list
+  return [];
 }
 
 export async function POST(req: Request) {
@@ -284,18 +298,42 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const _grantId = body.grantId || "pidp-fy2026";
-    const _portName = body.portName || "Port Freeport";
+    const grantTitle = body.grantTitle || body.grantId || "Grant Application";
 
-    // Use uploaded/extracted profile if provided, otherwise fall back to hardcoded demo
-    const entity: EntityProfile = body.entityProfile
-      ? mergeWithDefaults(body.entityProfile)
-      : PORT_FREEPORT_ENTITY;
+    // Require entity profile
+    if (!body.entityProfile) {
+      return new Response(
+        JSON.stringify({ error: "Entity profile is required. Complete the research phase first." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const entity: EntityProfile = mergeWithDefaults(body.entityProfile);
 
-    // Use custom grant sections if provided (from NOFO extraction), otherwise use PIDP defaults
-    const grantReqs: GrantRequirements = body.grantRequirements
-      ? { ...PIDP_FY2026, ...body.grantRequirements }
-      : PIDP_FY2026;
+    // Require real grant requirements (from NOFO extraction)
+    if (!body.grantRequirements?.sections?.length) {
+      return new Response(
+        JSON.stringify({ error: "Grant requirements are required. Upload the NOFO document first." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const grantReqs: GrantRequirements = {
+      grantId: body.grantId || "unknown",
+      programName: body.grantRequirements.programName || grantTitle,
+      agency: body.grantRequirements.agency || "Unknown Agency",
+      nofoNumber: body.grantRequirements.nofoNumber || "",
+      fiscalYear: body.grantRequirements.fiscalYear || new Date().getFullYear(),
+      totalFunding: body.grantRequirements.totalFunding || 0,
+      maxAward: body.grantRequirements.maxAward || 0,
+      minAward: body.grantRequirements.minAward || 0,
+      costShareRequired: body.grantRequirements.costShareRequired ?? false,
+      costShareMinimum: body.grantRequirements.costShareMinimum || body.grantRequirements.costSharePercentage || 0,
+      applicationDeadline: body.grantRequirements.applicationDeadline || body.grantRequirements.submissionDeadline || "",
+      sections: body.grantRequirements.sections,
+      requiredAttachments: body.grantRequirements.requiredAttachments || [],
+      evaluationProcess: body.grantRequirements.evaluationProcess || "",
+      selectionPriorities: body.grantRequirements.selectionPriorities || [],
+    };
 
     // Generate all sections in parallel for speed
     const sectionPromises = grantReqs.sections.map(async (section): Promise<SectionDraft> => {

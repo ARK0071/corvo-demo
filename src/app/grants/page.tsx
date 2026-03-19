@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-// Tabs UI removed — sidebar drives navigation via ?tab= param
+// Tabs UI removed - sidebar drives navigation via ?tab= param
 import {
   Award,
   Search,
@@ -47,7 +47,6 @@ import { addPortVendors } from "@/data/port-vendors";
 import { OutreachEmail } from "@/components/grant-match/outreach-email";
 import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
 import { useProfile } from "@/components/profile-provider";
-import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
   getAllProjects,
   createProject,
@@ -532,7 +531,7 @@ function UnifiedGrantsDashboard() {
           </div>
         </div>
 
-        {/* Tab content — tab selection driven by URL ?tab= param, sidebar provides navigation */}
+        {/* Tab content - tab selection driven by URL ?tab= param, sidebar provides navigation */}
         <div className="w-full">
           {activeTab === "discover" && (
             <div className="mt-2">
@@ -1615,7 +1614,7 @@ function UnifiedGrantsDashboard() {
                     <option value="">Choose a project...</option>
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name} - {formatCurrency(p.budget)}
+                        {p.name} ({formatCurrency(p.budget)})
                       </option>
                     ))}
                   </select>
@@ -1807,9 +1806,6 @@ function UnifiedGrantsDashboard() {
         </div>
       </div>
     </div>
-
-    {/* Corvo Grant Intelligence Chat Sidebar */}
-    <GrantIntelligenceChatSidebar />
   </>
   );
 }

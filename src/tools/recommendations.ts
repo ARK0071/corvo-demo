@@ -44,11 +44,11 @@ export function generateVendorRecommendations(params: {
         estimatedSavings += Math.round(v.annualSpend * 0.08);
         priority = "high";
       } else if (contract?.autoRenew && (contract?.aboveMarketPercent || 0) > 10) {
-        actions.push(`Contract auto-renewing at ${contract.aboveMarketPercent}% above market — intervene before renewal`);
+        actions.push(`Contract auto-renewing at ${contract.aboveMarketPercent}% above market - intervene before renewal`);
         estimatedSavings += Math.round(v.annualSpend * (contract.aboveMarketPercent / 100));
         priority = "high";
       } else if (contract?.status === "expiring_soon") {
-        actions.push("Begin renewal negotiations — contract expiring within 90 days");
+        actions.push("Begin renewal negotiations - contract expiring within 90 days");
         estimatedSavings += Math.round(v.annualSpend * 0.05);
         priority = "high";
       }
@@ -70,12 +70,12 @@ export function generateVendorRecommendations(params: {
 
       // Check risk score
       if (v.riskScore > 30) {
-        actions.push("Elevated supplier risk — develop contingency plan");
+        actions.push("Elevated supplier risk - develop contingency plan");
         if (priority === "low") priority = "medium";
       }
 
       if (actions.length === 0) {
-        actions.push("Maintain current relationship — no immediate action needed");
+        actions.push("Maintain current relationship - no immediate action needed");
       }
 
       return {
@@ -152,7 +152,7 @@ export async function assessCommodityBuyTiming(params: {
     currentVsAvg: `${trend.percentFromAvg > 0 ? "+" : ""}${trend.percentFromAvg}%`,
     inventoryStatus: {
       currentWeeks: currentInventoryWeeks,
-      assessment: currentInventoryWeeks < 4 ? "Low inventory — increased urgency" : "Adequate inventory levels",
+      assessment: currentInventoryWeeks < 4 ? "Low inventory - increased urgency" : "Adequate inventory levels",
     },
     recommendation: {
       action: expectedPriceIncrease > 3 ? "BUY" : expectedPriceIncrease > 0 ? "PARTIAL BUY" : "HOLD",
@@ -351,10 +351,10 @@ export function identifyAlternativeSuppliers(params: {
       diversityStatus: v.diversityStatus,
       yearOnboarded: v.yearOnboarded,
       assessment: v.riskScore < 15
-        ? "Low risk — strong alternative"
+        ? "Low risk - strong alternative"
         : v.riskScore < 25
-          ? "Moderate risk — viable alternative"
-          : "Higher risk — requires due diligence",
+          ? "Moderate risk - viable alternative"
+          : "Higher risk - requires due diligence",
     })),
     recommendation: alternatives.length > 0
       ? `${alternatives.length} alternative suppliers identified. Top recommendation: ${alternatives[0].name} (${formatCurrency(alternatives[0].annualSpend)} existing spend, risk score: ${alternatives[0].riskScore}/100).`
@@ -445,12 +445,12 @@ export function generateBusinessCase(params: {
       ],
     },
     recommendation: roi > 200
-      ? "STRONG APPROVE — Exceptional ROI with low implementation risk"
+      ? "STRONG APPROVE - Exceptional ROI with low implementation risk"
       : roi > 100
-        ? "APPROVE — Solid business case with good return on investment"
+        ? "APPROVE - Solid business case with good return on investment"
         : roi > 50
-          ? "CONDITIONAL APPROVE — Moderate ROI, ensure scope is well-defined"
-          : "REVIEW — Low ROI, consider alternative approaches",
+          ? "CONDITIONAL APPROVE - Moderate ROI, ensure scope is well-defined"
+          : "REVIEW - Low ROI, consider alternative approaches",
   };
 }
 

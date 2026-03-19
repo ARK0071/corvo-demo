@@ -1,5 +1,5 @@
 /**
- * LAWA — Los Angeles World Airports Profile
+ * LAWA - Los Angeles World Airports Profile
  * Temporary profile for airport customer demo
  */
 
@@ -36,8 +36,8 @@ export const lawaProfile: PortProfile = {
   ],
 
   capabilities: [
-    "LAX — one of the world's busiest airports (87M+ annual passengers)",
-    "Van Nuys Airport (VNY) — busiest general aviation airport in the world",
+    "LAX - one of the world's busiest airports (87M+ annual passengers)",
+    "Van Nuys Airport (VNY) - busiest general aviation airport in the world",
     "Major international air cargo hub",
     "Automated People Mover (APM) transit system",
     "Consolidated Rent-A-Car (ConRAC) facility",

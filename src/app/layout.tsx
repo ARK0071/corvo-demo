@@ -3,6 +3,7 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ProfileProvider } from "@/components/profile-provider";
 import AppLayout from "@/components/app-layout";
 import "./globals.css";
 
@@ -17,15 +18,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" className="light" suppressHydrationWarning>
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider>
-          <TooltipProvider>
-            <AppLayout>{children}</AppLayout>
-          </TooltipProvider>
+          <ProfileProvider>
+            <TooltipProvider>
+              <AppLayout>{children}</AppLayout>
+            </TooltipProvider>
+          </ProfileProvider>
         </ThemeProvider>
       </body>
     </html>

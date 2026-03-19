@@ -106,7 +106,7 @@ export interface EntityProfile {
 }
 
 /**
- * Port Freeport — Full Entity Profile
+ * Port Freeport - Full Entity Profile
  */
 export const PORT_FREEPORT_ENTITY: EntityProfile = {
   name: "Port Freeport",
@@ -142,18 +142,18 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
 
   infrastructure: {
     terminalFacilities: [
-      "Velasco Terminal — Container and general cargo, 2 berths, 500,000 TEU capacity",
-      "Parcel Terminal — Bulk and breakbulk cargo, 4 berths",
-      "Liquid Cargo Dock — Chemical and petroleum product transfers",
-      "Phillips 66/Freeport LNG — Adjacent private terminals with shared channel",
+      "Velasco Terminal - Container and general cargo, 2 berths, 500,000 TEU capacity",
+      "Parcel Terminal - Bulk and breakbulk cargo, 4 berths",
+      "Liquid Cargo Dock - Chemical and petroleum product transfers",
+      "Phillips 66/Freeport LNG - Adjacent private terminals with shared channel",
     ],
     channelDepth: 46,
     channelWidth: 400,
     berths: 8,
     railConnections: [
-      "BNSF Railway — direct rail access to Velasco Terminal",
-      "Union Pacific — interchange via BNSF connection",
-      "SH 36 corridor — dedicated port access road",
+      "BNSF Railway - direct rail access to Velasco Terminal",
+      "Union Pacific - interchange via BNSF connection",
+      "SH 36 corridor - dedicated port access road",
     ],
     acreage: 250,
   },
@@ -187,15 +187,15 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
       description:
         "Deepening the Freeport Harbor Channel from 46 ft to 56 ft MLLW, widening select reaches, and extending the channel to accommodate Post-Panamax vessels. Federal-local cost-share project with USACE Galveston District.",
       totalCost: 295_000_000,
-      status: "Under construction — Phase 1 dredging underway",
-      partnerAgencies: ["U.S. Army Corps of Engineers (USACE) — Galveston District"],
+      status: "Under construction - Phase 1 dredging underway",
+      partnerAgencies: ["U.S. Army Corps of Engineers (USACE) - Galveston District"],
     },
     {
       name: "Velasco Terminal Phase 2 Expansion",
       description:
         "Expansion of the Velasco Container Terminal including 2 additional berths, 40-acre container yard expansion, new intermodal rail facility, and upgraded crane infrastructure to increase capacity to 800,000 TEU.",
       totalCost: 180_000_000,
-      status: "Design — 60% engineering complete",
+      status: "Design - 60% engineering complete",
       partnerAgencies: ["BNSF Railway"],
     },
     {
@@ -203,7 +203,7 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
       description:
         "Procurement of 8 electric RTG cranes, 20 electric yard tractors, shore power systems for 4 berths, and on-site battery storage and charging infrastructure.",
       totalCost: 45_000_000,
-      status: "Procurement — RFP for electric RTGs released",
+      status: "Procurement - RFP for electric RTGs released",
       partnerAgencies: ["EPA Region 6", "Texas Commission on Environmental Quality"],
     },
   ],
@@ -213,7 +213,7 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
       program: "PIDP",
       awardYear: 2021,
       awardAmount: 22_000_000,
-      projectName: "Velasco Terminal Phase 1 — Crane and Berth Improvements",
+      projectName: "Velasco Terminal Phase 1 - Crane and Berth Improvements",
       agency: "MARAD",
       status: "Completed",
     },
@@ -237,7 +237,7 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
       program: "RAISE",
       awardYear: 2023,
       awardAmount: 15_000_000,
-      projectName: "Intermodal Rail Connectivity — Velasco Terminal Rail Spur",
+      projectName: "Intermodal Rail Connectivity - Velasco Terminal Rail Spur",
       agency: "USDOT",
       status: "In progress",
     },
@@ -246,7 +246,7 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
   certifications: [
     "Green Marine Environmental Certification (Level 3)",
     "ISO 14001 Environmental Management System",
-    "OSHA Voluntary Protection Program — Star Site",
+    "OSHA Voluntary Protection Program - Star Site",
     "C-TPAT Partner",
     "MTSA-compliant Facility Security Plan",
   ],
@@ -270,11 +270,11 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
   ],
 
   communityImpact: [
-    "Workforce Development Center — annual training for 200+ local workers in maritime logistics, heavy equipment, and safety certifications",
-    "Port Freeport Scholarship Program — $500K annual scholarships to Brazoria County students",
-    "Community Advisory Panel — quarterly meetings with Freeport, Quintana, and Jones Creek residents",
-    "Local First Procurement Policy — 35% of operating spend directed to Brazoria County businesses",
-    "Environmental Justice Initiative — community air quality monitoring at 6 fence-line stations",
+    "Workforce Development Center - annual training for 200+ local workers in maritime logistics, heavy equipment, and safety certifications",
+    "Port Freeport Scholarship Program - $500K annual scholarships to Brazoria County students",
+    "Community Advisory Panel - quarterly meetings with Freeport, Quintana, and Jones Creek residents",
+    "Local First Procurement Policy - 35% of operating spend directed to Brazoria County businesses",
+    "Environmental Justice Initiative - community air quality monitoring at 6 fence-line stations",
   ],
 
   disadvantagedCommunityData: {
@@ -288,8 +288,8 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
 
   climateResilienceData: {
     floodZone: "AE (100-year coastal flood zone)",
-    hurricaneExposure: "High — Category 3+ hurricane return period approximately 15 years. Facility directly impacted by Hurricane Harvey (2017).",
-    emissionsBaseline: "42,000 metric tons CO2e (2019 baseline — Scope 1 and 2)",
+    hurricaneExposure: "High - Category 3+ hurricane return period approximately 15 years. Facility directly impacted by Hurricane Harvey (2017).",
+    emissionsBaseline: "42,000 metric tons CO2e (2019 baseline - Scope 1 and 2)",
     emissionsReductionTarget: "50% reduction by 2030; carbon neutrality by 2040",
     existingMitigations: [
       "Hurricane preparedness and evacuation plan (updated annually)",
@@ -298,7 +298,7 @@ export const PORT_FREEPORT_ENTITY: EntityProfile = {
       "Elevated electrical infrastructure at new berths",
     ],
     plannedMitigations: [
-      "Green infrastructure — 15-acre bioswale and retention system",
+      "Green infrastructure - 15-acre bioswale and retention system",
       "Elevation of remaining electrical systems above 500-year flood level",
       "Living shoreline pilot along Brazos River entrance",
       "Resilient pavement and drainage upgrades across container yard",

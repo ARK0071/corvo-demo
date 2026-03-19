@@ -64,7 +64,7 @@ export const procurementTools = {
   },
 
   analyze_maverick_spend: {
-    description: "Identify off-contract (maverick) purchases — transactions with contracted vendors that were made outside their contract terms.",
+    description: "Identify off-contract (maverick) purchases - transactions with contracted vendors that were made outside their contract terms.",
     inputSchema: z.object({
       category: z.string().optional().describe("Category to filter by"),
     }),

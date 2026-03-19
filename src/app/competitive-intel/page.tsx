@@ -72,7 +72,7 @@ function fmt(n: number): string {
 }
 
 function fmtDate(d: string | null): string {
-  if (!d) return "—";
+  if (!d) return "-";
   try {
     return new Date(d).toLocaleDateString("en-US", {
       month: "short",
@@ -427,7 +427,7 @@ function SimpleTable({
                 >
                   {c.format
                     ? c.format(row[c.key])
-                    : String(row[c.key] ?? "—")}
+                    : String(row[c.key] ?? "-")}
                 </td>
               ))}
             </tr>

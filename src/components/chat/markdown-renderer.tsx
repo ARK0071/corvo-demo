@@ -115,7 +115,7 @@ const components: Components = {
 const remarkPlugins = [remarkGfm];
 
 function MarkdownRendererInner({ content }: { content: string }) {
-  // Memoize the rendered output — only re-render when content string changes
+  // Memoize the rendered output - only re-render when content string changes
   return useMemo(
     () => (
       <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>

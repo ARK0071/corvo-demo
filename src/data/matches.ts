@@ -103,7 +103,7 @@ function scoreCapabilityAlignment(vendor: PortVendor, grant: GrantProgram): numb
     if (vendorKeywords.has(kw)) {
       keywordMatches++;
     } else {
-      // Partial match — check if any vendor keyword contains this grant keyword or vice versa
+      // Partial match - check if any vendor keyword contains this grant keyword or vice versa
       for (const vk of vendorKeywords) {
         if (vk.includes(kw) || kw.includes(vk)) {
           keywordMatches += 0.5;
@@ -114,7 +114,7 @@ function scoreCapabilityAlignment(vendor: PortVendor, grant: GrantProgram): numb
   }
   const keywordScore = Math.min(100, (keywordMatches / Math.max(grantKeywords.size, 1)) * 120);
 
-  // 4. Sector affinity bonus — does the vendor's sector naturally align with this grant?
+  // 4. Sector affinity bonus - does the vendor's sector naturally align with this grant?
   let sectorScore = 0;
   const sectorAffinityTerms = SECTOR_GRANT_AFFINITY[vendor.sector];
   if (sectorAffinityTerms) {
@@ -125,7 +125,7 @@ function scoreCapabilityAlignment(vendor: PortVendor, grant: GrantProgram): numb
     sectorScore = Math.min(100, (sectorHits / Math.max(sectorAffinityTerms.length * 0.3, 1)) * 100);
   }
 
-  // 5. Past project relevance — vendors with real federal projects matching grant areas
+  // 5. Past project relevance - vendors with real federal projects matching grant areas
   let projectScore = 0;
   if (vendor.pastPortProjects.length > 0) {
     let projMatches = 0;
@@ -195,7 +195,7 @@ function scoreCertificationMatch(vendor: PortVendor, grant: GrantProgram): numbe
   // Weight: federal designations 45%, industry certs 35%, DBE bonus 20%
   let score = Math.round(federalScore * 0.45 + industryScore * 0.35);
 
-  // DBE/small business bonus — significant advantage in federal scoring
+  // DBE/small business bonus - significant advantage in federal scoring
   if (vendor.disadvantagedBusiness) {
     score += 25;
   }
@@ -206,7 +206,7 @@ function scoreCertificationMatch(vendor: PortVendor, grant: GrantProgram): numbe
 function scoreGeographicFit(vendor: PortVendor): number {
   const hq = vendor.headquarters.toLowerCase();
 
-  // US state abbreviations — SAM.gov returns real addresses
+  // US state abbreviations - SAM.gov returns real addresses
   const usStates = [
     "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
     "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
@@ -253,8 +253,8 @@ function identifyStrengths(vendor: PortVendor, grant: GrantProgram, dims: MatchD
   if (dims.capabilityAlignment >= 60) strengths.push(`Strong capability alignment with ${grant.shortName} requirements`);
   if (dims.certificationMatch >= 60) strengths.push("Holds relevant certifications/designations for the program");
   if (vendor.disadvantagedBusiness) strengths.push(`${vendor.disadvantagedBusiness} designation provides federal scoring advantage`);
-  if (dims.geographicFit >= 80) strengths.push("US-based — meets domestic preference requirements");
-  if (dims.financialCapacity >= 65) strengths.push(`Proven federal contractor — $${(vendor.annualRevenue / 1_000_000).toFixed(0)}M in federal awards`);
+  if (dims.geographicFit >= 80) strengths.push("US-based - meets domestic preference requirements");
+  if (dims.financialCapacity >= 65) strengths.push(`Proven federal contractor - $${(vendor.annualRevenue / 1_000_000).toFixed(0)}M in federal awards`);
   if (vendor.pastPortProjects.length >= 3) strengths.push(`${vendor.pastPortProjects.length} documented federal projects in relevant NAICS codes`);
   if (vendor.capabilities.length >= 5) strengths.push(`Diverse capabilities (${vendor.capabilities.length} NAICS/PSC codes)`);
   return strengths.slice(0, 4);
@@ -263,17 +263,17 @@ function identifyStrengths(vendor: PortVendor, grant: GrantProgram, dims: MatchD
 function identifyGaps(vendor: PortVendor, grant: GrantProgram, dims: MatchDimensions): string[] {
   const gaps: string[] = [];
   if (dims.capabilityAlignment < 40) gaps.push(`Limited capability alignment with ${grant.shortName} focus areas`);
-  if (dims.certificationMatch < 40) gaps.push("No federal small-business designations on file — may limit scoring");
+  if (dims.certificationMatch < 40) gaps.push("No federal small-business designations on file - may limit scoring");
   if (dims.geographicFit < 60) gaps.push("Non-US headquarters may create Buy America compliance challenges");
-  if (dims.financialCapacity < 50) gaps.push("Limited federal award history — may need to demonstrate bonding capacity");
-  if (vendor.pastPortProjects.length === 0) gaps.push("No documented federal projects — past performance may be hard to demonstrate");
+  if (dims.financialCapacity < 50) gaps.push("Limited federal award history - may need to demonstrate bonding capacity");
+  if (vendor.pastPortProjects.length === 0) gaps.push("No documented federal projects - past performance may be hard to demonstrate");
   if (grant.matchRequirement > 0) {
-    gaps.push(`Grant requires ${(grant.matchRequirement * 100).toFixed(0)}% local cost-share — verify funding availability`);
+    gaps.push(`Grant requires ${(grant.matchRequirement * 100).toFixed(0)}% local cost-share - verify funding availability`);
   }
   return gaps.slice(0, 3);
 }
 
-// Weights for overall score — adapted for USASpending data
+// Weights for overall score - adapted for USASpending data
 const WEIGHTS = {
   capabilityAlignment: 0.40,
   certificationMatch: 0.25,
@@ -316,7 +316,7 @@ export function scoreVendorForGrant(vendor: PortVendor, grant: GrantProgram): Gr
   };
 }
 
-// Mutable match matrix — populated on demand
+// Mutable match matrix - populated on demand
 export const matchMatrix: GrantVendorMatch[] = [];
 
 export function getTopMatchesForGrant(grantId: string, limit: number = 10): GrantVendorMatch[] {

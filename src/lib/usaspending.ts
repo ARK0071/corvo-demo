@@ -102,7 +102,7 @@ interface CacheEntry<T> {
 }
 
 const cache = new Map<string, CacheEntry<unknown>>();
-const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours — USASpending data changes slowly
+const CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours - USASpending data changes slowly
 
 function getCached<T>(key: string): T | null {
   const entry = cache.get(key);
@@ -332,8 +332,8 @@ export function mapRecipientToVendor(
   const totalTransactions = profile?.total_transactions || 0;
 
   const description = profile
-    ? `${profile.name} — ${headquarters}. Total federal awards: $${(totalAwards / 1_000_000).toFixed(1)}M across ${totalTransactions} transactions.${profile.parent_name ? ` Subsidiary of ${profile.parent_name}.` : ""}`
-    : `${recipient.name} — Federal contractor with $${(recipient.amount / 1_000_000).toFixed(1)}M in awards.`;
+    ? `${profile.name} - ${headquarters}. Total federal awards: $${(totalAwards / 1_000_000).toFixed(1)}M across ${totalTransactions} transactions.${profile.parent_name ? ` Subsidiary of ${profile.parent_name}.` : ""}`
+    : `${recipient.name} - Federal contractor with $${(recipient.amount / 1_000_000).toFixed(1)}M in awards.`;
 
   return {
     id: recipient.uei || recipient.recipient_id,
@@ -530,7 +530,7 @@ export async function searchAwardVendors(params: {
       safetyRecord: 0.8,
       disadvantagedBusiness: null,
       keyPersonnel: [],
-      description: `${v.name} — ${headquarters}. ${v.awardCount} federal contract${v.awardCount !== 1 ? "s" : ""} totaling $${(v.totalAmount / 1_000_000).toFixed(1)}M.${agencyList ? ` Agencies: ${agencyList}.` : ""}`,
+      description: `${v.name} - ${headquarters}. ${v.awardCount} federal contract${v.awardCount !== 1 ? "s" : ""} totaling $${(v.totalAmount / 1_000_000).toFixed(1)}M.${agencyList ? ` Agencies: ${agencyList}.` : ""}`,
     });
   }
 

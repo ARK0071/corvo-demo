@@ -31,9 +31,10 @@ import {
 import {
   getAllProjects,
   getProjectStats,
-  initializePortFreeportProjects,
+  initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
+import { useProfile } from "@/components/profile-provider";
 
 // ─── Helpers ───
 
@@ -66,6 +67,7 @@ interface NewsArticle {
 // ─── Page ───
 
 export default function PorterDashboardPage() {
+  const { profileId } = useProfile();
   const [pipeline, setPipeline] = useState<PipelineGrant[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectStats, setProjectStats] = useState<ReturnType<typeof getProjectStats> | null>(null);
@@ -73,7 +75,7 @@ export default function PorterDashboardPage() {
   const [newsLoading, setNewsLoading] = useState(true);
 
   useEffect(() => {
-    initializePortFreeportProjects();
+    initializeProjectsForProfile(profileId);
     setPipeline(getAllPipelineGrants());
     setProjects(getAllProjects());
     setProjectStats(getProjectStats());
@@ -128,7 +130,7 @@ export default function PorterDashboardPage() {
           Porter Dashboard
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Port Freeport — grant pipeline, projects, and news at a glance.
+          Port Freeport grant pipeline, projects, and news at a glance.
         </p>
       </div>
 
@@ -253,7 +255,7 @@ export default function PorterDashboardPage() {
                             : ""
                         }`}
                       >
-                        {days !== null ? `${days}d` : "—"}
+                        {days !== null ? `${days}d` : "-"}
                       </Badge>
                     </div>
                   );

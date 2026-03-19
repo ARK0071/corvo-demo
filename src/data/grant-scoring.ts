@@ -307,7 +307,7 @@ function scoreCompetitiveness(grant: DiscoveredGrant, profile: PortProfile): {
     factors.push(`Regional focus matches ${profile.name} location`);
   }
 
-  // Sector focus — port/maritime or airport/aviation depending on profile
+  // Sector focus - port/maritime or airport/aviation depending on profile
   const sectorFocus = isAirport
     ? grant.fundingCategories.some((c) => c.toLowerCase().includes("transport")) ||
       grantText.includes("airport") ||
@@ -331,7 +331,7 @@ function scoreCompetitiveness(grant: DiscoveredGrant, profile: PortProfile): {
 
   if (wrongSector) {
     score -= 25;
-    factors.push(isAirport ? "Grant targets port/maritime sector — low relevance for airports" : "Grant targets airport/aviation sector — low relevance for ports");
+    factors.push(isAirport ? "Grant targets port/maritime sector - low relevance for airports" : "Grant targets airport/aviation sector - low relevance for ports");
   }
 
   // Certifications match

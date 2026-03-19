@@ -3,15 +3,15 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Upload, Tags, GitBranch, ListChecks, Settings, Network, Globe2, TrendingUp, Feather, Anchor, Award, Building2, FileUp, BarChart3, Newspaper, Search, Layers, FolderKanban, Users, ChevronDown } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings } from "lucide-react";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
-import { Collapsible } from "radix-ui";
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
+  SidebarFooter,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -19,18 +19,19 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-const corvusItems = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Vendor Upload", url: "/upload", icon: Upload },
-  { title: "Categorization Review", url: "/review", icon: Tags },
-  { title: "Taxonomy Mapper", url: "/taxonomy", icon: GitBranch },
-  { title: "Vendor Graph", url: "/vendor-graph", icon: Network },
-  { title: "Spend Analysis", url: "/spend-analysis", icon: TrendingUp },
-  { title: "Corvus", url: "/", icon: Feather },
-  { title: "Tariff Intelligence", url: "/tariff", icon: Globe2 },
-  { title: "HITL Queue", url: "/queue", icon: ListChecks },
-  { title: "Settings", url: "/settings", icon: Settings },
-];
+// Corvus modules hidden for now – will re-enable later
+// const corvusItems = [
+//   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
+//   { title: "Vendor Upload", url: "/upload", icon: Upload },
+//   { title: "Categorization Review", url: "/review", icon: Tags },
+//   { title: "Taxonomy Mapper", url: "/taxonomy", icon: GitBranch },
+//   { title: "Vendor Graph", url: "/vendor-graph", icon: Network },
+//   { title: "Spend Analysis", url: "/spend-analysis", icon: TrendingUp },
+//   { title: "Corvus", url: "/", icon: Feather },
+//   { title: "Tariff Intelligence", url: "/tariff", icon: Globe2 },
+//   { title: "HITL Queue", url: "/queue", icon: ListChecks },
+//   { title: "Settings", url: "/settings", icon: Settings },
+// ];
 
 const grantMatchItems = [
   { title: "Dashboard", url: "/porter-dashboard", icon: LayoutDashboard },
@@ -85,132 +86,54 @@ function AppSidebarInner() {
         </span>
       </SidebarHeader>
       <SidebarContent>
-        {collapsed ? (
-          <>
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {corvusItems.map((item) => {
-                    const isActive = checkIsActive(item.url);
-                    return (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton asChild>
-                          <Link href={item.url} className={isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}>
-                            <item.icon className="mr-2 h-4 w-4" />
-                            {!collapsed && <span>{item.title}</span>}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {grantMatchItems.map((item) => {
-                    const isActive = checkIsActive(item.url);
-                    const isPipeline = item.title === "Pipeline";
-                    return (
-                      <SidebarMenuItem key={item.title}>
-                        <SidebarMenuButton asChild>
-                          <Link href={item.url} className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
-                            <item.icon className="mr-2 h-4 w-4 shrink-0" />
-                            {!collapsed && (
-                              <>
-                                <span className="flex-1">{item.title}</span>
-                                {isPipeline && (
-                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
-                                    {upcomingCount > 99 ? "99+" : upcomingCount}
-                                  </span>
-                                )}
-                              </>
+        <SidebarGroup>
+          {!collapsed && (
+            <div className="flex items-center gap-2 px-2 py-1">
+              <Anchor className="h-4 w-4" />
+              <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground p-0 font-normal">Porter</SidebarGroupLabel>
+            </div>
+          )}
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {grantMatchItems.map((item) => {
+                const isActive = checkIsActive(item.url);
+                const isPipeline = item.title === "Pipeline";
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild>
+                      <Link href={item.url} className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
+                        <item.icon className="mr-2 h-4 w-4 shrink-0" />
+                        {!collapsed && (
+                          <>
+                            <span className="flex-1">{item.title}</span>
+                            {isPipeline && (
+                              <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
+                                {upcomingCount > 99 ? "99+" : upcomingCount}
+                              </span>
                             )}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </>
-        ) : (
-          <>
-            <SidebarGroup>
-              <Collapsible.Root defaultOpen className="group/collapsible">
-                <Collapsible.Trigger asChild>
-                  <SidebarMenuButton className="w-full justify-between group-data-[collapsible=icon]:hidden">
-                    <span className="flex items-center gap-2">
-                      <Feather className="h-4 w-4" />
-                      <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground p-0 font-normal">Corvus</SidebarGroupLabel>
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=closed]:-rotate-90" />
-                  </SidebarMenuButton>
-                </Collapsible.Trigger>
-                <Collapsible.Content>
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      {corvusItems.map((item) => {
-                        const isActive = checkIsActive(item.url);
-                        return (
-                          <SidebarMenuItem key={item.title}>
-                            <SidebarMenuButton asChild>
-                              <Link href={item.url} className={isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}>
-                                <item.icon className="mr-2 h-4 w-4" />
-                                <span>{item.title}</span>
-                              </Link>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        );
-                      })}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </Collapsible.Content>
-              </Collapsible.Root>
-            </SidebarGroup>
-            <SidebarGroup>
-              <Collapsible.Root defaultOpen className="group/collapsible">
-                <Collapsible.Trigger asChild>
-                  <SidebarMenuButton className="w-full justify-between group-data-[collapsible=icon]:hidden">
-                    <span className="flex items-center gap-2">
-                      <Anchor className="h-4 w-4" />
-                      <SidebarGroupLabel className="text-[10px] uppercase tracking-wider text-muted-foreground p-0 font-normal">Porter</SidebarGroupLabel>
-                    </span>
-                    <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 group-data-[state=closed]:-rotate-90" />
-                  </SidebarMenuButton>
-                </Collapsible.Trigger>
-                <Collapsible.Content>
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      {grantMatchItems.map((item) => {
-                        const isActive = checkIsActive(item.url);
-                        const isPipeline = item.title === "Pipeline";
-                        return (
-                          <SidebarMenuItem key={item.title}>
-                            <SidebarMenuButton asChild>
-                              <Link href={item.url} className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
-                                <item.icon className="mr-2 h-4 w-4 shrink-0" />
-                                <span className="flex-1">{item.title}</span>
-                                {isPipeline && (
-                                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
-                                    {upcomingCount > 99 ? "99+" : upcomingCount}
-                                  </span>
-                                )}
-                              </Link>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        );
-                      })}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </Collapsible.Content>
-              </Collapsible.Root>
-            </SidebarGroup>
-          </>
-        )}
+                          </>
+                        )}
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="border-t">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild>
+              <Link href="/settings" className={`flex items-center w-full ${checkIsActive("/settings") ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
+                <Settings className="mr-2 h-4 w-4 shrink-0" />
+                {!collapsed && <span>Settings</span>}
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </Sidebar>
   );
 }

@@ -69,7 +69,7 @@ export function matchGrantsToVendorProfile(params: {
 }) {
   const vendor = getPortVendorById(params.vendorId);
   if (!vendor) {
-    return { error: `Vendor not found: ${params.vendorId}. Vendors are loaded dynamically from federal data — use the Vendor Directory to search first.` };
+    return { error: `Vendor not found: ${params.vendorId}. Vendors are loaded dynamically from federal data - use the Vendor Directory to search first.` };
   }
 
   const limit = params.limit || 5;

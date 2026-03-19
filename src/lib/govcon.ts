@@ -226,7 +226,7 @@ export function mapGovConEntityToVendor(entity: GovConEntity): PortVendor {
   const naicsDescs = assertions?.goodsAndServices?.naicsList?.map((n) => n.naicsDescription) || [];
   const description = naicsDescs.length > 0
     ? `${reg.legalBusinessName} specializes in ${naicsDescs.slice(0, 3).join(", ")}. Registered in GovCon (UEI: ${reg.uei}).`
-    : `${reg.legalBusinessName} — GovCon registered entity (UEI: ${reg.uei}).`;
+    : `${reg.legalBusinessName} - GovCon registered entity (UEI: ${reg.uei}).`;
 
   return {
     id: reg.uei,
@@ -370,7 +370,7 @@ export async function searchGovConEntities(
       safetyRecord: 0.8,
       disadvantagedBusiness: null,
       keyPersonnel: [],
-      description: `${v.name} — ${headquarters}. ${v.awardCount} federal award${v.awardCount !== 1 ? "s" : ""} totaling $${(v.totalAmount / 1_000_000).toFixed(1)}M.${agencyList ? ` Agencies: ${agencyList}.` : ""}`,
+      description: `${v.name} - ${headquarters}. ${v.awardCount} federal award${v.awardCount !== 1 ? "s" : ""} totaling $${(v.totalAmount / 1_000_000).toFixed(1)}M.${agencyList ? ` Agencies: ${agencyList}.` : ""}`,
     };
   });
 
@@ -380,7 +380,7 @@ export async function searchGovConEntities(
 }
 
 // ─── GovCon Opportunities API ───
-// Docs: https://govconapi.com — GET /api/v1/opportunities/search
+// Docs: https://govconapi.com - GET /api/v1/opportunities/search
 
 export interface GovConOpportunity {
   notice_id: string;

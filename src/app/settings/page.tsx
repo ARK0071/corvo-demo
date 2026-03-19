@@ -4,9 +4,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Settings, Key, Database, Bell, Shield } from "lucide-react";
+import { Settings, Key, Database, Bell, Shield, Building2 } from "lucide-react";
+import { useProfile } from "@/components/profile-provider";
 
 export default function SettingsPage() {
+  const { profile, profileId, setProfileId, allProfiles } = useProfile();
+
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="mx-auto max-w-3xl px-6 py-8">
@@ -19,6 +22,85 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-6">
+          {/* Client Profile Selector */}
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Client Profile</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              Select the active entity profile. This controls grant eligibility scoring, alignment matching, and competitiveness analysis across the platform.
+            </p>
+            <div className="space-y-2">
+              {allProfiles.map(({ id, profile: p }) => (
+                <button
+                  key={id}
+                  onClick={() => setProfileId(id)}
+                  className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                    id === profileId
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{p.name}</span>
+                      {id === profileId && (
+                        <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {p.classification} &middot; {p.location.city}, {p.location.stateCode}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{p.entityType}</span>
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          {/* Active Profile Details */}
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Building2 className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Active Profile Details</h2>
+              <Badge variant="secondary" className="text-[10px] ml-auto">{profile.classification}</Badge>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Entity</span>
+                <span className="text-sm text-muted-foreground">{profile.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Location</span>
+                <span className="text-sm text-muted-foreground">{profile.location.city}, {profile.location.state}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Region</span>
+                <span className="text-sm text-muted-foreground">{profile.location.region}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Operating Budget</span>
+                <span className="text-sm text-muted-foreground">
+                  {profile.characteristics.operatingBudget
+                    ? `$${(profile.characteristics.operatingBudget / 1_000_000).toFixed(0)}M`
+                    : "N/A"}
+                </span>
+              </div>
+              <div className="mt-3">
+                <span className="text-xs font-medium text-muted-foreground block mb-2">Priorities</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {profile.priorities.slice(0, 6).map((p) => (
+                    <Badge key={p} variant="secondary" className="text-[10px]">{p}</Badge>
+                  ))}
+                  {profile.priorities.length > 6 && (
+                    <Badge variant="secondary" className="text-[10px]">+{profile.priorities.length - 6} more</Badge>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+
           {/* API Keys */}
           <Card className="p-5">
             <div className="flex items-center gap-2 mb-4">

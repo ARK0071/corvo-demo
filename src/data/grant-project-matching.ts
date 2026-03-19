@@ -55,7 +55,7 @@ function scoreMatch(project: Project, grant: GrantLike): GrantProjectMatch {
   // Description keyword match (30%)
   const descScore = textOverlap(`${grantDesc} ${grantTitle}`, project.focusAreas) * 100;
 
-  // Budget fit (15%) — project budget should be in grant's range
+  // Budget fit (15%) - project budget should be in grant's range
   let budgetScore = 50;
   const ceiling = "awardCeiling" in grant ? grant.awardCeiling : 0;
   const floor = "awardFloor" in grant ? grant.awardFloor : 0;

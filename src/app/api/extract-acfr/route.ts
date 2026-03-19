@@ -90,7 +90,7 @@ function extractRelevantPages(fullText: string, totalPages: number): string {
 
   const sections: string[] = [];
 
-  // First ~20 pages (transmittal letter, MD&A — the narrative gold)
+  // First ~20 pages (transmittal letter, MD&A - the narrative gold)
   const mdaEnd = Math.min(20 * linesPerPage, lines.length);
   sections.push(lines.slice(0, mdaEnd).join("\n"));
 
@@ -101,13 +101,13 @@ function extractRelevantPages(fullText: string, totalPages: number): string {
     sections.push(lines.slice(fsStart, fsEnd).join("\n"));
   }
 
-  // Statistical section (last 15% of document — has tonnage, TEUs, jobs, etc.)
+  // Statistical section (last 15% of document - has tonnage, TEUs, jobs, etc.)
   const statStart = Math.floor(Math.max(0, totalPages - Math.ceil(totalPages * 0.15)) * linesPerPage);
   if (statStart < lines.length) {
     sections.push(lines.slice(statStart).join("\n"));
   }
 
-  // Capital projects / notes section (middle of document — look for keywords)
+  // Capital projects / notes section (middle of document - look for keywords)
   const capitalKeywords = ["capital project", "construction in progress", "capital asset", "grant"];
   const noteStart = Math.floor(totalPages * 0.35 * linesPerPage);
   const noteEnd = Math.floor(totalPages * 0.7 * linesPerPage);
@@ -132,7 +132,7 @@ function extractRelevantPages(fullText: string, totalPages: number): string {
 
   // Truncate to ~80K characters (~20K tokens) to stay well within Haiku limits
   if (combined.length > 80_000) {
-    return combined.slice(0, 80_000) + "\n\n[TRUNCATED — document too long]";
+    return combined.slice(0, 80_000) + "\n\n[TRUNCATED - document too long]";
   }
 
   return combined;
@@ -162,7 +162,7 @@ export async function POST(req: Request) {
       return Response.json({ error: "File too large (max 50MB)" }, { status: 400 });
     }
 
-    // Step 1: Extract text from PDF (free — no AI cost)
+    // Step 1: Extract text from PDF (free - no AI cost)
     const buffer = Buffer.from(await file.arrayBuffer());
     const pdfData = await pdf(buffer);
 

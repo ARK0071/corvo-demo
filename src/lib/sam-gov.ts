@@ -225,7 +225,7 @@ export function mapSamEntityToVendor(entity: SamEntity): PortVendor {
   const naicsDescs = assertions?.goodsAndServices?.naicsList?.map((n) => n.naicsDescription) || [];
   const description = naicsDescs.length > 0
     ? `${reg.legalBusinessName} specializes in ${naicsDescs.slice(0, 3).join(", ")}. Registered in SAM.gov (UEI: ${reg.ueiSAM}).`
-    : `${reg.legalBusinessName} — SAM.gov registered entity (UEI: ${reg.ueiSAM}).`;
+    : `${reg.legalBusinessName} - SAM.gov registered entity (UEI: ${reg.ueiSAM}).`;
 
   return {
     id: reg.ueiSAM,

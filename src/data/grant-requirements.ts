@@ -43,7 +43,7 @@ export interface GrantRequirements {
 }
 
 /**
- * PIDP FY2026 — Port Infrastructure Development Program
+ * PIDP FY2026 - Port Infrastructure Development Program
  * MARAD / U.S. Department of Transportation
  */
 export const PIDP_FY2026: GrantRequirements = {

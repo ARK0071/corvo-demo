@@ -209,13 +209,13 @@ export async function getMarketPriceTrends(params: {
     recentNews: recentNews.length > 0 ? recentNews : undefined,
     analysis: {
       currentVsAvg: trend.percentFromAvg < -5
-        ? `Current price is ${Math.abs(trend.percentFromAvg)}% below the 12-month average — potentially favorable buying opportunity.`
+        ? `Current price is ${Math.abs(trend.percentFromAvg)}% below the 12-month average - potentially favorable buying opportunity.`
         : trend.percentFromAvg > 5
-          ? `Current price is ${trend.percentFromAvg}% above the 12-month average — consider deferring non-urgent purchases.`
+          ? `Current price is ${trend.percentFromAvg}% above the 12-month average - consider deferring non-urgent purchases.`
           : "Current price is near the 12-month average.",
       volatility: trend.volatilityIndex > 40
-        ? "High volatility — consider hedging or fixed-price contracts."
-        : "Moderate volatility — standard procurement approach appropriate.",
+        ? "High volatility - consider hedging or fixed-price contracts."
+        : "Moderate volatility - standard procurement approach appropriate.",
     },
   };
 }
@@ -293,7 +293,7 @@ export function analyzeShouldCost(params: {
       source: benchmark.source,
     },
     negotiationLevers: [
-      "Challenge material/license cost component — request volume discounts",
+      "Challenge material/license cost component - request volume discounts",
       "Benchmark labor rates against market alternatives",
       "Negotiate overhead allocation based on actual utilization",
       "Target supplier margin compression for long-term commitments",
@@ -379,10 +379,10 @@ export async function generateNegotiationBrief(params: {
       targetSavings: formatCurrency(Math.round(v.annualSpend * 0.08)),
       keyLeveragePoints: [
         `${formatCurrency(v.annualSpend)} annual spend provides significant volume leverage`,
-        spendGrowth > 10 ? `${Math.round(spendGrowth)}% YoY spend growth — use future growth as incentive` : null,
+        spendGrowth > 10 ? `${Math.round(spendGrowth)}% YoY spend growth - use future growth as incentive` : null,
         alternatives.length > 0 ? `${alternatives.length} qualified alternatives available in market` : null,
-        contract?.autoRenew ? "Auto-renewal clause — threaten non-renewal for concessions" : null,
-        benchmark?.trend === "declining" ? "Market prices are declining — leverage market conditions" : null,
+        contract?.autoRenew ? "Auto-renewal clause - threaten non-renewal for concessions" : null,
+        benchmark?.trend === "declining" ? "Market prices are declining - leverage market conditions" : null,
       ].filter(Boolean),
     },
     alternatives: alternatives.map((a) => ({
