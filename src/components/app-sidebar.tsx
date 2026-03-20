@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText } from "lucide-react";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import {
   Sidebar,
@@ -40,6 +40,8 @@ const grantMatchItems = [
   { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },
   { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },
   { title: "Grant Intelligence", url: "/grant-match", icon: Anchor },
+  { title: "Awards", url: "/awards", icon: Award },
+  { title: "Reporting", url: "/reporting", icon: FileText },
   { title: "Competitive Intel", url: "/competitive-intel", icon: BarChart3 },
   { title: "Newsroom", url: "/newsroom", icon: Newspaper },
 ];

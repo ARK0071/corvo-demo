@@ -11,14 +11,10 @@ import {
   Award,
   DollarSign,
   Calendar,
-  TrendingUp,
   ArrowRight,
   Loader2,
   Newspaper,
   BarChart3,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
   FileText,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +30,8 @@ import {
   initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
+import { getAwardStats } from "@/data/awards";
+import { getReportingStats } from "@/data/reporting";
 import { useProfile } from "@/components/profile-provider";
 
 // ─── Helpers ───
@@ -73,12 +71,16 @@ export default function PorterDashboardPage() {
   const [projectStats, setProjectStats] = useState<ReturnType<typeof getProjectStats> | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [awardStats, setAwardStats] = useState<ReturnType<typeof getAwardStats> | null>(null);
+  const [reportingStats, setReportingStats] = useState<ReturnType<typeof getReportingStats> | null>(null);
 
   useEffect(() => {
     initializeProjectsForProfile(profileId);
     setPipeline(getAllPipelineGrants());
     setProjects(getAllProjects());
     setProjectStats(getProjectStats());
+    setAwardStats(getAwardStats());
+    setReportingStats(getReportingStats());
 
     fetch("/api/newsroom")
       .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -87,7 +89,6 @@ export default function PorterDashboardPage() {
       .finally(() => setNewsLoading(false));
   }, []);
 
-  // Pipeline stage counts
   const stageCounts = useMemo(() => ({
     eligible: getStageCount("eligible"),
     applied: getStageCount("applied"),
@@ -97,7 +98,6 @@ export default function PorterDashboardPage() {
     total: pipeline.length,
   }), [pipeline]);
 
-  // Upcoming deadlines (next 30 days)
   const upcoming = useMemo(() =>
     pipeline
       .filter((g) => {
@@ -109,7 +109,6 @@ export default function PorterDashboardPage() {
     [pipeline]
   );
 
-  // Total potential funding in pipeline
   const fundingStats = useMemo(() => {
     const potentialFunding = pipeline.reduce(
       (s, g) => s + (g.awardCeiling || g.totalFunding || 0),
@@ -130,30 +129,16 @@ export default function PorterDashboardPage() {
           Porter Dashboard
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Port Freeport grant pipeline, projects, and news at a glance.
+          Port Freeport grant pipeline, awards, and compliance at a glance.
         </p>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <KpiCard
           icon={<Layers className="h-4 w-4" />}
           label="Pipeline"
           value={String(stageCounts.total)}
-          href="/grants?tab=pipeline"
-        />
-        <KpiCard
-          icon={<CheckCircle2 className="h-4 w-4" />}
-          label="Awarded"
-          value={String(stageCounts.awarded)}
-          accent="text-emerald-600 dark:text-emerald-400"
-          href="/grants?tab=pipeline"
-        />
-        <KpiCard
-          icon={<Clock className="h-4 w-4" />}
-          label="Under Review"
-          value={String(stageCounts.underReview)}
-          accent="text-amber-600 dark:text-amber-400"
           href="/grants?tab=pipeline"
         />
         <KpiCard
@@ -163,20 +148,28 @@ export default function PorterDashboardPage() {
           href="/grants?tab=pipeline"
         />
         <KpiCard
-          icon={<FolderKanban className="h-4 w-4" />}
-          label="Projects"
-          value={String(projects.length)}
-          href="/grants?tab=projects"
+          icon={<Award className="h-4 w-4" />}
+          label="Active Awards"
+          value={String(awardStats?.activeCount ?? 0)}
+          accent="text-[#3d8b8b]"
+          href="/awards"
         />
         <KpiCard
           icon={<DollarSign className="h-4 w-4" />}
-          label="Project Budget"
-          value={fmt(projectStats?.totalBudget ?? 0)}
-          href="/grants?tab=projects"
+          label="Award Funding"
+          value={fmt(awardStats?.totalAwarded ?? 0)}
+          href="/awards"
+        />
+        <KpiCard
+          icon={<FileText className="h-4 w-4" />}
+          label="Reports Due (30d)"
+          value={String(reportingStats?.dueNext30Days ?? 0)}
+          accent={(reportingStats?.dueNext30Days ?? 0) > 0 ? "text-amber-600 dark:text-amber-400" : ""}
+          href="/reporting"
         />
       </div>
 
-      {/* Two-column layout */}
+      {/* ── Main Content: 2-column ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pipeline Funnel */}
         <Card>
@@ -366,22 +359,16 @@ export default function PorterDashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <Card>
-        <CardContent className="pt-4">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3 font-medium">
-            Quick Actions
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <QuickAction href="/grants?tab=discover" icon={<Search className="h-3.5 w-3.5" />} label="Discover Grants" />
-            <QuickAction href="/grants?tab=pipeline" icon={<Layers className="h-3.5 w-3.5" />} label="View Pipeline" />
-            <QuickAction href="/grants?tab=projects" icon={<FolderKanban className="h-3.5 w-3.5" />} label="Manage Projects" />
-            <QuickAction href="/grants?tab=outreach" icon={<Users className="h-3.5 w-3.5" />} label="Vendor Outreach" />
-            <QuickAction href="/competitive-intel" icon={<BarChart3 className="h-3.5 w-3.5" />} label="Competitive Intel" />
-            <QuickAction href="/newsroom" icon={<Newspaper className="h-3.5 w-3.5" />} label="Newsroom" />
-            <QuickAction href="/grant-match" icon={<FileText className="h-3.5 w-3.5" />} label="Grant Intelligence" />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex flex-wrap gap-2">
+        <QuickAction href="/grants?tab=discover" icon={<Search className="h-3.5 w-3.5" />} label="Discover Grants" />
+        <QuickAction href="/grants?tab=pipeline" icon={<Layers className="h-3.5 w-3.5" />} label="View Pipeline" />
+        <QuickAction href="/grants?tab=projects" icon={<FolderKanban className="h-3.5 w-3.5" />} label="Manage Projects" />
+        <QuickAction href="/grants?tab=outreach" icon={<Users className="h-3.5 w-3.5" />} label="Vendor Outreach" />
+        <QuickAction href="/awards" icon={<Award className="h-3.5 w-3.5" />} label="Awards" />
+        <QuickAction href="/reporting" icon={<FileText className="h-3.5 w-3.5" />} label="Reporting" />
+        <QuickAction href="/competitive-intel" icon={<BarChart3 className="h-3.5 w-3.5" />} label="Competitive Intel" />
+        <QuickAction href="/newsroom" icon={<Newspaper className="h-3.5 w-3.5" />} label="Newsroom" />
+      </div>
     </div>
   );
 }
