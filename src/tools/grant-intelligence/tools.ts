@@ -559,7 +559,6 @@ export async function matchGrantsToProjectTool(params: { projectId: string }) {
         matchScore: match.matchScore,
         recommendation: match.recommendation,
         reasons: match.reasons,
-        breakdown: match.breakdown,
       };
     }),
   };
@@ -600,7 +599,6 @@ export async function getProjectGrantMatches(params: { grantId: string }) {
         matchScore: match.matchScore,
         recommendation: match.recommendation,
         reasons: match.reasons,
-        breakdown: match.breakdown,
       };
     }),
   };
