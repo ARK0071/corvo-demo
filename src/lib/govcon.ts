@@ -390,6 +390,7 @@ export interface GovConOpportunity {
   posted_date: string;
   response_deadline?: string;
   naics?: string[];
+  psc?: string;
   set_aside_type?: string;
   notice_type?: string;
   description_text?: string;
@@ -480,6 +481,274 @@ export async function searchGovConOpportunities(
     console.error("GovCon Opportunities API error:", error);
     throw error;
   }
+}
+
+// ─── Advanced Vendor Search via Award Notices ───
+// Supports all 8 filter types for the Subchapter N vendor search system.
+
+export interface AdvancedVendorSearchParams {
+  naicsCodes?: string[];
+  noticeType?: string;
+  setAsides?: string[];
+  states?: string[];
+  agencies?: string[];
+  agencySearch?: string;
+  valueMin?: number | null;
+  valueMax?: number | null;
+  postedFrom?: string;
+  postedTo?: string;
+  pscCodes?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface AggregatedVendor {
+  name: string;
+  totalAmount: number;
+  awardCount: number;
+  maxSingleAward: number;
+  state: string;
+  city: string;
+  naics: Set<string>;
+  pscs: Set<string>;
+  agencies: Set<string>;
+  setAsideTypes: Set<string>;
+  awards: {
+    title: string;
+    amount: number;
+    date: string;
+    agency: string;
+    solicitationNumber: string;
+    noticeId: string;
+  }[];
+}
+
+// GovCon API `agency` filter does partial text match on full agency names.
+// Our UI presets use abbreviations; this maps them to search-friendly strings.
+const AGENCY_SEARCH_TERMS: Record<string, string> = {
+  USACE: "Corps of Engineers",
+  MARAD: "Maritime Administration",
+  DOT: "Department of Transportation",
+  EPA: "Environmental Protection",
+  DHS: "Homeland Security",
+};
+
+function resolveAgencySearchTerm(agencies: string[], agencySearch?: string): string | undefined {
+  if (agencies.length > 0) {
+    const terms = agencies.map((a) => AGENCY_SEARCH_TERMS[a] || a);
+    return terms[0];
+  }
+  return agencySearch?.trim() || undefined;
+}
+
+/**
+ * Build query params for a single GovCon /opportunities/search request.
+ * Handles correct param names per API docs (naics vs naics_multiple,
+ * date_from/date_to, single-value state, etc.).
+ */
+function buildSearchParams(
+  params: AdvancedVendorSearchParams,
+  singleState: string | undefined,
+  pageSize: number,
+  offset: number,
+): URLSearchParams {
+  const qp = new URLSearchParams();
+
+  if (params.noticeType !== undefined && params.noticeType !== "") {
+    qp.set("notice_type", params.noticeType);
+  }
+
+  // NAICS: single code uses `naics`, multiple codes use `naics_multiple` (Developer plan)
+  if (params.naicsCodes && params.naicsCodes.length > 0) {
+    if (params.naicsCodes.length === 1) {
+      qp.set("naics", params.naicsCodes[0]);
+    } else {
+      qp.set("naics_multiple", params.naicsCodes.join(","));
+    }
+  }
+
+  // State: API only accepts a single state per request
+  if (singleState) {
+    qp.set("state", singleState);
+  }
+
+  // Agency: partial text match — resolve abbreviations to full names
+  const agencyTerm = resolveAgencySearchTerm(
+    params.agencies || [],
+    params.agencySearch,
+  );
+  if (agencyTerm) {
+    qp.set("agency", agencyTerm);
+  }
+
+  // Value range
+  if (params.valueMin != null && params.valueMin > 0) {
+    qp.set("value_min", String(params.valueMin));
+  }
+  if (params.valueMax != null && params.valueMax > 0) {
+    qp.set("value_max", String(params.valueMax));
+  }
+
+  // Date range — API uses date_from / date_to
+  if (params.postedFrom) {
+    qp.set("date_from", params.postedFrom);
+  }
+  if (params.postedTo) {
+    qp.set("date_to", params.postedTo);
+  }
+
+  // PSC: single code per request
+  if (params.pscCodes && params.pscCodes.length > 0) {
+    qp.set("psc", params.pscCodes[0]);
+  }
+
+  // Set-aside
+  if (params.setAsides && params.setAsides.length > 0) {
+    qp.set("set_aside", params.setAsides[0]);
+  }
+
+  qp.set("limit", String(pageSize));
+  qp.set("offset", String(offset));
+
+  return qp;
+}
+
+/**
+ * Merge a GovConOpportunity award into the vendor aggregation map.
+ */
+function mergeAwardIntoVendorMap(
+  vendorMap: Map<string, AggregatedVendor>,
+  award: GovConOpportunity,
+): void {
+  const name = award.awardee_name;
+  if (!name) return;
+
+  const key = name.toLowerCase().trim();
+  const existing = vendorMap.get(key);
+  const awardEntry = {
+    title: award.title,
+    amount: award.award_amount || 0,
+    date: award.posted_date,
+    agency: award.agency || "",
+    solicitationNumber: award.solicitation_number || "",
+    noticeId: award.notice_id,
+  };
+
+  if (existing) {
+    existing.totalAmount += award.award_amount || 0;
+    existing.awardCount++;
+    existing.maxSingleAward = Math.max(existing.maxSingleAward, award.award_amount || 0);
+    if (award.naics) award.naics.forEach((n) => existing.naics.add(n));
+    if (award.psc) existing.pscs.add(award.psc);
+    if (award.agency) existing.agencies.add(award.agency);
+    if (award.set_aside_type) existing.setAsideTypes.add(award.set_aside_type);
+    if (existing.awards.length < 10) existing.awards.push(awardEntry);
+  } else {
+    vendorMap.set(key, {
+      name,
+      totalAmount: award.award_amount || 0,
+      awardCount: 1,
+      maxSingleAward: award.award_amount || 0,
+      state: award.performance_state_code || "",
+      city: award.performance_city_name || "",
+      naics: new Set(award.naics || []),
+      pscs: new Set(award.psc ? [award.psc] : []),
+      agencies: new Set(award.agency ? [award.agency] : []),
+      setAsideTypes: new Set(award.set_aside_type ? [award.set_aside_type] : []),
+      awards: [awardEntry],
+    });
+  }
+}
+
+/**
+ * Run paginated requests for a single state and return collected awards.
+ */
+async function fetchAwardsForState(
+  apiKey: string,
+  params: AdvancedVendorSearchParams,
+  state: string | undefined,
+  maxPages: number,
+): Promise<{ awards: GovConOpportunity[]; totalRecords: number }> {
+  const pageSize = Math.min(params.limit || 50, 50);
+  let totalRecords = 0;
+  const allAwards: GovConOpportunity[] = [];
+
+  for (let page = 0; page < maxPages; page++) {
+    const qp = buildSearchParams(params, state, pageSize, page * pageSize);
+    const url = `${GOVCON_OPPORTUNITIES_URL}?${qp.toString()}`;
+
+    console.log(`[GovCon] Fetching: state=${state || "any"} page=${page}`);
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => null);
+      const errorMsg =
+        errorBody?.error?.message ||
+        errorBody?.message ||
+        errorBody?.detail ||
+        `GovCon API returned ${res.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const data: GovConOpportunitiesResponse = await res.json();
+    totalRecords = data.pagination?.total || 0;
+    const awards = data.data || [];
+
+    console.log(
+      `[GovCon] state=${state || "any"} page=${page}: ${awards.length} awards (${totalRecords} total). Filters: ${JSON.stringify(data.filters_applied || {})}`
+    );
+
+    allAwards.push(...awards);
+
+    if (!data.pagination?.has_next || awards.length < pageSize) break;
+  }
+
+  return { awards: allAwards, totalRecords };
+}
+
+/**
+ * Search GovCon /opportunities/search with full filter support.
+ * Aggregates results by awardee_name to produce a vendor list.
+ *
+ * When multiple states are selected, runs one set of paginated requests
+ * per state (the API only accepts a single state per request) and merges.
+ */
+export async function searchVendorsAdvanced(
+  params: AdvancedVendorSearchParams,
+  maxPages: number = 3
+): Promise<{ vendors: AggregatedVendor[]; totalRecords: number }> {
+  const apiKey = process.env.GOVCON_API_KEY;
+  if (!apiKey) {
+    throw new Error("GOVCON_API_KEY is not configured. Add it to .env.local.");
+  }
+
+  const states = params.states && params.states.length > 0 ? params.states : [undefined];
+  const pagesPerState = Math.max(1, Math.ceil(maxPages / states.length));
+
+  // Fetch awards for each state in parallel, then merge sequentially
+  const stateResults = await Promise.all(
+    states.map((state) =>
+      fetchAwardsForState(apiKey, params, state, pagesPerState)
+    )
+  );
+
+  const vendorMap = new Map<string, AggregatedVendor>();
+  let totalRecords = 0;
+
+  for (const { awards, totalRecords: count } of stateResults) {
+    totalRecords += count;
+    for (const award of awards) {
+      mergeAwardIntoVendorMap(vendorMap, award);
+    }
+  }
+
+  return { vendors: [...vendorMap.values()], totalRecords };
 }
 
 // Fetch multiple pages to get more results (respects rate limits)

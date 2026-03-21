@@ -108,8 +108,8 @@ function AppSidebarInner() {
                         {!collapsed && (
                           <>
                             <span className="flex-1">{item.title}</span>
-                            {isPipeline && (
-                              <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1.5 text-[10px] font-bold text-background">
+                            {isPipeline && upcomingCount > 0 && (
+                              <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-black px-1.5 text-[10px] font-bold text-white dark:bg-white dark:text-black">
                                 {upcomingCount > 99 ? "99+" : upcomingCount}
                               </span>
                             )}
