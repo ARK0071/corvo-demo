@@ -19,17 +19,11 @@ import {
   getRecommendation,
   type GrantScore,
   type TopProjectMatch,
-  type TopSpendMatch,
+  type TopDomainMatch,
 } from "@/data/grant-scoring";
 import { getDefaultProfile } from "@/data/port-profile";
 
 const EMBEDDINGS_DIR = path.join(process.cwd(), "src/data/embeddings");
-
-interface SpendEmbedding {
-  embeddingTheme: string;
-  weight: number;
-  vector: number[];
-}
 
 interface ProjectEmbedding {
   name: string;
@@ -43,13 +37,13 @@ interface ProfileEmbedding {
   vector: number[];
 }
 
-const grantEmbeddingCache = new Map<string, number[]>();
-
-function loadSpendEmbeddings(): Record<string, SpendEmbedding> {
-  const p = path.join(EMBEDDINGS_DIR, "spend-embeddings.json");
-  const raw = fs.readFileSync(p, "utf-8");
-  return JSON.parse(raw) as Record<string, SpendEmbedding>;
+interface DomainEmbedding {
+  name: string;
+  text: string;
+  vector: number[];
 }
+
+const grantEmbeddingCache = new Map<string, number[]>();
 
 function loadProjectEmbeddings(): Record<string, ProjectEmbedding> {
   const p = path.join(EMBEDDINGS_DIR, "project-embeddings.json");
@@ -62,6 +56,13 @@ function loadProfileEmbedding(): ProfileEmbedding | null {
   if (!fs.existsSync(p)) return null;
   const raw = fs.readFileSync(p, "utf-8");
   return JSON.parse(raw) as ProfileEmbedding;
+}
+
+function loadDomainEmbeddings(): Record<string, DomainEmbedding> {
+  const p = path.join(EMBEDDINGS_DIR, "funding-domain-embeddings.json");
+  if (!fs.existsSync(p)) return {};
+  const raw = fs.readFileSync(p, "utf-8");
+  return JSON.parse(raw) as Record<string, DomainEmbedding>;
 }
 
 function hasValidVector(vec: number[]): boolean {
@@ -78,21 +79,21 @@ export async function scoreGrantsServer(
   if (grants.length === 0) return [];
 
   const profile = getDefaultProfile();
-  const spendEmbeddings = loadSpendEmbeddings();
   const projectEmbeddings = loadProjectEmbeddings();
   const profileEmbedding = loadProfileEmbedding();
+  const domainEmbeddings = loadDomainEmbeddings();
 
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
 
   const profileVecValid = profileEmbedding && hasValidVector(profileEmbedding.vector);
   const projectCount = Object.values(projectEmbeddings).filter((p) => hasValidVector(p.vector)).length;
-  const spendCount = Object.values(spendEmbeddings).filter((s) => hasValidVector(s.vector)).length;
+  const domainCount = Object.values(domainEmbeddings).filter((d) => hasValidVector(d.vector)).length;
 
   console.log("[score-grants] Config:", {
     openaiKey: hasOpenAI ? "set" : "NOT SET",
     profileEmbedding: profileEmbedding ? (profileVecValid ? "valid" : "empty vector") : "missing file",
     projectEmbeddings: `${projectCount}/${Object.keys(projectEmbeddings).length} valid`,
-    spendEmbeddings: `${spendCount}/${Object.keys(spendEmbeddings).length} valid`,
+    domainEmbeddings: `${domainCount}/${Object.keys(domainEmbeddings).length} valid`,
   });
 
   const filtered = grants.filter((g) => !isHardNegativeGrant(g));
@@ -158,29 +159,24 @@ export async function scoreGrantsServer(
       projectSimilarityScore = topProjectMatches[0]?.similarity ?? 0;
     }
 
-    const topSpendMatches: TopSpendMatch[] = [];
-    let spendSimilarityScore = 0;
+    const topDomainMatches: TopDomainMatch[] = [];
+    let fundingDomainSimilarityScore = 0;
     if (hasValidVector(grantVec)) {
-      for (const [cat, data] of Object.entries(spendEmbeddings)) {
+      for (const [domainId, data] of Object.entries(domainEmbeddings)) {
         if (!hasValidVector(data.vector)) continue;
         const sim = cosineSimilarity(grantVec, data.vector);
         const score = similarityToScore(sim);
-        topSpendMatches.push({
-          category: cat,
-          embeddingTheme: data.embeddingTheme,
-          similarity: score,
-          weight: data.weight,
-        });
+        topDomainMatches.push({ domainId, domainName: data.name, similarity: score });
       }
-      topSpendMatches.sort((a, b) => b.similarity - a.similarity);
-      spendSimilarityScore = topSpendMatches[0]?.similarity ?? 0;
+      topDomainMatches.sort((a, b) => b.similarity - a.similarity);
+      fundingDomainSimilarityScore = topDomainMatches[0]?.similarity ?? 0;
     }
 
     const overallScore = computeFinalScore({
       eligibilityScore: eligibility.score,
       profileAlignmentScore,
       projectSimilarityScore,
-      spendSimilarityScore,
+      fundingDomainSimilarityScore,
       impactScore,
     });
 
@@ -193,7 +189,7 @@ export async function scoreGrantsServer(
     const strengths: string[] = [
       ...eligibility.reasons,
       ...topProjectMatches.slice(0, 2).map((m) => `${m.projectName} (${m.similarity}% match)`),
-      ...topSpendMatches.slice(0, 1).map((m) => `${m.category}: ${m.similarity}% match`),
+      ...topDomainMatches.slice(0, 1).map((m) => `${m.domainName} (${m.similarity}% match)`),
     ];
 
     const concerns: string[] = [];
@@ -210,7 +206,7 @@ export async function scoreGrantsServer(
       hasValidVector(grantVec) &&
       (hasValidVector(profileEmbedding?.vector ?? []) ||
         Object.values(projectEmbeddings).some((p) => hasValidVector(p.vector)) ||
-        Object.values(spendEmbeddings).some((s) => hasValidVector(s.vector)));
+        Object.values(domainEmbeddings).some((d) => hasValidVector(d.vector)));
 
     if (i === 0) {
       console.log("[score-grants] First grant similarity sample:", {
@@ -219,8 +215,8 @@ export async function scoreGrantsServer(
         profileAlignmentScore,
         projectSimilarityScore,
         topProject: topProjectMatches[0]?.projectName,
-        topSpend: topSpendMatches[0]?.category,
-        spendSimilarity: topSpendMatches[0]?.similarity,
+        topDomain: topDomainMatches[0]?.domainName,
+        domainSimilarity: topDomainMatches[0]?.similarity,
         embeddingScoresAvailable,
       });
     }
@@ -232,15 +228,15 @@ export async function scoreGrantsServer(
       eligibilityScore: eligibility.score,
       profileAlignmentScore,
       projectSimilarityScore,
-      spendSimilarityScore,
+      fundingDomainSimilarityScore,
       impactScore,
       recommendation,
       eligibilityStatus: eligibility.status,
       strengths: strengths.slice(0, 5),
       concerns: concerns.slice(0, 3),
       keyRequirements,
-      topProjectMatches: topProjectMatches.slice(0, 5),
-      topSpendMatches: topSpendMatches.slice(0, 5),
+      topProjectMatches,
+      topDomainMatches,
       embeddingScoresAvailable,
     });
   }

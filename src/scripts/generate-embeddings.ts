@@ -93,6 +93,28 @@ async function main() {
   );
   console.log(`   Wrote profile-embedding.json (${DEFAULT_PROFILE_ID})`);
 
+  // 4. Funding domain embeddings
+  console.log("\n4. Embedding funding domains...");
+  const domainsPath = path.join(process.cwd(), "fundingDomainEmbeddings.json");
+  const domainsRaw = fs.readFileSync(domainsPath, "utf-8");
+  const domains = JSON.parse(domainsRaw) as { id: string; name: string; embeddingText: string }[];
+  const domainTexts = domains.map((d) => d.embeddingText);
+  const domainVectors = await embedTexts(domainTexts);
+  const domainEmbeddings: Record<string, { name: string; text: string; vector: number[] }> = {};
+  for (let i = 0; i < domains.length; i++) {
+    const d = domains[i];
+    domainEmbeddings[d.id] = {
+      name: d.name,
+      text: d.embeddingText,
+      vector: domainVectors[i] ?? [],
+    };
+  }
+  fs.writeFileSync(
+    path.join(EMBEDDINGS_DIR, "funding-domain-embeddings.json"),
+    JSON.stringify(domainEmbeddings, null, 2)
+  );
+  console.log(`   Wrote funding-domain-embeddings.json (${domains.length} domains)`);
+
   console.log("\nDone. Embeddings saved to src/data/embeddings/");
 }
 

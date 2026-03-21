@@ -1,7 +1,7 @@
 /**
  * Grant Eligibility and Scoring System
  *
- * Rule-based eligibility and impact scoring. Embedding-based profile/project/spend
+ * Rule-based eligibility and impact scoring. Embedding-based profile/project/domain
  * similarity is computed in the /api/score-grants route.
  */
 
@@ -15,11 +15,10 @@ export interface TopProjectMatch {
   similarity: number; // 0-100
 }
 
-export interface TopSpendMatch {
-  category: string;
-  embeddingTheme: string;
+export interface TopDomainMatch {
+  domainId: string;
+  domainName: string;
   similarity: number; // 0-100
-  weight: number;
 }
 
 export interface GrantScore {
@@ -29,7 +28,7 @@ export interface GrantScore {
   eligibilityScore: number; // 0-100 - Can we apply?
   profileAlignmentScore: number; // 0-100 - Embedding similarity vs port profile
   projectSimilarityScore: number; // 0-100 - Best project match
-  spendSimilarityScore: number; // 0-100 - Best spend theme match
+  fundingDomainSimilarityScore: number; // 0-100 - Best funding domain match
   impactScore: number; // 0-100 - Potential impact
   recommendation: "highly_recommended" | "recommended" | "consider" | "not_recommended";
   eligibilityStatus: "eligible" | "likely_eligible" | "unclear" | "not_eligible";
@@ -37,8 +36,8 @@ export interface GrantScore {
   concerns: string[];
   keyRequirements: string[];
   topProjectMatches: TopProjectMatch[];
-  topSpendMatches: TopSpendMatch[];
-  /** True when profile/project/spend embeddings were used; false when placeholders or no key */
+  topDomainMatches: TopDomainMatch[];
+  /** True when profile/project/domain embeddings were used; false when placeholders or no key */
   embeddingScoresAvailable: boolean;
 }
 
@@ -188,20 +187,20 @@ export function scoreImpact(grant: DiscoveredGrant, profile: PortProfile): numbe
 
 /**
  * Compute final overall score from sub-scores.
- * Weights: Eligibility 25%, Profile 25%, Projects 20%, Spend 15%, Impact 15%
+ * Weights: Eligibility 25%, Profile 25%, Projects 20%, Domains 15%, Impact 15%
  */
 export function computeFinalScore(params: {
   eligibilityScore: number;
   profileAlignmentScore: number;
   projectSimilarityScore: number;
-  spendSimilarityScore: number;
+  fundingDomainSimilarityScore: number;
   impactScore: number;
 }): number {
   return Math.round(
     params.eligibilityScore * 0.25 +
       params.profileAlignmentScore * 0.25 +
       params.projectSimilarityScore * 0.2 +
-      params.spendSimilarityScore * 0.15 +
+      params.fundingDomainSimilarityScore * 0.15 +
       params.impactScore * 0.15
   );
 }

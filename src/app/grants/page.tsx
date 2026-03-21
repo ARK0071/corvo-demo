@@ -54,7 +54,8 @@ import {
 } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects, type GrantProjectMatch } from "@/data/grant-project-matching";
 import { ProjectForm } from "@/components/projects/project-form";
-import { Edit, Trash2 } from "lucide-react";
+import { Edit, Trash2, SlidersHorizontal } from "lucide-react";
+import { FUNDING_DOMAINS } from "@/data/funding-domains";
 import {
   Sheet,
   SheetContent,
@@ -192,7 +193,12 @@ function UnifiedGrantsDashboard() {
   const [discoveredGrants, setDiscoveredGrants] = useState<DiscoveredGrant[]>([]);
   const [grantScores, setGrantScores] = useState<Map<string, GrantScore>>(new Map());
   const [showOnlyEligible, setShowOnlyEligible] = useState(false);
-  const [sortBy, setSortBy] = useState<"relevance" | "score" | "deadline" | "funding">("relevance");
+  const [sortBy, setSortBy] = useState<"score" | "deadline" | "funding">("score");
+  const [selectedProjectIds, setSelectedProjectIds] = useState<"all" | Set<string>>("all");
+  const [selectedDomainIds, setSelectedDomainIds] = useState<"all" | Set<string>>("all");
+  const [includeProfile, setIncludeProfile] = useState(true);
+  const [includeEligibility, setIncludeEligibility] = useState(true);
+  const [includeImpact, setIncludeImpact] = useState(true);
 
   // Client-side grant search cache (avoids redundant API calls for same query)
   const [searchCache] = useState(() => new Map<string, { grants: DiscoveredGrant[]; totalCount: number }>());
@@ -662,43 +668,184 @@ function UnifiedGrantsDashboard() {
 
             {discoveredGrants.length > 0 && (
               <Card className="p-4 mb-4">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium">Show:</span>
-                    <button
-                      onClick={() => setShowOnlyEligible(!showOnlyEligible)}
-                      className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                        showOnlyEligible
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground hover:bg-muted/80"
-                      }`}
-                    >
-                      Eligible for {selectedProfile.name} Only
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium">Sort by:</span>
-                    {(
-                      [
-                        ["score", "Match Score"],
-                        ["relevance", "Relevance"],
-                        ["funding", "Funding"],
-                        ["deadline", "Deadline"],
-                      ] as const
-                    ).map(([value, label]) => (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium">Show:</span>
                       <button
-                        key={value}
-                        onClick={() => setSortBy(value)}
+                        onClick={() => setShowOnlyEligible(!showOnlyEligible)}
                         className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                          sortBy === value
+                          showOnlyEligible
                             ? "bg-primary text-primary-foreground"
                             : "bg-muted text-muted-foreground hover:bg-muted/80"
                         }`}
                       >
-                        {label}
+                        Eligible for {selectedProfile.name} Only
                       </button>
-                    ))}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium">Sort by:</span>
+                      {(
+                        [
+                          ["score", "Match Score"],
+                          ["funding", "Funding"],
+                          ["deadline", "Deadline"],
+                        ] as const
+                      ).map(([value, label]) => (
+                        <button
+                          key={value}
+                          onClick={() => setSortBy(value)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                            sortBy === value
+                              ? "bg-primary text-primary-foreground"
+                              : "bg-muted text-muted-foreground hover:bg-muted/80"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-medium text-muted-foreground">Include in score:</span>
+                      {([
+                        ["Profile", includeProfile, setIncludeProfile] as const,
+                        ["Eligibility", includeEligibility, setIncludeEligibility] as const,
+                        ["Impact", includeImpact, setIncludeImpact] as const,
+                      ]).map(([label, value, setter]) => (
+                        <button
+                          key={label}
+                          onClick={() => setter(!value)}
+                          className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                            value
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                              : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {projects.length > 0 && (
+                    <div className="border-t pt-3">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] font-medium text-muted-foreground">Projects:</span>
+                        <button
+                          onClick={() => setSelectedProjectIds("all")}
+                          className={`text-[10px] hover:underline ${
+                            selectedProjectIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
+                          }`}
+                        >
+                          All
+                        </button>
+                        <span className="text-[10px] text-muted-foreground/50">|</span>
+                        <button
+                          onClick={() => setSelectedProjectIds(new Set())}
+                          className={`text-[10px] hover:underline ${
+                            selectedProjectIds !== "all" && selectedProjectIds.size === 0 ? "text-primary font-medium" : "text-muted-foreground"
+                          }`}
+                        >
+                          None
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {projects.map((project) => {
+                          const isSelected = selectedProjectIds === "all" || selectedProjectIds.has(project.id);
+                          return (
+                            <button
+                              key={project.id}
+                              onClick={() => {
+                                if (selectedProjectIds === "all") {
+                                  const allExceptThis = new Set(projects.map((p) => p.id));
+                                  allExceptThis.delete(project.id);
+                                  setSelectedProjectIds(allExceptThis);
+                                } else {
+                                  const next = new Set(selectedProjectIds);
+                                  if (next.has(project.id)) {
+                                    next.delete(project.id);
+                                  } else {
+                                    next.add(project.id);
+                                  }
+                                  if (next.size === projects.length) setSelectedProjectIds("all");
+                                  else setSelectedProjectIds(next);
+                                }
+                              }}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                isSelected
+                                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30"
+                                  : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                              }`}
+                              title={project.description}
+                            >
+                              {project.name.length > 40 ? project.name.slice(0, 40) + "..." : project.name}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="border-t pt-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[10px] font-medium text-muted-foreground">Funding domains:</span>
+                      <button
+                        onClick={() => setSelectedDomainIds("all")}
+                        className={`text-[10px] hover:underline ${
+                          selectedDomainIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
+                        }`}
+                      >
+                        All
+                      </button>
+                      <span className="text-[10px] text-muted-foreground/50">|</span>
+                      <button
+                        onClick={() => setSelectedDomainIds(new Set())}
+                        className={`text-[10px] hover:underline ${
+                          selectedDomainIds !== "all" && selectedDomainIds.size === 0 ? "text-primary font-medium" : "text-muted-foreground"
+                        }`}
+                      >
+                        None
+                      </button>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {FUNDING_DOMAINS.map((domain) => {
+                        const isSelected = selectedDomainIds === "all" || selectedDomainIds.has(domain.id);
+                        return (
+                          <button
+                            key={domain.id}
+                            onClick={() => {
+                              if (selectedDomainIds === "all") {
+                                const allExceptThis = new Set(FUNDING_DOMAINS.map((d) => d.id));
+                                allExceptThis.delete(domain.id);
+                                setSelectedDomainIds(allExceptThis);
+                              } else {
+                                const next = new Set(selectedDomainIds);
+                                if (next.has(domain.id)) {
+                                  next.delete(domain.id);
+                                } else {
+                                  next.add(domain.id);
+                                }
+                                if (next.size === FUNDING_DOMAINS.length) setSelectedDomainIds("all");
+                                else setSelectedDomainIds(next);
+                              }
+                            }}
+                            className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                              isSelected
+                                ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                            }`}
+                          >
+                            {domain.name}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </Card>
@@ -748,18 +895,62 @@ function UnifiedGrantsDashboard() {
                   });
                 }
 
+                // Compute dynamic overall score. Each dimension can be toggled
+                // on/off or filtered to specific items. Active weights are
+                // normalized so the result stays on a 0-100 scale.
+                function getDynamicScore(grantId: string): number {
+                  const score = grantScores.get(grantId);
+                  if (!score) return 0;
+
+                  let projSim: number;
+                  if (selectedProjectIds === "all") {
+                    projSim = score.projectSimilarityScore;
+                  } else if (selectedProjectIds.size === 0) {
+                    projSim = 0;
+                  } else {
+                    const selected = score.topProjectMatches.filter((m) =>
+                      (selectedProjectIds as Set<string>).has(m.projectId)
+                    );
+                    projSim = selected.length > 0 ? Math.max(...selected.map((m) => m.similarity)) : 0;
+                  }
+
+                  let domainSim: number;
+                  if (selectedDomainIds === "all") {
+                    domainSim = score.fundingDomainSimilarityScore;
+                  } else if (selectedDomainIds.size === 0) {
+                    domainSim = 0;
+                  } else {
+                    const selected = (score.topDomainMatches ?? []).filter((m) =>
+                      (selectedDomainIds as Set<string>).has(m.domainId)
+                    );
+                    domainSim = selected.length > 0 ? Math.max(...selected.map((m) => m.similarity)) : 0;
+                  }
+
+                  const projActive = selectedProjectIds === "all" || selectedProjectIds.size > 0;
+                  const domainActive = selectedDomainIds === "all" || selectedDomainIds.size > 0;
+
+                  const components: [number, number][] = [];
+                  if (includeEligibility) components.push([score.eligibilityScore, 0.25]);
+                  if (includeProfile)     components.push([score.profileAlignmentScore, 0.25]);
+                  if (projActive)         components.push([projSim, 0.20]);
+                  if (domainActive)       components.push([domainSim, 0.15]);
+                  if (includeImpact)      components.push([score.impactScore, 0.15]);
+
+                  if (components.length === 0) return 0;
+
+                  const totalWeight = components.reduce((s, [, w]) => s + w, 0);
+                  const raw = components.reduce((s, [v, w]) => s + v * w, 0);
+                  return Math.round(raw / totalWeight);
+                }
+
                 // Sort grants
                 const sorted = [...filtered].sort((a, b) => {
-                  if (sortBy === "score") {
-                    const scoreA = grantScores.get(a.id)?.overallScore || 0;
-                    const scoreB = grantScores.get(b.id)?.overallScore || 0;
-                    return scoreB - scoreA;
-                  } else if (sortBy === "funding") {
+                  if (sortBy === "funding") {
                     return (b.awardCeiling || 0) - (a.awardCeiling || 0);
                   } else if (sortBy === "deadline") {
                     return (a.closeDate || "").localeCompare(b.closeDate || "");
                   }
-                  return 0; // relevance (default API order)
+                  return getDynamicScore(b.id) - getDynamicScore(a.id);
                 });
 
                 // Show message if filter produces no results
@@ -818,7 +1009,7 @@ function UnifiedGrantsDashboard() {
                                   variant="outline"
                                   className={`text-[10px] ${grantRecColors[score.recommendation]}`}
                                 >
-                                  {score.overallScore}/100
+                                  {getDynamicScore(grant.id)}/100
                                 </Badge>
                                 <Badge
                                   variant="outline"
@@ -852,7 +1043,7 @@ function UnifiedGrantsDashboard() {
                       <div className="text-right shrink-0 ml-4">
                         {score && (
                           <div className="text-lg font-bold mb-1 text-primary">
-                            {score.overallScore}
+                            {getDynamicScore(grant.id)}
                           </div>
                         )}
                         <p className="text-sm font-mono font-medium">
@@ -927,7 +1118,7 @@ function UnifiedGrantsDashboard() {
                               </Badge>
                             </div>
 
-                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
                               <div>
                                 <span className="text-[9px] text-muted-foreground uppercase">Profile</span>
                                 <p className="text-sm font-mono font-bold">{score.profileAlignmentScore}</p>
@@ -937,8 +1128,8 @@ function UnifiedGrantsDashboard() {
                                 <p className="text-sm font-mono font-bold">{score.projectSimilarityScore}</p>
                               </div>
                               <div>
-                                <span className="text-[9px] text-muted-foreground uppercase">Spend</span>
-                                <p className="text-sm font-mono font-bold">{score.spendSimilarityScore}</p>
+                                <span className="text-[9px] text-muted-foreground uppercase">Domains</span>
+                                <p className="text-sm font-mono font-bold">{score.fundingDomainSimilarityScore ?? 0}</p>
                               </div>
                               <div>
                                 <span className="text-[9px] text-muted-foreground uppercase">Eligibility</span>
@@ -964,15 +1155,13 @@ function UnifiedGrantsDashboard() {
                               </div>
                             )}
 
-                            {score.topSpendMatches.length > 0 && (
+                            {(score.topDomainMatches ?? []).length > 0 && (
                               <div className="mb-3">
-                                <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Top Spend Themes</span>
+                                <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Funding Domain Matches</span>
                                 <ul className="mt-1 space-y-0.5">
-                                  {score.topSpendMatches.slice(0, 5).map((m) => (
-                                    <li key={m.category} className="text-xs font-medium flex items-center justify-between gap-2">
-                                      <span className="truncate" title={m.embeddingTheme}>
-                                        {m.category}: {m.embeddingTheme.slice(0, 40)}...
-                                      </span>
+                                  {(score.topDomainMatches ?? []).slice(0, 5).map((m) => (
+                                    <li key={m.domainId} className="text-xs font-medium flex items-center justify-between gap-2">
+                                      <span className="truncate">{m.domainName}</span>
                                       <span className="text-muted-foreground shrink-0">{m.similarity}%</span>
                                     </li>
                                   ))}

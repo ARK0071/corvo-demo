@@ -153,8 +153,8 @@ export async function explainGrantScore(params: { grantId: string }) {
         max: 100,
         weight: "20%",
       },
-      spendSimilarity: {
-        score: score.spendSimilarityScore,
+      fundingDomainSimilarity: {
+        score: score.fundingDomainSimilarityScore,
         max: 100,
         weight: "15%",
       },
