@@ -482,6 +482,185 @@ export async function searchGovConOpportunities(
   }
 }
 
+// ─── Advanced Vendor Search via Award Notices ───
+// Supports all 8 filter types for the Subchapter N vendor search system.
+
+export interface AdvancedVendorSearchParams {
+  naicsCodes?: string[];
+  noticeType?: string;
+  setAsides?: string[];
+  states?: string[];
+  agencies?: string[];
+  agencySearch?: string;
+  valueMin?: number | null;
+  valueMax?: number | null;
+  postedFrom?: string;
+  postedTo?: string;
+  pscCodes?: string[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface AggregatedVendor {
+  name: string;
+  totalAmount: number;
+  awardCount: number;
+  maxSingleAward: number;
+  state: string;
+  city: string;
+  naics: Set<string>;
+  pscs: Set<string>;
+  agencies: Set<string>;
+  setAsideTypes: Set<string>;
+  awards: {
+    title: string;
+    amount: number;
+    date: string;
+    agency: string;
+    solicitationNumber: string;
+    noticeId: string;
+  }[];
+}
+
+/**
+ * Search GovCon /opportunities/search with full filter support.
+ * Aggregates results by awardee_name to produce a vendor list.
+ * Runs up to `maxPages` paginated requests to gather comprehensive results.
+ */
+export async function searchVendorsAdvanced(
+  params: AdvancedVendorSearchParams,
+  maxPages: number = 3
+): Promise<{ vendors: AggregatedVendor[]; totalRecords: number }> {
+  const apiKey = process.env.GOVCON_API_KEY;
+  if (!apiKey) {
+    throw new Error("GOVCON_API_KEY is not configured. Add it to .env.local.");
+  }
+
+  const pageSize = Math.min(params.limit || 50, 50);
+  const vendorMap = new Map<string, AggregatedVendor>();
+  let totalRecords = 0;
+
+  for (let page = 0; page < maxPages; page++) {
+    const qp = new URLSearchParams();
+
+    if (params.noticeType) {
+      qp.set("notice_type", params.noticeType);
+    } else {
+      qp.set("notice_type", "Award Notice");
+    }
+
+    // NAICS codes → keywords approach (GovCon uses `naics` param)
+    if (params.naicsCodes && params.naicsCodes.length > 0) {
+      qp.set("naics", params.naicsCodes.join(","));
+    }
+
+    // State filter (join multiple states)
+    if (params.states && params.states.length > 0) {
+      qp.set("state", params.states.join(","));
+    }
+
+    // Agency filter (Developer plan feature)
+    const agencyKeyword = params.agencySearch?.trim();
+    if (params.agencies && params.agencies.length > 0) {
+      qp.set("agency", params.agencies.join(","));
+    } else if (agencyKeyword) {
+      qp.set("agency", agencyKeyword);
+    }
+
+    // Value range (Developer plan)
+    if (params.valueMin != null && params.valueMin > 0) {
+      qp.set("value_min", String(params.valueMin));
+    }
+    if (params.valueMax != null && params.valueMax > 0) {
+      qp.set("value_max", String(params.valueMax));
+    }
+
+    // Date range
+    if (params.postedFrom) {
+      qp.set("posted_from", params.postedFrom);
+    }
+    if (params.postedTo) {
+      qp.set("posted_to", params.postedTo);
+    }
+
+    // PSC codes
+    if (params.pscCodes && params.pscCodes.length > 0) {
+      qp.set("psc", params.pscCodes.join(","));
+    }
+
+    // Set-aside
+    if (params.setAsides && params.setAsides.length > 0) {
+      qp.set("set_aside", params.setAsides.join(","));
+    }
+
+    qp.set("limit", String(pageSize));
+    qp.set("offset", String(page * pageSize));
+
+    const url = `${GOVCON_OPPORTUNITIES_URL}?${qp.toString()}`;
+
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => null);
+      const errorMsg = errorBody?.error?.message || errorBody?.message || `GovCon API returned ${res.status}`;
+      throw new Error(errorMsg);
+    }
+
+    const data: GovConOpportunitiesResponse = await res.json();
+    totalRecords = data.pagination?.total || 0;
+    const awards = data.data || [];
+
+    for (const award of awards) {
+      const name = award.awardee_name;
+      if (!name) continue;
+
+      const key = name.toLowerCase().trim();
+      const existing = vendorMap.get(key);
+      const awardEntry = {
+        title: award.title,
+        amount: award.award_amount || 0,
+        date: award.posted_date,
+        agency: award.agency || "",
+        solicitationNumber: award.solicitation_number || "",
+        noticeId: award.notice_id,
+      };
+
+      if (existing) {
+        existing.totalAmount += award.award_amount || 0;
+        existing.awardCount++;
+        existing.maxSingleAward = Math.max(existing.maxSingleAward, award.award_amount || 0);
+        if (award.naics) award.naics.forEach((n) => existing.naics.add(n));
+        if (award.agency) existing.agencies.add(award.agency);
+        if (award.set_aside_type) existing.setAsideTypes.add(award.set_aside_type);
+        if (existing.awards.length < 10) existing.awards.push(awardEntry);
+      } else {
+        vendorMap.set(key, {
+          name,
+          totalAmount: award.award_amount || 0,
+          awardCount: 1,
+          maxSingleAward: award.award_amount || 0,
+          state: award.performance_state_code || "",
+          city: award.performance_city_name || "",
+          naics: new Set(award.naics || []),
+          pscs: new Set(),
+          agencies: new Set(award.agency ? [award.agency] : []),
+          setAsideTypes: new Set(award.set_aside_type ? [award.set_aside_type] : []),
+          awards: [awardEntry],
+        });
+      }
+    }
+
+    if (!data.pagination?.has_next || awards.length < pageSize) break;
+  }
+
+  return { vendors: [...vendorMap.values()], totalRecords };
+}
+
 // Fetch multiple pages to get more results (respects rate limits)
 export async function searchGovConEntitiesMultiPage(
   params: GovConSearchParams,

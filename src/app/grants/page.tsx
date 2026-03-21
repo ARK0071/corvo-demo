@@ -20,9 +20,6 @@ import {
   Users,
   CheckCircle2,
   AlertCircle,
-  Mail,
-  Shield,
-  Calendar,
   DollarSign,
   BarChart3,
 } from "lucide-react";
@@ -39,13 +36,9 @@ import {
   updateGrantNotes,
   removeFromPipeline,
   getStageCount,
-  getAwardedGrants,
   isInPipeline,
 } from "@/data/grant-pipeline";
-import { scoreVendorsForGrant, type GrantVendorMatch } from "@/data/matches";
-import type { PortVendor } from "@/data/port-vendors";
-import { addPortVendors } from "@/data/port-vendors";
-import { OutreachEmail } from "@/components/grant-match/outreach-email";
+import { VendorSearch } from "@/components/vendor-search/vendor-search";
 import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
 import { currentPortProfile } from "@/data/port-profile";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
@@ -84,23 +77,6 @@ const stageLabels: Record<PipelineStage, string> = {
   rejected: "Rejected",
 };
 
-const sectorColors: Record<string, string> = {
-  "Marine Construction": "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-  "Heavy Civil/Infrastructure": "bg-orange-500/10 text-orange-600 dark:text-orange-400",
-  "Environmental/Remediation": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  "Marine Equipment/Cranes": "bg-purple-500/10 text-purple-600 dark:text-purple-400",
-  "Electrical/Power": "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  "Engineering/Design": "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
-  "Security/IT": "bg-red-500/10 text-red-600 dark:text-red-400",
-  "Sustainability/Clean Energy": "bg-green-500/10 text-green-600 dark:text-green-400",
-};
-
-const recColors: Record<string, string> = {
-  strong_match: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-  good_match: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
-  partial_match: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  weak_match: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
-};
 
 const grantRecColors: Record<string, string> = {
   highly_recommended: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
@@ -176,14 +152,7 @@ function UnifiedGrantsDashboard() {
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [notesText, setNotesText] = useState("");
 
-  // Vendor Outreach tab state
-  const [selectedAwardedGrant, setSelectedAwardedGrant] = useState<string | null>(null);
-  const [vendors, setVendors] = useState<PortVendor[]>([]);
-  const [matches, setMatches] = useState<GrantVendorMatch[]>([]);
-  const [loadingVendors, setLoadingVendors] = useState(false);
-  const [vendorError, setVendorError] = useState<string | null>(null);
-  const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
-  const [expandedEmails, setExpandedEmails] = useState<Set<string>>(new Set());
+  // (Vendor search now handled by VendorSearch component)
 
   // Projects tab state
   const [projects, setProjects] = useState<Project[]>(getAllProjects());
@@ -423,80 +392,16 @@ function UnifiedGrantsDashboard() {
     setPipelineGrants([...getAllPipelineGrants()]);
   }
 
-  // Load vendors for awarded grant
-  async function handleLoadVendors(grantId: string) {
-    const grant = pipelineGrants.find((g) => g.id === grantId);
-    if (!grant) return;
-
-    setSelectedAwardedGrant(grantId);
-    setLoadingVendors(true);
-    setVendorError(null);
-
-    try {
-      const res = await fetch("/api/sam-search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          focusAreas: grant.focusAreas,
-          eligibleActivities: grant.eligibleActivities,
-          maxPages: 5,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to search federal vendors");
-      }
-
-      const { vendors: samVendors } = await res.json() as { vendors: PortVendor[]; totalRecords: number };
-
-      if (samVendors.length === 0) {
-        throw new Error("No federal vendors found for this grant's focus areas.");
-      }
-
-      addPortVendors(samVendors);
-      setVendors(samVendors);
-
-      // Convert PipelineGrant to GrantProgram format for scoring
-      const grantForScoring = {
-        id: grant.id,
-        name: grant.title,
-        shortName: grant.opportunityNumber,
-        agency: grant.agency,
-        description: grant.description,
-        totalFunding: grant.totalFunding,
-        minAward: grant.awardFloor,
-        maxAward: grant.awardCeiling,
-        matchRequirement: 0,
-        eligibleActivities: grant.eligibleActivities,
-        deadline: grant.closeDate,
-        status: "open" as const,
-        applicationUrl: grant.applicationUrl,
-        focusAreas: grant.focusAreas,
-      };
-
-      const newMatches = scoreVendorsForGrant(samVendors, grantForScoring);
-      newMatches.sort((a, b) => b.overallScore - a.overallScore);
-      setMatches(newMatches.slice(0, 20));
-    } catch (err) {
-      setVendorError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoadingVendors(false);
-    }
-  }
-
   function toggleStatus(status: string) {
     setSelectedStatuses((prev) =>
       prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
     );
   }
 
-  const awardedGrants = getAwardedGrants();
-
   return (
     <>
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-6 py-8">
+        <div className={`mx-auto px-6 py-8 ${activeTab === "outreach" ? "max-w-[90rem]" : "max-w-6xl"}`}>
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-3">
@@ -512,7 +417,7 @@ function UnifiedGrantsDashboard() {
                 {activeTab === "discover" && "Search and discover federal grant opportunities"}
                 {activeTab === "pipeline" && "Track your grant applications through each stage"}
                 {activeTab === "projects" && "Manage port projects and match them to grants"}
-                {activeTab === "outreach" && "Find and contact vendors for awarded grants"}
+                {activeTab === "outreach" && "Search qualified federal contractors with Subchapter N compliance intelligence"}
               </p>
             </div>
           </div>
@@ -1242,10 +1147,7 @@ function UnifiedGrantsDashboard() {
                                     {stage === "awarded" && (
                                       <Button
                                         size="sm"
-                                        onClick={() => {
-                                          setActiveTab("outreach");
-                                          handleLoadVendors(grant.id);
-                                        }}
+                                        onClick={() => setActiveTab("outreach")}
                                         className="h-6 text-[10px] px-2 flex-1 gap-1"
                                       >
                                         <Users className="h-3 w-3" />
@@ -1593,221 +1495,10 @@ function UnifiedGrantsDashboard() {
             </div>
           )}
 
-          {/* TAB 4: VENDOR OUTREACH */}
+          {/* TAB 4: VENDOR OUTREACH — Subchapter N Vendor Search */}
           {activeTab === "outreach" && (
             <div className="mt-2">
-            {awardedGrants.length === 0 ? (
-              <div className="text-center py-16 text-muted-foreground">
-                <Users className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                <p className="text-sm">No awarded grants yet</p>
-                <p className="text-xs mt-1">
-                  Move grants to "Awarded" status in the Pipeline tab to match vendors
-                </p>
-              </div>
-            ) : (
-              <div>
-                <Card className="p-5 mb-6">
-                  <label className="text-sm font-medium mb-2 block">Select Awarded Grant</label>
-                  <select
-                    value={selectedAwardedGrant || ""}
-                    onChange={(e) => {
-                      const grantId = e.target.value;
-                      if (grantId) {
-                        handleLoadVendors(grantId);
-                      }
-                    }}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="">Choose a grant...</option>
-                    {awardedGrants.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.title} - {formatCurrency(g.awardCeiling)}
-                      </option>
-                    ))}
-                  </select>
-
-                  {loadingVendors && (
-                    <div className="flex items-center gap-2 mt-4 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Searching federal contractors and scoring matches...
-                    </div>
-                  )}
-
-                  {vendorError && (
-                    <div className="mt-4 flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2">
-                      <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                      <p className="text-sm text-destructive">{vendorError}</p>
-                    </div>
-                  )}
-                </Card>
-
-                {matches.length > 0 && (
-                  <div>
-                    <h3 className="text-sm font-semibold mb-3">
-                      Top {matches.length} Vendor Matches
-                    </h3>
-                    <div className="space-y-2">
-                      {matches.map((match) => {
-                        const vendor = vendors.find((v) => v.id === match.vendorId);
-                        if (!vendor) return null;
-
-                        const isOpen = expandedVendors.has(vendor.id);
-                        const emailOpen = expandedEmails.has(vendor.id);
-                        const selectedGrant = pipelineGrants.find((g) => g.id === selectedAwardedGrant);
-
-                        return (
-                          <Card key={vendor.id} className="overflow-hidden">
-                            <button
-                              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors text-left"
-                              onClick={() => {
-                                if (isOpen) {
-                                  setExpandedVendors(new Set([...expandedVendors].filter((id) => id !== vendor.id)));
-                                } else {
-                                  setExpandedVendors(new Set([...expandedVendors, vendor.id]));
-                                }
-                              }}
-                            >
-                              <div className="flex items-center gap-3 flex-1 min-w-0">
-                                {isOpen ? (
-                                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                                )}
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm font-medium">{vendor.name}</span>
-                                    <Badge variant="outline" className={`text-[10px] ${recColors[match.recommendation]}`}>
-                                      {match.recommendation.replace("_", " ")}
-                                    </Badge>
-                                    {vendor.disadvantagedBusiness && (
-                                      <Badge variant="outline" className="text-[10px] bg-green-500/10 text-green-600 border-green-500/20">
-                                        <Shield className="h-2.5 w-2.5 mr-0.5" />
-                                        {vendor.disadvantagedBusiness}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-2 mt-0.5">
-                                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${sectorColors[vendor.sector] || ""}`}>
-                                      {vendor.sector}
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">{vendor.headquarters}</span>
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="text-right shrink-0 ml-4">
-                                <p className="text-lg font-mono font-bold">{match.overallScore}</p>
-                                <p className="text-[10px] text-muted-foreground">/ 100</p>
-                              </div>
-                            </button>
-
-                            {isOpen && (
-                              <div className="border-t px-4 pb-4 pt-3">
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-                                  {(Object.entries(match.dimensions) as [string, number][]).map(([key, value]) => (
-                                    <div key={key}>
-                                      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                                        {key.replace(/([A-Z])/g, " $1").trim()}
-                                      </span>
-                                      <div className="flex items-center gap-2 mt-1">
-                                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                                          <div
-                                            className={`h-full rounded-full ${
-                                              value >= 70
-                                                ? "bg-green-500"
-                                                : value >= 50
-                                                  ? "bg-blue-500"
-                                                  : value >= 30
-                                                    ? "bg-amber-500"
-                                                    : "bg-red-500"
-                                            }`}
-                                            style={{ width: `${value}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-xs font-mono w-6 text-right">{value}</span>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-
-                                {match.strengths.length > 0 && (
-                                  <div className="mb-3">
-                                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Strengths</span>
-                                    <ul className="mt-1 space-y-0.5">
-                                      {match.strengths.map((s) => (
-                                        <li key={s} className="text-xs text-green-600 dark:text-green-400 flex items-start gap-1.5">
-                                          <CheckCircle2 className="h-3 w-3 mt-0.5 shrink-0" />
-                                          {s}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-
-                                {match.gaps.length > 0 && (
-                                  <div className="mb-4">
-                                    <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Gaps</span>
-                                    <ul className="mt-1 space-y-0.5">
-                                      {match.gaps.map((g) => (
-                                        <li key={g} className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
-                                          <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                                          {g}
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  </div>
-                                )}
-
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (emailOpen) {
-                                      setExpandedEmails(new Set([...expandedEmails].filter((id) => id !== vendor.id)));
-                                    } else {
-                                      setExpandedEmails(new Set([...expandedEmails, vendor.id]));
-                                    }
-                                  }}
-                                  className="gap-1.5 text-xs"
-                                >
-                                  <Mail className="h-3.5 w-3.5" />
-                                  {emailOpen ? "Hide" : "Show"} Outreach Email
-                                </Button>
-
-                                {emailOpen && selectedGrant && (
-                                  <div className="mt-3">
-                                    <OutreachEmail
-                                      match={match}
-                                      grant={{
-                                        id: selectedGrant.id,
-                                        name: selectedGrant.title,
-                                        shortName: selectedGrant.opportunityNumber,
-                                        agency: selectedGrant.agency,
-                                        description: selectedGrant.description,
-                                        totalFunding: selectedGrant.totalFunding,
-                                        minAward: selectedGrant.awardFloor,
-                                        maxAward: selectedGrant.awardCeiling,
-                                        matchRequirement: 0,
-                                        eligibleActivities: selectedGrant.eligibleActivities,
-                                        deadline: selectedGrant.closeDate,
-                                        status: "open",
-                                        applicationUrl: selectedGrant.applicationUrl,
-                                        focusAreas: selectedGrant.focusAreas,
-                                      }}
-                                      vendor={vendor}
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+              <VendorSearch />
             </div>
           )}
         </div>
