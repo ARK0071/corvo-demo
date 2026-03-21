@@ -59,12 +59,20 @@ const agencyBadgeColors: Record<string, string> = {
   NOAA: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
 };
 
+function relevancyColor(score: number): string {
+  if (score >= 70) return "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20";
+  if (score >= 45) return "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20";
+  if (score >= 25) return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
+  return "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20";
+}
+
 interface VendorCardProps {
   vendor: EnrichedVendor;
   rank: number;
+  relevancyScore?: number;
 }
 
-export function VendorCard({ vendor, rank }: VendorCardProps) {
+export function VendorCard({ vendor, rank, relevancyScore }: VendorCardProps) {
   const [expanded, setExpanded] = useState(false);
   const c = vendor.compliance;
 
@@ -140,8 +148,13 @@ export function VendorCard({ vendor, rank }: VendorCardProps) {
           </div>
         </div>
 
-        {/* Procurement tier badge (right side) */}
-        <div className="shrink-0 text-right">
+        {/* Procurement tier badge + relevancy (right side) */}
+        <div className="shrink-0 text-right space-y-1">
+          {relevancyScore !== undefined && (
+            <Badge variant="outline" className={`text-[9px] ${relevancyColor(relevancyScore)}`}>
+              {relevancyScore}% relevant
+            </Badge>
+          )}
           <Badge variant="outline" className={`text-[9px] ${tierColors[c.procurementTier]}`}>
             {c.procurementTier === "competitive" ? "Full Competitive" : c.procurementTier === "delegated" ? "Delegated" : "Routine"}
           </Badge>

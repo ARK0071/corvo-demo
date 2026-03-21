@@ -19,6 +19,8 @@ import {
   Shield,
   FileText,
   Briefcase,
+  FolderKanban,
+  Loader2,
 } from "lucide-react";
 import {
   PORT_NAICS_OPTIONS,
@@ -33,12 +35,17 @@ import {
   type VendorSearchFilters,
   type NoticeType,
 } from "@/lib/vendor-filters";
+import type { Project } from "@/data/projects";
 
 interface VendorFiltersProps {
   filters: VendorSearchFilters;
   onChange: (filters: VendorSearchFilters) => void;
   onReset: () => void;
   resultCount?: number;
+  projects?: Project[];
+  selectedProjectId: string | null;
+  onProjectChange: (projectId: string | null) => void;
+  scoringInProgress?: boolean;
 }
 
 function FilterSection({
@@ -112,7 +119,16 @@ function ChipSelect({
   );
 }
 
-export function VendorFilters({ filters, onChange, onReset, resultCount }: VendorFiltersProps) {
+export function VendorFilters({
+  filters,
+  onChange,
+  onReset,
+  resultCount,
+  projects,
+  selectedProjectId,
+  onProjectChange,
+  scoringInProgress,
+}: VendorFiltersProps) {
   const [showAllStates, setShowAllStates] = useState(false);
   const activeFilterCount = [
     filters.naicsCodes.length > 0,
@@ -150,6 +166,55 @@ export function VendorFilters({ filters, onChange, onReset, resultCount }: Vendo
           Reset
         </Button>
       </div>
+
+      {/* Project Relevancy Sort */}
+      {projects && projects.length > 0 && (
+        <FilterSection
+          title="Sort by Project Relevancy"
+          icon={<FolderKanban className="h-3.5 w-3.5" />}
+          defaultOpen={true}
+          badge={selectedProjectId ? 1 : undefined}
+        >
+          <p className="text-[10px] text-muted-foreground mb-2">
+            Re-sort results by semantic relevancy to a project
+          </p>
+          <div className="space-y-1">
+            <button
+              onClick={() => onProjectChange(null)}
+              className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded-md border transition-colors ${
+                !selectedProjectId
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-background border-border hover:bg-muted/70 text-muted-foreground"
+              }`}
+            >
+              <span className="font-medium">Default (by award value)</span>
+            </button>
+            {projects.map((proj) => (
+              <button
+                key={proj.id}
+                onClick={() => onProjectChange(proj.id)}
+                disabled={scoringInProgress}
+                className={`w-full text-left text-[11px] px-2.5 py-1.5 rounded-md border transition-colors ${
+                  selectedProjectId === proj.id
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background border-border hover:bg-muted/70 text-muted-foreground"
+                } disabled:opacity-50`}
+              >
+                <span className="font-medium">{proj.name}</span>
+                <span className="block text-[10px] opacity-70 mt-0.5 truncate">
+                  {proj.projectType} — {proj.status}
+                </span>
+              </button>
+            ))}
+          </div>
+          {scoringInProgress && (
+            <div className="flex items-center gap-1.5 mt-2 text-[10px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Computing relevancy scores...
+            </div>
+          )}
+        </FilterSection>
+      )}
 
       {/* Filter 1: NAICS Codes */}
       <FilterSection
@@ -225,15 +290,21 @@ export function VendorFilters({ filters, onChange, onReset, resultCount }: Vendo
       <FilterSection
         title="Set-Aside Status"
         icon={<Shield className="h-3.5 w-3.5" />}
-        badge={filters.setAsides.length}
+        badge={filters.setAsides.filter((s) => s !== "").length}
       >
         <p className="text-[10px] text-muted-foreground mb-2">
           Sec. 60.404(d)(4) / 60.458(6) — SBD program impact
         </p>
         <ChipSelect
           options={SET_ASIDE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-          selected={filters.setAsides}
-          onToggle={(v) => update({ setAsides: toggleInArray(filters.setAsides, v) })}
+          selected={filters.setAsides.length === 0 ? [""] : filters.setAsides}
+          onToggle={(v) => {
+            if (v === "") {
+              update({ setAsides: [] });
+            } else {
+              update({ setAsides: toggleInArray(filters.setAsides.filter((s) => s !== ""), v) });
+            }
+          }}
         />
       </FilterSection>
 

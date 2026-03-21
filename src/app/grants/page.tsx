@@ -1498,7 +1498,7 @@ function UnifiedGrantsDashboard() {
           {/* TAB 4: VENDOR OUTREACH — Subchapter N Vendor Search */}
           {activeTab === "outreach" && (
             <div className="mt-2">
-              <VendorSearch />
+              <VendorSearch projects={projects} />
             </div>
           )}
         </div>

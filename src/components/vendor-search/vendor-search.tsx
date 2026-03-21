@@ -1,28 +1,22 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Search,
   Loader2,
   Users,
   AlertCircle,
-  Download,
   SlidersHorizontal,
   ChevronLeft,
-  BarChart3,
-  Shield,
-  DollarSign,
-  Building2,
-  FileText,
 } from "lucide-react";
 import {
   getDefaultFilters,
   type VendorSearchFilters,
   type EnrichedVendor,
 } from "@/lib/vendor-filters";
+import type { Project } from "@/data/projects";
 import { VendorFilters } from "./vendor-filters";
 import { VendorCard } from "./vendor-card";
 
@@ -40,7 +34,11 @@ interface SearchResponse {
   filtersApplied: Record<string, unknown>;
 }
 
-export function VendorSearch() {
+interface VendorSearchProps {
+  projects?: Project[];
+}
+
+export function VendorSearch({ projects }: VendorSearchProps) {
   const [filters, setFilters] = useState<VendorSearchFilters>(getDefaultFilters);
   const [vendors, setVendors] = useState<EnrichedVendor[]>([]);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -48,6 +46,11 @@ export function VendorSearch() {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [showFilters, setShowFilters] = useState(true);
+
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [relevancyScores, setRelevancyScores] = useState<Record<string, number>>({});
+  const [scoringInProgress, setScoringInProgress] = useState(false);
+  const unsortedVendorsRef = useRef<EnrichedVendor[]>([]);
 
   const handleSearch = useCallback(async () => {
     setLoading(true);
@@ -66,9 +69,12 @@ export function VendorSearch() {
       }
 
       const data: SearchResponse = await res.json();
+      unsortedVendorsRef.current = data.vendors;
       setVendors(data.vendors);
       setTotalRecords(data.totalRecords);
       setHasSearched(true);
+      setSelectedProjectId(null);
+      setRelevancyScores({});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -82,7 +88,56 @@ export function VendorSearch() {
     setTotalRecords(0);
     setHasSearched(false);
     setError(null);
+    setSelectedProjectId(null);
+    setRelevancyScores({});
+    unsortedVendorsRef.current = [];
   }, []);
+
+  const handleProjectChange = useCallback(
+    async (projectId: string | null) => {
+      setSelectedProjectId(projectId);
+
+      if (!projectId) {
+        setRelevancyScores({});
+        setVendors([...unsortedVendorsRef.current]);
+        return;
+      }
+
+      const project = projects?.find((p) => p.id === projectId);
+      if (!project || unsortedVendorsRef.current.length === 0) return;
+
+      setScoringInProgress(true);
+      try {
+        const res = await fetch("/api/vendor-relevancy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project,
+            vendors: unsortedVendorsRef.current,
+          }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Relevancy scoring failed");
+        }
+
+        const { scores } = (await res.json()) as { scores: Record<string, number> };
+        setRelevancyScores(scores);
+
+        const sorted = [...unsortedVendorsRef.current].sort(
+          (a, b) => (scores[b.id] ?? 0) - (scores[a.id] ?? 0)
+        );
+        setVendors(sorted);
+      } catch (err) {
+        console.error("Relevancy scoring error:", err);
+        setError(err instanceof Error ? err.message : "Relevancy scoring failed");
+      } finally {
+        setScoringInProgress(false);
+      }
+    },
+    [projects]
+  );
 
   // Aggregate stats for the results summary
   const stats = vendors.length > 0 ? {
@@ -103,6 +158,10 @@ export function VendorSearch() {
             onChange={setFilters}
             onReset={handleReset}
             resultCount={vendors.length}
+            projects={projects}
+            selectedProjectId={selectedProjectId}
+            onProjectChange={handleProjectChange}
+            scoringInProgress={scoringInProgress}
           />
           <Button
             onClick={handleSearch}
@@ -151,6 +210,16 @@ export function VendorSearch() {
               <span className="text-xs text-muted-foreground">
                 {vendors.length} vendor{vendors.length !== 1 ? "s" : ""} found
                 {totalRecords > 0 && ` (${totalRecords} total records)`}
+                {selectedProjectId && !scoringInProgress && (
+                  <span className="ml-1 text-primary font-medium">
+                    — sorted by project relevancy
+                  </span>
+                )}
+                {scoringInProgress && (
+                  <span className="ml-1 text-muted-foreground italic">
+                    — computing relevancy...
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -247,7 +316,12 @@ export function VendorSearch() {
         {!loading && vendors.length > 0 && (
           <div className="space-y-2">
             {vendors.map((vendor, i) => (
-              <VendorCard key={vendor.id} vendor={vendor} rank={i + 1} />
+              <VendorCard
+                key={vendor.id}
+                vendor={vendor}
+                rank={i + 1}
+                relevancyScore={selectedProjectId ? relevancyScores[vendor.id] : undefined}
+              />
             ))}
           </div>
         )}

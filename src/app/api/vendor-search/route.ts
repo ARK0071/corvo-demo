@@ -77,8 +77,8 @@ export async function POST(req: Request) {
 
     const { vendors: rawVendors, totalRecords } = await searchVendorsAdvanced({
       naicsCodes: body.naicsCodes,
-      noticeType: body.noticeType || "Award Notice",
-      setAsides: body.setAsides,
+      noticeType: body.noticeType ?? "Award Notice",
+      setAsides: body.setAsides?.filter((s) => s !== ""),
       states: body.states,
       agencies: body.agencies,
       agencySearch: body.agencySearch,
