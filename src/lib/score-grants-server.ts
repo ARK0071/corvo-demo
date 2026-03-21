@@ -2,8 +2,6 @@
  * Server-side grant scoring. Used by /api/score-grants and grant-intelligence tools.
  */
 
-import * as path from "path";
-import * as fs from "fs";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import {
   buildGrantEmbeddingText,
@@ -22,8 +20,9 @@ import {
   type TopDomainMatch,
 } from "@/data/grant-scoring";
 import { getDefaultProfile } from "@/data/port-profile";
-
-const EMBEDDINGS_DIR = path.join(process.cwd(), "src/data/embeddings");
+import projectEmbeddingsData from "@/data/embeddings/project-embeddings.json";
+import profileEmbeddingData from "@/data/embeddings/profile-embedding.json";
+import domainEmbeddingsData from "@/data/embeddings/funding-domain-embeddings.json";
 
 interface ProjectEmbedding {
   name: string;
@@ -46,23 +45,15 @@ interface DomainEmbedding {
 const grantEmbeddingCache = new Map<string, number[]>();
 
 function loadProjectEmbeddings(): Record<string, ProjectEmbedding> {
-  const p = path.join(EMBEDDINGS_DIR, "project-embeddings.json");
-  const raw = fs.readFileSync(p, "utf-8");
-  return JSON.parse(raw) as Record<string, ProjectEmbedding>;
+  return projectEmbeddingsData as unknown as Record<string, ProjectEmbedding>;
 }
 
 function loadProfileEmbedding(): ProfileEmbedding | null {
-  const p = path.join(EMBEDDINGS_DIR, "profile-embedding.json");
-  if (!fs.existsSync(p)) return null;
-  const raw = fs.readFileSync(p, "utf-8");
-  return JSON.parse(raw) as ProfileEmbedding;
+  return profileEmbeddingData as unknown as ProfileEmbedding;
 }
 
 function loadDomainEmbeddings(): Record<string, DomainEmbedding> {
-  const p = path.join(EMBEDDINGS_DIR, "funding-domain-embeddings.json");
-  if (!fs.existsSync(p)) return {};
-  const raw = fs.readFileSync(p, "utf-8");
-  return JSON.parse(raw) as Record<string, DomainEmbedding>;
+  return domainEmbeddingsData as unknown as Record<string, DomainEmbedding>;
 }
 
 function hasValidVector(vec: number[]): boolean {
