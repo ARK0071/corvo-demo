@@ -9,7 +9,8 @@ import {
 } from "@/data/grant-pipeline";
 import { currentPortProfile } from "@/data/port-profile";
 import { fetchGrantDetails, type DiscoveredGrant } from "@/lib/grants-gov";
-import { scoreGrantForPort, type GrantScore } from "@/data/grant-scoring";
+import { scoreGrantsServer } from "@/lib/score-grants-server";
+import type { GrantScore } from "@/data/grant-scoring";
 import { getAllProjects, getProjectById } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects } from "@/data/grant-project-matching";
 import { analyzeCompetitiveIntelligence } from "@/data/competitive-intelligence";
@@ -112,9 +113,13 @@ export async function explainGrantScore(params: { grantId: string }) {
   // Check cache first
   let score = grantScoreCache.get(params.grantId);
   if (!score) {
-    // Score the grant
-    score = scoreGrantForPort(discoveredGrant, currentPortProfile);
-    grantScoreCache.set(params.grantId, score);
+    const [s] = await scoreGrantsServer([discoveredGrant]);
+    if (s) {
+      score = s;
+      grantScoreCache.set(params.grantId, score);
+    } else {
+      return { error: "Could not score grant" };
+    }
   }
 
   // Calculate deadline info
@@ -138,18 +143,23 @@ export async function explainGrantScore(params: { grantId: string }) {
         status: score.eligibilityStatus,
         max: 100,
       },
-      alignment: {
-        score: score.alignmentScore,
+      profileAlignment: {
+        score: score.profileAlignmentScore,
         max: 100,
-        weight: "35%",
+        weight: "25%",
       },
-      impact: {
-        score: score.impactScore,
+      projectSimilarity: {
+        score: score.projectSimilarityScore,
+        max: 100,
+        weight: "20%",
+      },
+      spendSimilarity: {
+        score: score.spendSimilarityScore,
         max: 100,
         weight: "15%",
       },
-      competitiveness: {
-        score: score.competitivenessScore,
+      impact: {
+        score: score.impactScore,
         max: 100,
         weight: "15%",
       },
@@ -419,58 +429,46 @@ export async function compareTwoGrants(params: {
   if (!grant1) return { error: `Grant ${params.grantId1} not found` };
   if (!grant2) return { error: `Grant ${params.grantId2} not found` };
 
-  // Get scores for both grants
-  const score1 =
-    grantScoreCache.get(params.grantId1) ||
-    scoreGrantForPort(
-      {
-        id: grant1.id,
-        opportunityNumber: grant1.opportunityNumber,
-        title: grant1.title,
-        agency: grant1.agency,
-        agencyCode: grant1.agencyCode,
-        description: grant1.description,
-        awardFloor: grant1.awardFloor,
-        awardCeiling: grant1.awardCeiling,
-        totalFunding: grant1.totalFunding,
-        closeDate: grant1.closeDate,
-        postDate: "",
-        status: "posted",
-        applicationUrl: grant1.applicationUrl,
-        eligibility: grant1.eligibleActivities,
-        fundingCategories: grant1.focusAreas,
-        fundingInstruments: [],
-        costSharing: false,
-        alnNumbers: [],
-      },
-      currentPortProfile
-    );
+  const toDiscovered = (g: typeof grant1) => ({
+    id: g.id,
+    opportunityNumber: g.opportunityNumber,
+    title: g.title,
+    agency: g.agency,
+    agencyCode: g.agencyCode,
+    description: g.description,
+    awardFloor: g.awardFloor,
+    awardCeiling: g.awardCeiling,
+    totalFunding: g.totalFunding,
+    closeDate: g.closeDate,
+    postDate: "",
+    status: "posted",
+    applicationUrl: g.applicationUrl,
+    eligibility: g.eligibleActivities,
+    fundingCategories: g.focusAreas,
+    fundingInstruments: [],
+    costSharing: false,
+    alnNumbers: [],
+  });
 
-  const score2 =
-    grantScoreCache.get(params.grantId2) ||
-    scoreGrantForPort(
-      {
-        id: grant2.id,
-        opportunityNumber: grant2.opportunityNumber,
-        title: grant2.title,
-        agency: grant2.agency,
-        agencyCode: grant2.agencyCode,
-        description: grant2.description,
-        awardFloor: grant2.awardFloor,
-        awardCeiling: grant2.awardCeiling,
-        totalFunding: grant2.totalFunding,
-        closeDate: grant2.closeDate,
-        postDate: "",
-        status: "posted",
-        applicationUrl: grant2.applicationUrl,
-        eligibility: grant2.eligibleActivities,
-        fundingCategories: grant2.focusAreas,
-        fundingInstruments: [],
-        costSharing: false,
-        alnNumbers: [],
-      },
-      currentPortProfile
-    );
+  let score1 = grantScoreCache.get(params.grantId1);
+  let score2 = grantScoreCache.get(params.grantId2);
+  if (!score1 || !score2) {
+    const scores = await scoreGrantsServer([
+      toDiscovered(grant1),
+      toDiscovered(grant2),
+    ]);
+    if (scores[0]) {
+      score1 = scores[0];
+      grantScoreCache.set(params.grantId1, score1);
+    }
+    if (scores[1]) {
+      score2 = scores[1];
+      grantScoreCache.set(params.grantId2, score2);
+    }
+  }
+  if (!score1 || !score2) {
+    return { error: "Could not score one or both grants" };
+  }
 
   return {
     comparison: [
@@ -504,11 +502,11 @@ export async function compareTwoGrants(params: {
             : "N/A",
       },
       {
-        metric: "Alignment Score",
-        grant1: score1.alignmentScore,
-        grant2: score2.alignmentScore,
+        metric: "Profile Alignment",
+        grant1: score1.profileAlignmentScore,
+        grant2: score2.profileAlignmentScore,
         winner:
-          score1.alignmentScore > score2.alignmentScore
+          score1.profileAlignmentScore > score2.profileAlignmentScore
             ? grant1.title
             : grant2.title,
       },

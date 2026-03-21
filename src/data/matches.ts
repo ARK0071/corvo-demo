@@ -1,11 +1,13 @@
 import { type GrantProgram } from "./grants";
 import { portVendors, type PortVendor } from "./port-vendors";
+import { scoreMaritimeRelevance } from "@/lib/vendorMatching/maritimeRelevance";
 
 export interface MatchDimensions {
-  capabilityAlignment: number;   // 0-100
+  capabilityAlignment: number;   // 0-100 (semantic when server-scored)
   certificationMatch: number;    // 0-100
   geographicFit: number;         // 0-100
   financialCapacity: number;     // 0-100
+  maritimeRelevance: number;     // 0-100
 }
 
 export interface GrantVendorMatch {
@@ -148,7 +150,7 @@ const FEDERAL_DESIGNATIONS = new Set(["DBE", "SDB", "WBE", "MBE", "SDVOSB", "HUB
 // Industry certifications that only SAM.gov or manual entry can provide
 const INDUSTRY_CERTS = new Set(["ISO 9001", "ISO 14001", "ISO 27001", "OSHA", "USACE", "UL", "Energy Star", "CMMC", "FedRAMP", "Buy America"]);
 
-function scoreCertificationMatch(vendor: PortVendor, grant: GrantProgram): number {
+export function scoreCertificationMatch(vendor: PortVendor, grant: GrantProgram): number {
   const relevantCerts = grantCertMap[grant.id] || [];
   if (relevantCerts.length === 0) return 60;
 
@@ -203,33 +205,33 @@ function scoreCertificationMatch(vendor: PortVendor, grant: GrantProgram): numbe
   return Math.min(100, score);
 }
 
-function scoreGeographicFit(vendor: PortVendor): number {
+const US_STATES = [
+  "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
+  "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
+  "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj",
+  "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc",
+  "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
+  "dc",
+];
+
+const GULF_COAST_STATES = new Set(["tx", "la", "ms", "al", "fl"]);
+
+export function scoreGeographicFit(vendor: PortVendor): number {
   const hq = vendor.headquarters.toLowerCase();
 
-  // US state abbreviations — SAM.gov returns real addresses
-  const usStates = [
-    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga",
-    "hi", "id", "il", "in", "ia", "ks", "ky", "la", "me", "md",
-    "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj",
-    "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc",
-    "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy",
-    "dc",
-  ];
-
-  // Check if any US state abbreviation is in the headquarters string
-  for (const st of usStates) {
+  for (const st of US_STATES) {
     if (hq.includes(`, ${st}`) || hq.endsWith(` ${st}`)) {
+      if (GULF_COAST_STATES.has(st)) return 95;
       return 85;
     }
   }
 
-  // Check for common US indicators
   if (hq.includes("usa") || hq.includes("united states")) return 85;
 
   return 50;
 }
 
-function scoreFinancialCapacity(vendor: PortVendor, grant: GrantProgram): number {
+export function scoreFinancialCapacity(vendor: PortVendor, grant: GrantProgram): number {
   // USASpending vendors have real federal award totals in annualRevenue
   if (vendor.annualRevenue > 0) {
     const revenueRatio = vendor.annualRevenue / Math.max(grant.maxAward, 1);
@@ -248,21 +250,37 @@ function scoreFinancialCapacity(vendor: PortVendor, grant: GrantProgram): number
   return 40; // No financial data available
 }
 
-function identifyStrengths(vendor: PortVendor, grant: GrantProgram, dims: MatchDimensions): string[] {
+export function identifyStrengths(
+  vendor: PortVendor,
+  grant: GrantProgram,
+  dims: MatchDimensions,
+  semanticReasons?: string[],
+  maritimeReasons?: string[],
+): string[] {
   const strengths: string[] = [];
-  if (dims.capabilityAlignment >= 60) strengths.push(`Strong capability alignment with ${grant.shortName} requirements`);
+  if (dims.capabilityAlignment >= 60) {
+    const reason = semanticReasons?.[0]
+      ? `Strong semantic match: ${semanticReasons[0]}`
+      : `Strong capability alignment with ${grant.shortName} requirements`;
+    strengths.push(reason);
+  }
+  if (dims.maritimeRelevance >= 70 && maritimeReasons?.length) {
+    strengths.push(`Maritime/port relevance: ${maritimeReasons.slice(0, 2).join(", ")}`);
+  }
   if (dims.certificationMatch >= 60) strengths.push("Holds relevant certifications/designations for the program");
   if (vendor.disadvantagedBusiness) strengths.push(`${vendor.disadvantagedBusiness} designation provides federal scoring advantage`);
-  if (dims.geographicFit >= 80) strengths.push("US-based — meets domestic preference requirements");
+  if (dims.geographicFit >= 90) strengths.push("Gulf Coast–based — ideal proximity for port projects");
+  else if (dims.geographicFit >= 80) strengths.push("US-based — meets domestic preference requirements");
   if (dims.financialCapacity >= 65) strengths.push(`Proven federal contractor — $${(vendor.annualRevenue / 1_000_000).toFixed(0)}M in federal awards`);
   if (vendor.pastPortProjects.length >= 3) strengths.push(`${vendor.pastPortProjects.length} documented federal projects in relevant NAICS codes`);
   if (vendor.capabilities.length >= 5) strengths.push(`Diverse capabilities (${vendor.capabilities.length} NAICS/PSC codes)`);
-  return strengths.slice(0, 4);
+  return strengths.slice(0, 5);
 }
 
-function identifyGaps(vendor: PortVendor, grant: GrantProgram, dims: MatchDimensions): string[] {
+export function identifyGaps(vendor: PortVendor, grant: GrantProgram, dims: MatchDimensions): string[] {
   const gaps: string[] = [];
   if (dims.capabilityAlignment < 40) gaps.push(`Limited capability alignment with ${grant.shortName} focus areas`);
+  if (dims.maritimeRelevance < 30) gaps.push("Low maritime/port sector relevance — may not align with port-specific work");
   if (dims.certificationMatch < 40) gaps.push("No federal small-business designations on file — may limit scoring");
   if (dims.geographicFit < 60) gaps.push("Non-US headquarters may create Buy America compliance challenges");
   if (dims.financialCapacity < 50) gaps.push("Limited federal award history — may need to demonstrate bonding capacity");
@@ -270,33 +288,94 @@ function identifyGaps(vendor: PortVendor, grant: GrantProgram, dims: MatchDimens
   if (grant.matchRequirement > 0) {
     gaps.push(`Grant requires ${(grant.matchRequirement * 100).toFixed(0)}% local cost-share — verify funding availability`);
   }
-  return gaps.slice(0, 3);
+  return gaps.slice(0, 4);
 }
 
-// Weights for overall score — adapted for USASpending data
-const WEIGHTS = {
-  capabilityAlignment: 0.40,
-  certificationMatch: 0.25,
-  geographicFit: 0.20,
-  financialCapacity: 0.15,
+// Weights for overall score
+export const WEIGHTS = {
+  capabilityAlignment: 0.45,
+  certificationMatch: 0.20,
+  geographicFit: 0.15,
+  financialCapacity: 0.10,
+  maritimeRelevance: 0.10,
 };
 
+/**
+ * Sync scoring (keyword-based capability alignment + maritime heuristics).
+ * Used as fallback when server-side embedding scoring is unavailable.
+ */
 export function scoreVendorForGrant(vendor: PortVendor, grant: GrantProgram): GrantVendorMatch {
+  const maritime = scoreMaritimeRelevance(vendor);
   const dimensions: MatchDimensions = {
     capabilityAlignment: scoreCapabilityAlignment(vendor, grant),
     certificationMatch: scoreCertificationMatch(vendor, grant),
     geographicFit: scoreGeographicFit(vendor),
     financialCapacity: scoreFinancialCapacity(vendor, grant),
+    maritimeRelevance: maritime.score,
   };
 
   const overallScore = Math.round(
     dimensions.capabilityAlignment * WEIGHTS.capabilityAlignment +
     dimensions.certificationMatch * WEIGHTS.certificationMatch +
     dimensions.geographicFit * WEIGHTS.geographicFit +
-    dimensions.financialCapacity * WEIGHTS.financialCapacity
+    dimensions.financialCapacity * WEIGHTS.financialCapacity +
+    dimensions.maritimeRelevance * WEIGHTS.maritimeRelevance
   );
 
-  const strengths = identifyStrengths(vendor, grant, dimensions);
+  const strengths = identifyStrengths(vendor, grant, dimensions, undefined, maritime.reasons);
+  const gaps = identifyGaps(vendor, grant, dimensions);
+
+  let recommendation: GrantVendorMatch["recommendation"];
+  if (overallScore >= 65) recommendation = "strong_match";
+  else if (overallScore >= 50) recommendation = "good_match";
+  else if (overallScore >= 35) recommendation = "partial_match";
+  else recommendation = "weak_match";
+
+  return {
+    grantId: grant.id,
+    vendorId: vendor.id,
+    overallScore,
+    dimensions,
+    strengths,
+    gaps,
+    recommendation,
+  };
+}
+
+/**
+ * Server-side scoring: accepts a pre-computed semantic capability score
+ * (from embedding cosine similarity) and maritime result, then assembles
+ * the full GrantVendorMatch with the new weights.
+ *
+ * Called from the API route — NOT from client-side code.
+ */
+export function scoreVendorForGrantWithSemantics(
+  vendor: PortVendor,
+  grant: GrantProgram,
+  semanticCapabilityScore: number,
+  maritimeResult: { score: number; reasons: string[] },
+): GrantVendorMatch {
+  const dimensions: MatchDimensions = {
+    capabilityAlignment: semanticCapabilityScore,
+    certificationMatch: scoreCertificationMatch(vendor, grant),
+    geographicFit: scoreGeographicFit(vendor),
+    financialCapacity: scoreFinancialCapacity(vendor, grant),
+    maritimeRelevance: maritimeResult.score,
+  };
+
+  const overallScore = Math.round(
+    dimensions.capabilityAlignment * WEIGHTS.capabilityAlignment +
+    dimensions.certificationMatch * WEIGHTS.certificationMatch +
+    dimensions.geographicFit * WEIGHTS.geographicFit +
+    dimensions.financialCapacity * WEIGHTS.financialCapacity +
+    dimensions.maritimeRelevance * WEIGHTS.maritimeRelevance
+  );
+
+  const semanticReasons = semanticCapabilityScore >= 60
+    ? [`Semantic capability alignment score: ${semanticCapabilityScore}`]
+    : undefined;
+
+  const strengths = identifyStrengths(vendor, grant, dimensions, semanticReasons, maritimeResult.reasons);
   const gaps = identifyGaps(vendor, grant, dimensions);
 
   let recommendation: GrantVendorMatch["recommendation"];

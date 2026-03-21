@@ -22,15 +22,12 @@ import {
   AlertCircle,
   Mail,
   Shield,
-  Calendar,
   DollarSign,
-  BarChart3,
   FileText,
   Copy,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
-import type { SmartMatchResult } from "@/lib/smartMatch/ranker";
 import {
   getAllPipelineGrants,
   addToPipeline,
@@ -38,14 +35,13 @@ import {
   updateGrantNotes,
   removeFromPipeline,
   getStageCount,
-  getAwardedGrants,
   isInPipeline,
 } from "@/data/grant-pipeline";
-import { scoreVendorsForGrant, type GrantVendorMatch } from "@/data/matches";
+import type { GrantVendorMatch } from "@/data/matches";
 import type { PortVendor } from "@/data/port-vendors";
 import { addPortVendors } from "@/data/port-vendors";
 import { OutreachEmail } from "@/components/grant-match/outreach-email";
-import { scoreGrantsForPort, type GrantScore } from "@/data/grant-scoring";
+import type { GrantScore } from "@/data/grant-scoring";
 import { currentPortProfile } from "@/data/port-profile";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
@@ -207,10 +203,6 @@ function UnifiedGrantsDashboard() {
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
 
-  // Smart Match disabled (legacy state kept for compatibility)
-  const matchMode: "manual" = "manual";
-  const [smartMatchResults, setSmartMatchResults] = useState<Map<string, SmartMatchResult>>(new Map());
-
   // Pipeline tab state
   const [pipelineGrants, setPipelineGrants] = useState<PipelineGrant[]>(getAllPipelineGrants());
   const [expandedPipeline, setExpandedPipeline] = useState<Set<string>>(new Set());
@@ -291,9 +283,6 @@ function UnifiedGrantsDashboard() {
         searchCache.set(cacheKey, { grants, totalCount: totalCountValue });
       }
 
-      // Smart Match disabled – always use raw Grants.gov results
-      setSmartMatchResults(new Map());
-
       setDiscoveredGrants(grants);
       setTotalCount(totalCountValue);
 
@@ -305,18 +294,24 @@ function UnifiedGrantsDashboard() {
     }
   }
 
-  // Score grants for selected port profile eligibility and fit
-  function scoreGrants(grants: DiscoveredGrant[]) {
+  // Score grants via API (embedding-based + eligibility + impact)
+  async function scoreGrants(grants: DiscoveredGrant[]) {
     setScanning(true);
-
     try {
-      const scores = scoreGrantsForPort(grants, selectedProfile);
+      const res = await fetch("/api/score-grants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grants }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Scoring failed");
+      }
+      const { scores } = (await res.json()) as { scores: GrantScore[] };
       const scoreMap = new Map<string, GrantScore>();
-
       for (const score of scores) {
         scoreMap.set(score.grantId, score);
       }
-
       setGrantScores(scoreMap);
     } catch (err) {
       console.error("Error scoring grants:", err);
@@ -521,7 +516,6 @@ function UnifiedGrantsDashboard() {
       addPortVendors(filteredVendors);
       setVendors(filteredVendors);
 
-      // Convert Project to GrantProgram-like format for scoring
       const grantForScoring = {
         id: project.id,
         name: project.name,
@@ -539,9 +533,19 @@ function UnifiedGrantsDashboard() {
         focusAreas: project.focusAreas,
       };
 
-      const newMatches = scoreVendorsForGrant(filteredVendors, grantForScoring);
-      newMatches.sort((a, b) => b.overallScore - a.overallScore);
-      setMatches(newMatches.slice(0, 20));
+      const scoreRes = await fetch("/api/vendor-matching/score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vendors: filteredVendors, grant: grantForScoring }),
+      });
+
+      if (!scoreRes.ok) {
+        const errData = await scoreRes.json().catch(() => ({}));
+        throw new Error(errData.error || "Vendor scoring failed");
+      }
+
+      const { matches: scoredMatches } = await scoreRes.json() as { matches: GrantVendorMatch[] };
+      setMatches(scoredMatches.slice(0, 20));
     } catch (err) {
       setVendorError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -724,13 +728,14 @@ function UnifiedGrantsDashboard() {
                   // If we never scored it (e.g. hard-negative filtered out), don't show it
                   if (!score) return false;
 
-                  // If alignment is 0, the grant doesn't match port priorities at all
-                  if (score.alignmentScore <= 0) {
+                  // When embeddings are available, exclude grants with 0 profile alignment
+                  if (score.embeddingScoresAvailable && score.profileAlignmentScore <= 0) {
                     return false;
                   }
 
-                  // Only show grants with overall score >= 35 (excludes most irrelevant grants)
-                  return score.overallScore >= 35;
+                  // Only show grants with overall score >= 35 (or 25 when no embeddings yet)
+                  const minScore = score.embeddingScoresAvailable ? 35 : 25;
+                  return score.overallScore >= minScore;
                 });
 
                 if (showOnlyEligible) {
@@ -786,8 +791,6 @@ function UnifiedGrantsDashboard() {
                   const isFetching = fetchingDetails.has(grant.id);
                   const inPipeline = isInPipeline(grant.id);
                   const score = grantScores.get(grant.id);
-                  const smartMatch = smartMatchResults.get(grant.id);
-
                 return (
                   <Card key={grant.id} className="overflow-hidden">
                     <button
@@ -856,7 +859,7 @@ function UnifiedGrantsDashboard() {
                           {grant.awardCeiling > 0 ? formatCurrency(grant.awardCeiling) : "TBD"}
                         </p>
                         <p className="text-[10px] text-muted-foreground">
-                          {smartMatch?.deadlineNote || grant.closeDate || "No deadline"}
+                          {grant.closeDate || "No deadline"}
                         </p>
                       </div>
                     </button>
@@ -915,30 +918,6 @@ function UnifiedGrantsDashboard() {
                           </div>
                         )}
 
-                        {/* Smart Match Why Bullets */}
-                        {smartMatch && smartMatch.why.length > 0 && (
-                          <div className="mb-4 p-3 rounded-md bg-purple-500/5 border border-purple-500/20">
-                            <div className="flex items-center gap-2 mb-2">
-                              <BarChart3 className="h-3 w-3 text-purple-600" />
-                              <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">Why Matched</span>
-                            </div>
-                            <ul className="space-y-1">
-                              {smartMatch.why.map((reason, i) => (
-                                <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                                  <span className="text-purple-600 dark:text-purple-400 mt-0.5">•</span>
-                                  {reason}
-                                </li>
-                              ))}
-                            </ul>
-                            {smartMatch.bestProject && (
-                              <div className="mt-2 pt-2 border-t border-purple-500/10">
-                                <span className="text-[9px] text-muted-foreground">Best Project Match: </span>
-                                <span className="text-xs font-medium">{smartMatch.bestProject.name}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         {score && (
                           <div className="mb-4 p-3 rounded-md bg-muted/30 border">
                             <div className="flex items-center justify-between mb-3">
@@ -948,24 +927,58 @@ function UnifiedGrantsDashboard() {
                               </Badge>
                             </div>
 
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+                              <div>
+                                <span className="text-[9px] text-muted-foreground uppercase">Profile</span>
+                                <p className="text-sm font-mono font-bold">{score.profileAlignmentScore}</p>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-muted-foreground uppercase">Projects</span>
+                                <p className="text-sm font-mono font-bold">{score.projectSimilarityScore}</p>
+                              </div>
+                              <div>
+                                <span className="text-[9px] text-muted-foreground uppercase">Spend</span>
+                                <p className="text-sm font-mono font-bold">{score.spendSimilarityScore}</p>
+                              </div>
                               <div>
                                 <span className="text-[9px] text-muted-foreground uppercase">Eligibility</span>
                                 <p className="text-sm font-mono font-bold">{score.eligibilityScore}</p>
                               </div>
                               <div>
-                                <span className="text-[9px] text-muted-foreground uppercase">Alignment</span>
-                                <p className="text-sm font-mono font-bold">{score.alignmentScore}</p>
-                              </div>
-                              <div>
                                 <span className="text-[9px] text-muted-foreground uppercase">Impact</span>
                                 <p className="text-sm font-mono font-bold">{score.impactScore}</p>
                               </div>
-                              <div>
-                                <span className="text-[9px] text-muted-foreground uppercase">Competitive</span>
-                                <p className="text-sm font-mono font-bold">{score.competitivenessScore}</p>
-                              </div>
                             </div>
+
+                            {score.topProjectMatches.length > 0 && (
+                              <div className="mb-3">
+                                <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Top Project Matches</span>
+                                <ul className="mt-1 space-y-0.5">
+                                  {score.topProjectMatches.slice(0, 5).map((m) => (
+                                    <li key={m.projectId} className="text-xs font-medium flex items-center justify-between gap-2">
+                                      <span className="truncate">{m.projectName}</span>
+                                      <span className="text-muted-foreground shrink-0">{m.similarity}%</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {score.topSpendMatches.length > 0 && (
+                              <div className="mb-3">
+                                <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Top Spend Themes</span>
+                                <ul className="mt-1 space-y-0.5">
+                                  {score.topSpendMatches.slice(0, 5).map((m) => (
+                                    <li key={m.category} className="text-xs font-medium flex items-center justify-between gap-2">
+                                      <span className="truncate" title={m.embeddingTheme}>
+                                        {m.category}: {m.embeddingTheme.slice(0, 40)}...
+                                      </span>
+                                      <span className="text-muted-foreground shrink-0">{m.similarity}%</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
 
                             {score.strengths.length > 0 && (
                               <div className="mb-2">
@@ -996,96 +1009,6 @@ function UnifiedGrantsDashboard() {
                             )}
                           </div>
                         )}
-
-                        {/* Relevant Projects */}
-                        {projects.length > 0 && (() => {
-                          const grantMatches = matchGrantToProjects(grant, projects);
-                          const relevantMatches = grantMatches.filter((m) => m.matchScore >= 10).slice(0, 5);
-                          
-                          if (relevantMatches.length > 0) {
-                            const matchColors: Record<string, string> = {
-                              strong_match: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-                              good_match: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                              partial_match: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                              weak_match: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
-                            };
-
-                            return (
-                              <div className="mb-4">
-                                <div className="flex items-center justify-between mb-2">
-                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                                    Relevant Projects ({relevantMatches.length})
-                                  </span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="text-xs h-6 px-2"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setActiveTab("projects");
-                                    }}
-                                  >
-                                    View All Projects
-                                  </Button>
-                                </div>
-                                <div className="space-y-2">
-                                  {relevantMatches.map((match) => {
-                                    const project = projects.find((p) => p.id === match.projectId);
-                                    if (!project) return null;
-                                    
-                                    return (
-                                      <Card
-                                        key={match.projectId}
-                                        className={`p-2.5 cursor-pointer hover:bg-muted/50 transition-colors ${matchColors[match.recommendation]}`}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActiveTab("projects");
-                                          setExpandedProjects(new Set([project.id]));
-                                        }}
-                                      >
-                                        <div className="flex items-start justify-between gap-2">
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
-                                              <span className="text-xs font-medium line-clamp-1">
-                                                {project.name}
-                                              </span>
-                                              <Badge variant="outline" className="text-[9px]">
-                                                {match.matchScore}/100
-                                              </Badge>
-                                            </div>
-                                            {match.reasons.length > 0 && (
-                                              <ul className="mt-1 space-y-0.5">
-                                                {match.reasons.slice(0, 2).map((reason, i) => (
-                                                  <li key={i} className="text-[10px] text-muted-foreground">
-                                                    • {reason}
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            )}
-                                            <div className="flex items-center gap-2 mt-1.5 text-[10px] text-muted-foreground">
-                                              {project.budget > 0 && (
-                                                <span className="flex items-center gap-1">
-                                                  <DollarSign className="h-3 w-3" />
-                                                  {formatCurrency(project.budget)}
-                                                </span>
-                                              )}
-                                              <span className="flex items-center gap-1">
-                                                <Building2 className="h-3 w-3" />
-                                                {project.status.replace(/_/g, " ")}
-                                              </span>
-                                            </div>
-                                          </div>
-                                        </div>
-                                      </Card>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          }
-                          
-                          return null;
-                        })()}
 
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -1615,11 +1538,20 @@ function UnifiedGrantsDashboard() {
             {showProjectForm && (
               <ProjectForm
                 project={editingProject}
-                onSave={(projectData) => {
+                onSave={async (projectData) => {
                   if (editingProject) {
                     updateProject(editingProject.id, projectData);
                   } else {
-                    createProject(projectData);
+                    const created = createProject(projectData);
+                    try {
+                      await fetch("/api/embed-project", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(created),
+                      });
+                    } catch {
+                      // Non-blocking: embed failed, scoring will use project without embedding
+                    }
                   }
                   setProjects([...getAllProjects()]);
                   setShowProjectForm(false);
