@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +36,7 @@ import {
   isInPipeline,
 } from "@/data/grant-pipeline";
 import { VendorSearch } from "@/components/vendor-search/vendor-search";
-import type { GrantScore } from "@/data/grant-scoring";
+import { getEmbeddingSimilarityForProject, type GrantScore } from "@/data/grant-scoring";
 import { useProfile } from "@/components/profile-provider";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
@@ -47,7 +47,6 @@ import {
   initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
-import { matchGrantsToProject, matchGrantToProjects, type GrantProjectMatch } from "@/data/grant-project-matching";
 import { ProjectForm } from "@/components/projects/project-form";
 import { Edit, Trash2, SlidersHorizontal } from "lucide-react";
 import { FUNDING_DOMAINS } from "@/data/funding-domains";
@@ -164,13 +163,54 @@ function UnifiedGrantsDashboard() {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
-  const [projectMatches, setProjectMatches] = useState<Map<string, GrantProjectMatch[]>>(new Map());
-
   // Initialize projects for the active profile (re-runs on profile switch)
   useEffect(() => {
     initializeProjectsForProfile(profileId);
     setProjects([...getAllProjects()]);
   }, [profileId]);
+
+  const grantsListForMatching = useMemo(
+    () => [
+      ...pipelineGrants,
+      ...discoveredGrants.filter((g) => !isInPipeline(g.id)),
+    ],
+    [pipelineGrants, discoveredGrants]
+  );
+
+  const { embeddingTopGrantsByProject, embeddingMatchCountByProject } = useMemo(() => {
+    const topMap = new Map<
+      string,
+      { grant: DiscoveredGrant | PipelineGrant; similarity: number; embeddingOk: boolean }[]
+    >();
+    const countMap = new Map<string, number>();
+
+    for (const project of projects) {
+      const rows: {
+        grant: DiscoveredGrant | PipelineGrant;
+        similarity: number;
+        embeddingOk: boolean;
+      }[] = [];
+      for (const grant of grantsListForMatching) {
+        const gs = grantScores.get(grant.id);
+        if (!gs) continue;
+        const sim = getEmbeddingSimilarityForProject(project, gs);
+        if (sim == null) continue;
+        rows.push({
+          grant,
+          similarity: sim,
+          embeddingOk: gs.embeddingScoresAvailable,
+        });
+      }
+      rows.sort((a, b) => b.similarity - a.similarity);
+      countMap.set(project.id, rows.length);
+      topMap.set(project.id, rows.slice(0, 3));
+    }
+
+    return {
+      embeddingTopGrantsByProject: topMap,
+      embeddingMatchCountByProject: countMap,
+    };
+  }, [projects, grantsListForMatching, grantScores]);
 
   // Search grants from Grants.gov + USDOT programs
   async function handleSearch() {
@@ -201,7 +241,6 @@ function UnifiedGrantsDashboard() {
             keyword,
             oppStatuses: statuses,
             rows,
-            includeDOTPrograms: true,
           }),
         });
 
@@ -1298,19 +1337,8 @@ function UnifiedGrantsDashboard() {
               <div className="space-y-4">
                 {projects.map((project) => {
                   const isExpanded = expandedProjects.has(project.id);
-                  const matches = projectMatches.get(project.id) || [];
-
-                  // Get all grants (from pipeline and discovered)
-                  const allGrants = [
-                    ...pipelineGrants,
-                    ...discoveredGrants.filter((g) => !isInPipeline(g.id)),
-                  ];
-
-                  // Calculate matches if not already cached
-                  if (allGrants.length > 0 && !projectMatches.has(project.id)) {
-                    const newMatches = matchGrantsToProject(project, allGrants);
-                    setProjectMatches(new Map(projectMatches.set(project.id, newMatches)));
-                  }
+                  const topEmbeddingMatches = embeddingTopGrantsByProject.get(project.id) ?? [];
+                  const embeddingMatchTotal = embeddingMatchCountByProject.get(project.id) ?? 0;
 
                   const statusColors: Record<string, string> = {
                     planning: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
@@ -1382,10 +1410,11 @@ function UnifiedGrantsDashboard() {
                                       {project.location}
                                     </span>
                                   )}
-                                  {matches.length > 0 && (
+                                  {embeddingMatchTotal > 0 && (
                                     <span className="flex items-center gap-1">
                                       <Award className="h-3 w-3" />
-                                      {matches.length} matching grant{matches.length !== 1 ? "s" : ""}
+                                      {embeddingMatchTotal} semantic match
+                                      {embeddingMatchTotal !== 1 ? "es" : ""}
                                     </span>
                                   )}
                                 </div>
@@ -1414,7 +1443,6 @@ function UnifiedGrantsDashboard() {
                                 if (confirm(`Delete project "${project.name}"?`)) {
                                   deleteProject(project.id);
                                   setProjects([...getAllProjects()]);
-                                  setProjectMatches(new Map());
                                 }
                               }}
                             >
@@ -1469,55 +1497,54 @@ function UnifiedGrantsDashboard() {
                               </div>
                             </div>
 
-                            {matches.length > 0 && (
-                              <div>
-                                <h4 className="text-xs font-semibold mb-2">
-                                  Matching Grants ({matches.length})
-                                </h4>
+                            <div>
+                              <h4 className="text-xs font-semibold mb-1">
+                                Top matching grants
+                              </h4>
+                              {grantScores.size === 0 ? (
+                                <p className="text-xs text-muted-foreground py-2">
+                                  Run a search on the Discover tab to score opportunities; matches listed here use those cached scores.
+                                </p>
+                              ) : embeddingMatchTotal === 0 ? (
+                                <p className="text-xs text-muted-foreground py-2">
+                                  No scored grants list a semantic match for this project yet. This project may not be in the embedding catalog, or no overlapping grants were scored.
+                                </p>
+                              ) : (
                                 <div className="space-y-2">
-                                  {matches.slice(0, 5).map((match) => {
-                                    const grant = allGrants.find((g) => g.id === match.grantId);
-                                    if (!grant) return null;
-
-                                    const matchColors: Record<string, string> = {
-                                      strong_match: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
-                                      good_match: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
-                                      partial_match: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-                                      weak_match: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
-                                    };
+                                  {topEmbeddingMatches.map((row) => {
+                                    const { grant, similarity, embeddingOk } = row;
+                                    const tier =
+                                      similarity >= 70
+                                        ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
+                                        : similarity >= 50
+                                          ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                                          : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
 
                                     return (
-                                      <Card
-                                        key={match.grantId}
-                                        className={`p-3 ${matchColors[match.recommendation]}`}
-                                      >
+                                      <Card key={grant.id} className={`p-3 border ${tier}`}>
                                         <div className="flex items-start justify-between gap-2">
                                           <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2 mb-1">
-                                              <span className="text-xs font-medium line-clamp-1">
+                                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                              <span className="text-xs font-medium line-clamp-2">
                                                 {grant.title}
                                               </span>
-                                              <Badge variant="outline" className="text-[9px]">
-                                                {match.matchScore}/100
+                                              <Badge variant="outline" className="text-[9px] tabular-nums">
+                                                Similarity {similarity}%
                                               </Badge>
+                                              {!embeddingOk && (
+                                                <Badge variant="secondary" className="text-[9px]">
+                                                  Est.
+                                                </Badge>
+                                              )}
                                             </div>
                                             <p className="text-[10px] text-muted-foreground line-clamp-1">
                                               {grant.agency}
                                             </p>
-                                            {match.reasons.length > 0 && (
-                                              <ul className="mt-1 space-y-0.5">
-                                                {match.reasons.slice(0, 2).map((reason, i) => (
-                                                  <li key={i} className="text-[10px] text-muted-foreground">
-                                                    • {reason}
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            )}
                                           </div>
                                           <Button
                                             size="sm"
                                             variant="outline"
-                                            className="text-xs h-7"
+                                            className="text-xs h-7 shrink-0"
                                             onClick={() => {
                                               if (!isInPipeline(grant.id)) {
                                                 handleAddToPipeline(grant as DiscoveredGrant);
@@ -1531,9 +1558,10 @@ function UnifiedGrantsDashboard() {
                                       </Card>
                                     );
                                   })}
+                                  
                                 </div>
-                              </div>
-                            )}
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1564,7 +1592,6 @@ function UnifiedGrantsDashboard() {
                   setProjects([...getAllProjects()]);
                   setShowProjectForm(false);
                   setEditingProject(undefined);
-                  setProjectMatches(new Map()); // Clear matches to recalculate
                 }}
                 onCancel={() => {
                   setShowProjectForm(false);

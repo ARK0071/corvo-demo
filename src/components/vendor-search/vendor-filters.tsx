@@ -170,9 +170,9 @@ export function VendorFilters({
       {/* Project Relevancy Sort */}
       {projects && projects.length > 0 && (
         <FilterSection
-          title="Sort by Project Relevancy"
+          title="Project Relevancy"
           icon={<FolderKanban className="h-3.5 w-3.5" />}
-          defaultOpen={true}
+          defaultOpen={false}
           badge={selectedProjectId ? 1 : undefined}
         >
           <p className="text-[10px] text-muted-foreground mb-2">
@@ -220,7 +220,7 @@ export function VendorFilters({
       <FilterSection
         title="NAICS Code"
         icon={<Hash className="h-3.5 w-3.5" />}
-        defaultOpen={true}
+        defaultOpen={false}
         badge={filters.naicsCodes.length}
       >
         <p className="text-[10px] text-muted-foreground mb-2">
@@ -265,7 +265,7 @@ export function VendorFilters({
       <FilterSection
         title="Notice Type"
         icon={<FileText className="h-3.5 w-3.5" />}
-        defaultOpen={true}
+        defaultOpen={false}
         badge={filters.noticeType !== "Award Notice" ? 1 : undefined}
       >
         <div className="space-y-1">
@@ -312,7 +312,7 @@ export function VendorFilters({
       <FilterSection
         title="State / Geography"
         icon={<MapPin className="h-3.5 w-3.5" />}
-        defaultOpen={true}
+        defaultOpen={false}
         badge={filters.states.length}
       >
         <p className="text-[10px] text-muted-foreground mb-2">

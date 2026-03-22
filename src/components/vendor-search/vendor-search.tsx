@@ -153,6 +153,19 @@ export function VendorSearch({ projects }: VendorSearchProps) {
       {/* Filter Panel (Left) */}
       {showFilters && (
         <div className="w-72 shrink-0 sticky top-4">
+          <Button
+            onClick={handleSearch}
+            disabled={loading}
+            className="w-full mb-3 gap-2"
+            size="sm"
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
+            {loading ? "Searching GovCon..." : "Search Vendors"}
+          </Button>
           <VendorFilters
             filters={filters}
             onChange={setFilters}
@@ -163,19 +176,6 @@ export function VendorSearch({ projects }: VendorSearchProps) {
             onProjectChange={handleProjectChange}
             scoringInProgress={scoringInProgress}
           />
-          <Button
-            onClick={handleSearch}
-            disabled={loading}
-            className="w-full mt-3 gap-2"
-            size="sm"
-          >
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Search className="h-3.5 w-3.5" />
-            )}
-            {loading ? "Searching GovCon..." : "Search Vendors"}
-          </Button>
         </div>
       )}
 

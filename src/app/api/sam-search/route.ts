@@ -2,8 +2,6 @@ import { searchVendors } from "@/lib/usaspending";
 import { deriveNaicsFromGrant } from "@/lib/govcon";
 import { PORT_NAICS_CODES } from "@/lib/naics";
 import type { PortVendor } from "@/data/port-vendors";
-import { ActiveVendors } from "@/lib/db/repositories";
-import { embedAndStoreVendors } from "@/lib/db/embedding-service";
 
 export const maxDuration = 60;
 
@@ -86,23 +84,18 @@ export async function POST(req: Request) {
     // Cache the response
     responseCache.set(cacheKey, { data: responseData, expiresAt: Date.now() + CACHE_TTL });
 
-    // Store vendors in database and generate embeddings (non-blocking)
-    if (result.vendors.length > 0) {
-      ActiveVendors.upsertVendors(result.vendors)
-        .then(async (dbResult: { created: number; updated: number }) => {
-          console.log(`[sam-search] Persisted ${dbResult.created} new, ${dbResult.updated} updated vendors`);
-          // Generate embeddings for newly stored vendors
-          if (dbResult.created > 0 || dbResult.updated > 0) {
-            try {
-              await embedAndStoreVendors(result.vendors);
-            } catch (embErr: unknown) {
-              console.error("Failed to generate vendor embeddings:", embErr);
-            }
-          }
-        })
-        .catch((err: unknown) => {
-          console.error("Failed to persist vendors to database:", err);
-        });
+    // Store vendors in database and generate embeddings (non-blocking, only when DB is configured)
+    if (result.vendors.length > 0 && process.env.RDS_HOST) {
+      import("@/lib/db/repositories").then(async ({ ActiveVendors }) => {
+        const { embedAndStoreVendors } = await import("@/lib/db/embedding-service");
+        const dbResult = await ActiveVendors.upsertVendors(result.vendors);
+        console.log(`[sam-search] Persisted ${dbResult.created} new, ${dbResult.updated} updated vendors`);
+        if (dbResult.created > 0 || dbResult.updated > 0) {
+          await embedAndStoreVendors(result.vendors);
+        }
+      }).catch((err: unknown) => {
+        console.error("Failed to persist vendors to database:", err);
+      });
     }
 
     return new Response(

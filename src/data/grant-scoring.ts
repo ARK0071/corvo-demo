@@ -261,3 +261,46 @@ export function getRecommendedGrants(scores: GrantScore[]): GrantScore[] {
       s.recommendation === "highly_recommended" || s.recommendation === "recommended"
   );
 }
+
+/** Normalize for loose name comparison (embedding export labels vs UI copy). */
+function normName(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Maps UI project titles to the `projectName` strings stored in project-embeddings.json
+ * when they differ (IDs should still match via {@link createProject} stable ids).
+ */
+const PROJECT_TITLE_TO_EMBEDDING_NAME: Record<string, string> = {
+  [normName("Velasco Terminal Phase 2 Expansion")]: "Velasco Container Terminal Expansion",
+  [normName("Super Post-Panamax STS Gantry Cranes (2 units)")]: "Two Super Post-Panamax STS Gantry Cranes",
+};
+
+/**
+ * Semantic similarity (0–100) between a grant and a project, from the same values
+ * computed in `/api/score-grants` (`topProjectMatches`). Returns null if the grant
+ * was not scored or this project has no row in the embedding catalog.
+ */
+export function getEmbeddingSimilarityForProject(
+  project: { id: string; name: string },
+  score: GrantScore
+): number | null {
+  const matches = score.topProjectMatches ?? [];
+  if (matches.length === 0) return null;
+
+  const byId = matches.find((m) => m.projectId === project.id);
+  if (byId) return byId.similarity;
+
+  const alias = PROJECT_TITLE_TO_EMBEDDING_NAME[normName(project.name)];
+  if (alias) {
+    const byAlias = matches.find((m) => m.projectName === alias);
+    if (byAlias) return byAlias.similarity;
+  }
+
+  const byExactName = matches.find((m) => m.projectName === project.name);
+  if (byExactName) return byExactName.similarity;
+
+  const pn = normName(project.name);
+  const byNorm = matches.find((m) => normName(m.projectName) === pn);
+  return byNorm?.similarity ?? null;
+}

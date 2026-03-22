@@ -1,30 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
-import { searchUSDOTGrants, enhanceUSDOTGrant, buildUSDOTSearchQuery } from "@/lib/usdot-grants";
-import { ActiveGrants } from "@/lib/db/repositories";
-import { embedAndStoreGrants } from "@/lib/db/embedding-service";
+import { enhanceUSDOTGrant } from "@/lib/usdot-grants";
 
 /**
  * POST /api/grants-search-enhanced
  *
- * Enhanced grant search that combines:
- * 1. General Grants.gov search
- * 2. USDOT-specific program searches (PIDP, RAISE, INFRA, MEGA)
- * 3. Deduplication and enhancement
- *
- * Request body: Same as /api/grants-search plus:
- * {
- *   ...GrantsSearchParams,
- *   includeDOTPrograms?: boolean; // Default: true
- * }
+ * Grant search via Grants.gov only (single query — no extra USDOT-specific parallel searches).
+ * DOT-related opportunities still appear when they match your keyword; `enhanceUSDOTGrant`
+ * enriches known program titles with typical funding metadata when applicable.
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    const includeDOTPrograms = body.includeDOTPrograms !== false; // Default true
-
-    // Build search params
     const params: GrantsSearchParams = {};
 
     if (body.keyword && typeof body.keyword === "string") {
@@ -37,8 +25,8 @@ export async function POST(request: NextRequest) {
 
     if (Array.isArray(body.oppStatuses)) {
       const validStatuses = ["posted", "forecasted", "closed", "archived"];
-      params.oppStatuses = body.oppStatuses.filter((s: unknown) =>
-        typeof s === "string" && validStatuses.includes(s)
+      params.oppStatuses = body.oppStatuses.filter(
+        (s: unknown) => typeof s === "string" && validStatuses.includes(s)
       );
     }
 
@@ -51,7 +39,7 @@ export async function POST(request: NextRequest) {
     if (typeof body.rows === "number" && body.rows > 0 && body.rows <= 200) {
       params.rows = body.rows;
     } else {
-      params.rows = 50; // Default
+      params.rows = 50;
     }
 
     if (typeof body.startRecordNum === "number" && body.startRecordNum >= 0) {
@@ -62,77 +50,26 @@ export async function POST(request: NextRequest) {
       params.sortBy = body.sortBy;
     }
 
-    // Execute searches in parallel
-    const searchPromises = [];
+    const mainKeyword =
+      params.keyword || "port OR maritime OR transportation OR infrastructure OR seaport";
 
-    // 1. Main Grants.gov search
-    const mainKeyword = params.keyword || "port OR maritime OR transportation OR infrastructure OR seaport";
-    searchPromises.push(
-      searchGrants({
-        ...params,
-        keyword: mainKeyword,
-      })
-    );
+    const { grants: rawGrants, totalCount } = await searchGrants({
+      ...params,
+      keyword: mainKeyword,
+    });
 
-    // 2. DOT-specific search (if enabled and not already searching DOT specifically)
-    if (includeDOTPrograms && (!params.agency || params.agency.includes("DOT"))) {
-      searchPromises.push(
-        searchGrants({
-          ...params,
-          keyword: buildUSDOTSearchQuery(),
-          agency: "DOT",
-        })
-      );
+    const grants = rawGrants.map((g) => enhanceUSDOTGrant(g));
 
-      // 3. Also search by specific DOT program names
-      searchPromises.push(
-        searchUSDOTGrants({
-          status: params.oppStatuses?.includes("posted")
-            ? "posted"
-            : params.oppStatuses?.includes("forecasted")
-              ? "forecasted"
-              : "all",
-        })
-      );
-    }
-
-    const results = await Promise.all(searchPromises);
-
-    // Combine and deduplicate results
-    const allGrants = new Map<string, any>();
-    let totalCount = 0;
-
-    for (const result of results) {
-      // Handle both { grants, totalCount } and plain DiscoveredGrant[] returns
-      const isArrayResult = Array.isArray(result);
-      const grantsFromResult = isArrayResult ? result : (result as { grants: any[]; totalCount: number }).grants;
-      const resultCount = isArrayResult ? result.length : (result as { grants: any[]; totalCount: number }).totalCount || 0;
-
-      totalCount = Math.max(totalCount, resultCount);
-
-      for (const grant of grantsFromResult || []) {
-        if (!allGrants.has(grant.id)) {
-          // Enhance DOT grants with typical funding amounts
-          const enhanced = enhanceUSDOTGrant(grant);
-          allGrants.set(grant.id, enhanced);
-        }
-      }
-    }
-
-    const grants = Array.from(allGrants.values());
-
-    // Store grants in database and generate embeddings (non-blocking)
-    if (grants.length > 0) {
-      ActiveGrants.upsertGrants(grants)
-        .then(async (result: { created: number; updated: number }) => {
-          console.log(`[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants`);
-          // Generate embeddings for newly stored grants
+    if (grants.length > 0 && process.env.RDS_HOST) {
+      import("@/lib/db/repositories")
+        .then(async ({ ActiveGrants }) => {
+          const { embedAndStoreGrants } = await import("@/lib/db/embedding-service");
+          const result = await ActiveGrants.upsertGrants(grants);
+          console.log(
+            `[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants`
+          );
           if (result.created > 0 || result.updated > 0) {
-            try {
-              await embedAndStoreGrants(grants);
-            } catch (embErr) {
-              console.error("Failed to generate grant embeddings:", embErr);
-            }
+            await embedAndStoreGrants(grants);
           }
         })
         .catch((err: unknown) => {
@@ -140,15 +77,11 @@ export async function POST(request: NextRequest) {
         });
     }
 
-    // Sort by relevance (DOT grants first if DOT-focused search)
     grants.sort((a, b) => {
-      // Prioritize DOT grants
       const aIsDOT = a.agencyCode === "DOT";
       const bIsDOT = b.agencyCode === "DOT";
       if (aIsDOT && !bIsDOT) return -1;
       if (!aIsDOT && bIsDOT) return 1;
-
-      // Then by funding amount
       return (b.awardCeiling || 0) - (a.awardCeiling || 0);
     });
 
@@ -158,7 +91,6 @@ export async function POST(request: NextRequest) {
         totalCount: Math.max(totalCount, grants.length),
         sources: {
           grants_gov: true,
-          usdot_programs: includeDOTPrograms,
         },
       },
       { status: 200 }

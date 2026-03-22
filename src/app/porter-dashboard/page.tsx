@@ -4,17 +4,14 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   LayoutDashboard,
-  Search,
   Layers,
   FolderKanban,
-  Users,
   Award,
   DollarSign,
   Calendar,
   ArrowRight,
   Loader2,
   Newspaper,
-  BarChart3,
   FileText,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -358,17 +355,6 @@ export default function PorterDashboardPage() {
         </Card>
       </div>
 
-      {/* Quick actions */}
-      <div className="flex flex-wrap gap-2">
-        <QuickAction href="/grants?tab=discover" icon={<Search className="h-3.5 w-3.5" />} label="Discover Grants" />
-        <QuickAction href="/grants?tab=pipeline" icon={<Layers className="h-3.5 w-3.5" />} label="View Pipeline" />
-        <QuickAction href="/grants?tab=projects" icon={<FolderKanban className="h-3.5 w-3.5" />} label="Manage Projects" />
-        <QuickAction href="/grants?tab=outreach" icon={<Users className="h-3.5 w-3.5" />} label="Vendor Outreach" />
-        <QuickAction href="/awards" icon={<Award className="h-3.5 w-3.5" />} label="Awards" />
-        <QuickAction href="/reporting" icon={<FileText className="h-3.5 w-3.5" />} label="Reporting" />
-        <QuickAction href="/competitive-intel" icon={<BarChart3 className="h-3.5 w-3.5" />} label="Competitive Intel" />
-        <QuickAction href="/newsroom" icon={<Newspaper className="h-3.5 w-3.5" />} label="Newsroom" />
-      </div>
     </div>
   );
 }
@@ -456,22 +442,3 @@ function EmptyHint({
   );
 }
 
-function QuickAction({
-  href,
-  icon,
-  label,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm hover:bg-muted/50 transition-colors"
-    >
-      {icon}
-      {label}
-    </Link>
-  );
-}

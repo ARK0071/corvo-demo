@@ -73,7 +73,6 @@ export function useGrantsData(): UseGrantsDataResult {
                 ? params.oppStatuses
                 : undefined,
             rows: params.rows || 100,
-            includeDOTPrograms: true,
           }),
         });
 

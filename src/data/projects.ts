@@ -31,10 +31,11 @@ export function getProjectById(id: string): Project | undefined {
   return projects.find((p) => p.id === id);
 }
 
-export function createProject(data: Omit<Project, "id">): Project {
+export function createProject(data: Omit<Project, "id"> & { id?: string }): Project {
+  const { id: explicitId, ...fields } = data;
   const project: Project = {
-    ...data,
-    id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    ...fields,
+    id: explicitId ?? `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
   };
   projects.push(project);
   return project;
@@ -91,8 +92,20 @@ export function initializePortFreeportProjects(): void {
 }
 
 function initializePortFreeportDefaults(): void {
-  const defaults: Omit<Project, "id">[] = [
+  /** Must match keys in `src/data/embeddings/project-embeddings.json` for semantic scores. */
+  const E = {
+    fhcip: "project-1774111453788-5a6f75btg",
+    velascoExpansion: "project-1774111453788-qdmjdsjzg",
+    velascoAccess: "project-1774111453788-0snae8q68",
+    stsCranes: "project-1774111453788-28isn1y16",
+    concrete15: "project-1774111453788-c3m885j1l",
+    terminalStreet: "project-1774111453788-p9ypwjhd3",
+    cathodic: "project-1774111453788-bqeartlx5",
+  } as const;
+
+  const defaults: (Omit<Project, "id"> & { id?: string })[] = [
     {
+      id: E.fhcip,
       name: "Freeport Harbor Channel Improvement Project (FHCIP)",
       description:
         "Deepening the Freeport Harbor Channel from 46 ft to 56 ft MLLW in partnership with USACE. Enables accommodation of larger Post-Panamax vessels and increases port competitiveness.",
@@ -113,6 +126,7 @@ function initializePortFreeportDefaults(): void {
       notes: "USACE partnership. Federal cost-share secured. NEPA Record of Decision obtained.",
     },
     {
+      id: E.velascoExpansion,
       name: "Velasco Terminal Phase 2 Expansion",
       description:
         "Expansion of the Velasco Container Terminal including additional berths, container yard, and intermodal rail connections to increase container throughput capacity.",
@@ -186,6 +200,135 @@ function initializePortFreeportDefaults(): void {
         "Green infrastructure",
         "Flood mitigation",
       ],
+    },
+    {
+      id: E.velascoAccess,
+      name: "Velasco Terminal Access & North Gate Entrance",
+      description:
+        "Construction of new terminal access road and north gate entrance facility to improve traffic flow and reduce congestion at the Velasco Terminal.",
+      projectType: "infrastructure",
+      status: "construction",
+      priority: "high",
+      budget: 11_900_000,
+      location: "Velasco Terminal",
+      startDate: "2024-06-01",
+      focusAreas: [
+        "Terminal access",
+        "Traffic management",
+        "Gate infrastructure",
+        "Port operations",
+      ],
+    },
+    {
+      id: E.stsCranes,
+      name: "Super Post-Panamax STS Gantry Cranes (2 units)",
+      description:
+        "Procurement of two super post-Panamax ship-to-shore gantry cranes for the Velasco Container Terminal to handle larger vessels and increase throughput.",
+      projectType: "equipment",
+      status: "procurement",
+      priority: "critical",
+      budget: 50_000_000,
+      location: "Velasco Terminal",
+      focusAreas: [
+        "Container handling",
+        "Crane infrastructure",
+        "Port modernization",
+        "Vessel accommodation",
+        "Cargo throughput",
+      ],
+      notes: "Ordered, delivery expected FY2025. Funded via Series 2024 revenue bonds.",
+    },
+    {
+      id: E.concrete15,
+      name: "15-Acre Concrete Storage Area",
+      description:
+        "Construction of a 15-acre concrete storage area for container and cargo staging, part of the $25.6M combined concrete/street improvement program.",
+      projectType: "infrastructure",
+      status: "planning",
+      priority: "medium",
+      budget: 12_800_000,
+      location: "Velasco Terminal Area",
+      startDate: "2025-01-01",
+      focusAreas: [
+        "Container storage",
+        "Yard expansion",
+        "Cargo staging",
+        "Port capacity",
+      ],
+      notes: "Partially grant-funded.",
+    },
+    {
+      id: E.terminalStreet,
+      name: "Terminal Access Street Reconstruction",
+      description:
+        "Reconstruction of terminal access streets to support increased heavy truck traffic from expanded container and RoRo operations.",
+      projectType: "infrastructure",
+      status: "planning",
+      priority: "medium",
+      budget: 12_800_000,
+      location: "Port-wide",
+      startDate: "2025-01-01",
+      focusAreas: [
+        "Road reconstruction",
+        "Heavy vehicle access",
+        "Port infrastructure",
+        "Freight movement",
+      ],
+      notes: "Part of $25.6M combined program. Partially grant-funded.",
+    },
+    {
+      id: E.cathodic,
+      name: "Cathodic Protection Systems",
+      description:
+        "Installation and upgrade of cathodic protection systems across port dock infrastructure to prevent corrosion and extend asset lifespan.",
+      projectType: "maintenance",
+      status: "construction",
+      priority: "medium",
+      budget: 4_660_000,
+      location: "Port-wide",
+      focusAreas: [
+        "Corrosion prevention",
+        "Dock maintenance",
+        "Asset preservation",
+        "Marine infrastructure",
+      ],
+      notes: "$241K expended to date. Funded via Series 2024 revenue bonds.",
+    },
+    {
+      name: "Rail-Served Industrial Park Development",
+      description:
+        "Development of a rail-served industrial park with 40,000 ft of rail tracks, vehicle storage, warehousing, and distribution centers to support intermodal commerce.",
+      projectType: "expansion",
+      status: "planning",
+      priority: "high",
+      budget: 75_000_000,
+      location: "Port Freeport Industrial Area",
+      focusAreas: [
+        "Rail infrastructure",
+        "Intermodal connectivity",
+        "Warehousing",
+        "Distribution",
+        "Industrial development",
+        "Supply chain",
+      ],
+      notes: "Strategic Initiative #3. Supports efficient commerce movement to Texas/U.S. markets.",
+    },
+    {
+      name: "Portwide Pavement Repairs",
+      description:
+        "Comprehensive pavement repair and rehabilitation program across all port facilities to maintain safe and efficient operations.",
+      projectType: "maintenance",
+      status: "construction",
+      priority: "medium",
+      budget: 4_778_772,
+      location: "Port-wide",
+      focusAreas: [
+        "Pavement repair",
+        "Road maintenance",
+        "Port operations",
+        "Safety",
+      ],
+      notes: "$4.76M of $4.78M authorized already expended.",
     },
   ];
 
