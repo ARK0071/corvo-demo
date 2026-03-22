@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
 import { searchUSDOTGrants, enhanceUSDOTGrant, buildUSDOTSearchQuery } from "@/lib/usdot-grants";
+import { ActiveGrants } from "@/lib/db/repositories";
+import { embedAndStoreGrants } from "@/lib/db/embedding-service";
 
 /**
  * POST /api/grants-search-enhanced
@@ -101,10 +103,14 @@ export async function POST(request: NextRequest) {
     let totalCount = 0;
 
     for (const result of results) {
-      const r = result as { grants?: any[]; totalCount?: number };
-      totalCount = Math.max(totalCount, r.totalCount || 0);
+      // Handle both { grants, totalCount } and plain DiscoveredGrant[] returns
+      const isArrayResult = Array.isArray(result);
+      const grantsFromResult = isArrayResult ? result : (result as { grants: any[]; totalCount: number }).grants;
+      const resultCount = isArrayResult ? result.length : (result as { grants: any[]; totalCount: number }).totalCount || 0;
 
-      for (const grant of r.grants || []) {
+      totalCount = Math.max(totalCount, resultCount);
+
+      for (const grant of grantsFromResult || []) {
         if (!allGrants.has(grant.id)) {
           // Enhance DOT grants with typical funding amounts
           const enhanced = enhanceUSDOTGrant(grant);
@@ -114,6 +120,25 @@ export async function POST(request: NextRequest) {
     }
 
     const grants = Array.from(allGrants.values());
+
+    // Store grants in database and generate embeddings (non-blocking)
+    if (grants.length > 0) {
+      ActiveGrants.upsertGrants(grants)
+        .then(async (result: { created: number; updated: number }) => {
+          console.log(`[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants`);
+          // Generate embeddings for newly stored grants
+          if (result.created > 0 || result.updated > 0) {
+            try {
+              await embedAndStoreGrants(grants);
+            } catch (embErr) {
+              console.error("Failed to generate grant embeddings:", embErr);
+            }
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to persist grants to database:", err);
+        });
+    }
 
     // Sort by relevance (DOT grants first if DOT-focused search)
     grants.sort((a, b) => {

@@ -131,3 +131,23 @@ export function buildProfileEmbeddingText(profile: PortProfile): string {
   ];
   return parts.filter(Boolean).join(" ");
 }
+
+/**
+ * Build embeddable text from a vendor.
+ */
+export function buildVendorEmbeddingText(vendor: {
+  name: string;
+  sector?: string | null;
+  capabilities?: string[];
+  certifications?: string[];
+  description?: string | null;
+}): string {
+  const parts: string[] = [
+    vendor.name,
+    vendor.sector || "",
+    ...(vendor.capabilities || []),
+    ...(vendor.certifications || []),
+    vendor.description?.slice(0, 1000) || "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}

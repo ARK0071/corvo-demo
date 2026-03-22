@@ -1,0 +1,312 @@
+generator client {
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [uuid_ossp(map: "uuid-ossp"), vector]
+}
+
+model PortProfile {
+  id                 String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  slug               String                 @unique @db.VarChar(100)
+  name               String                 @db.VarChar(255)
+  location           Json                   @default("{}")
+  entityType         String                 @map("entity_type") @db.VarChar(100)
+  classification     String?                @db.VarChar(100)
+  characteristics    Json                   @default("{}")
+  priorities         Json                   @default("[]")
+  capabilities       Json                   @default("[]")
+  needs              Json                   @default("[]")
+  certifications     Json                   @default("[]")
+  environmentalGoals Json                   @default("[]") @map("environmental_goals")
+  communityImpact    Json                   @default("[]") @map("community_impact")
+  profileEmbedding   Unsupported("vector")? @map("profile_embedding")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  pipelineGrants     PipelineGrant[]
+
+  @@map("port_profiles")
+  }
+
+model DiscoveredGrant {
+  id                 String                 @id @db.VarChar(50)
+  opportunityNumber  String?                @map("opportunity_number") @db.VarChar(100)
+  title              String                 @db.VarChar(500)
+  agency             String                 @db.VarChar(500)
+  agencyCode         String?                @map("agency_code") @db.VarChar(50)
+  description        String?
+  awardFloor         Decimal                @default(0) @map("award_floor") @db.Decimal(15, 2)
+  awardCeiling       Decimal                @default(0) @map("award_ceiling") @db.Decimal(15, 2)
+  totalFunding       Decimal                @default(0) @map("total_funding") @db.Decimal(15, 2)
+  closeDate          DateTime?              @map("close_date") @db.Date
+  postDate           DateTime?              @map("post_date") @db.Date
+  status             String                 @default("posted") @db.VarChar(50)
+  applicationUrl     String?                @map("application_url")
+  costSharing        Boolean                @default(false) @map("cost_sharing")
+  eligibility        Json                   @default("[]")
+  fundingCategories  Json                   @default("[]") @map("funding_categories")
+  fundingInstruments Json                   @default("[]") @map("funding_instruments")
+  alnNumbers         Json                   @default("[]") @map("aln_numbers")
+  contactName        String?                @map("contact_name") @db.VarChar(255)
+  contactEmail       String?                @map("contact_email") @db.VarChar(255)
+  contactPhone       String?                @map("contact_phone") @db.VarChar(50)
+  grantEmbedding     Unsupported("vector")? @map("grant_embedding")
+  lastSyncedAt       DateTime               @default(now()) @map("last_synced_at")
+  apiSource          String                 @default("grants.gov") @map("api_source") @db.VarChar(50)
+  rawData            Json?                  @map("raw_data")
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  grantVendorMatches GrantVendorMatch[]
+  pipelineGrants     PipelineGrant[]
+
+  @@index([status])
+  @@index([closeDate])
+  @@index([agency])
+  @@index([lastSyncedAt])
+  @@map("discovered_grants")
+  }
+
+model PortVendor {
+  id                    String                 @id @db.VarChar(50)
+  name                  String                 @db.VarChar(500)
+  sector                String?                @db.VarChar(100)
+  headquarters          String?                @db.VarChar(255)
+  annualRevenue         Decimal                @default(0) @map("annual_revenue") @db.Decimal(15, 2)
+  bondingCapacity       Decimal                @default(0) @map("bonding_capacity") @db.Decimal(15, 2)
+  employeeCount         Int                    @default(0) @map("employee_count")
+  safetyRecord          Decimal                @default(0.8) @map("safety_record") @db.Decimal(4, 2)
+  disadvantagedBusiness String?                @map("disadvantaged_business") @db.VarChar(50)
+  capabilities          Json                   @default("[]")
+  certifications        Json                   @default("[]")
+  keyPersonnel          Json                   @default("[]") @map("key_personnel")
+  pastPortProjects      Json                   @default("[]") @map("past_port_projects")
+  description           String?
+  vendorEmbedding       Unsupported("vector")? @map("vendor_embedding")
+  lastSyncedAt          DateTime               @default(now()) @map("last_synced_at")
+  apiSource             String                 @default("usaspending") @map("api_source") @db.VarChar(50)
+  rawData               Json?                  @map("raw_data")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+  grantVendorMatches    GrantVendorMatch[]
+
+  @@index([sector])
+  @@index([disadvantagedBusiness])
+  @@index([lastSyncedAt])
+  @@map("port_vendors")
+  }
+
+model PipelineGrant {
+  id                   String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  grantId              String          @map("grant_id") @db.VarChar(50)
+  portProfileId        String          @map("port_profile_id") @db.Uuid
+  stage                String          @default("eligible") @db.VarChar(50)
+  notes                String          @default("")
+  overallScore         Int?            @map("overall_score")
+  eligibilityScore     Int?            @map("eligibility_score")
+  alignmentScore       Int?            @map("alignment_score")
+  impactScore          Int?            @map("impact_score")
+  competitivenessScore Int?            @map("competitiveness_score")
+  recommendation       String?         @db.VarChar(50)
+  eligibilityStatus    String?         @map("eligibility_status") @db.VarChar(50)
+  strengths            Json            @default("[]")
+  concerns             Json            @default("[]")
+  keyRequirements      Json            @default("[]") @map("key_requirements")
+  scoredAt             DateTime?       @map("scored_at")
+  addedAt              DateTime        @default(now()) @map("added_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  grant                DiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  portProfile          PortProfile     @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, portProfileId])
+  @@index([portProfileId])
+  @@index([stage])
+  @@map("pipeline_grants")
+  }
+
+model GrantVendorMatch {
+  id                  String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  grantId             String          @map("grant_id") @db.VarChar(50)
+  vendorId            String          @map("vendor_id") @db.VarChar(50)
+  overallScore        Int             @map("overall_score")
+  capabilityAlignment Int             @default(0) @map("capability_alignment")
+  certificationMatch  Int             @default(0) @map("certification_match")
+  geographicFit       Int             @default(0) @map("geographic_fit")
+  financialCapacity   Int             @default(0) @map("financial_capacity")
+  strengths           Json            @default("[]")
+  gaps                Json            @default("[]")
+  recommendation      String          @db.VarChar(50)
+  vectorSimilarity    Float?          @map("vector_similarity")
+  computedAt          DateTime        @default(now()) @map("computed_at")
+  grant               DiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  vendor              PortVendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, vendorId])
+  @@index([grantId])
+  @@index([vendorId])
+  @@index([overallScore(sort: Desc)])
+  @@map("grant_vendor_matches")
+  }
+
+model ApiSyncLog {
+  id             String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  entityType     String    @map("entity_type") @db.VarChar(50)
+  apiSource      String    @map("api_source") @db.VarChar(50)
+  searchParams   Json?     @map("search_params")
+  recordsFetched Int       @default(0) @map("records_fetched")
+  recordsCreated Int       @default(0) @map("records_created")
+  recordsUpdated Int       @default(0) @map("records_updated")
+  status         String    @default("pending") @db.VarChar(50)
+  errorMessage   String?   @map("error_message")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+
+  @@map("api_sync_log")
+}
+
+// =============================================================================
+// DEMO TABLES - Using OpenAI text-embedding-3-small (1536 dimensions)
+// =============================================================================
+
+model DemoPortProfile {
+  id                 String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  slug               String                  @unique @db.VarChar(100)
+  name               String                  @db.VarChar(255)
+  location           Json                    @default("{}")
+  entityType         String                  @map("entity_type") @db.VarChar(100)
+  classification     String?                 @db.VarChar(100)
+  characteristics    Json                    @default("{}")
+  priorities         Json                    @default("[]")
+  capabilities       Json                    @default("[]")
+  needs              Json                    @default("[]")
+  certifications     Json                    @default("[]")
+  environmentalGoals Json                    @default("[]") @map("environmental_goals")
+  communityImpact    Json                    @default("[]") @map("community_impact")
+  profileEmbedding   Unsupported("vector")? @map("profile_embedding")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  pipelineGrants     DemoPipelineGrant[]
+
+  @@map("demo_port_profiles")
+}
+
+model DemoDiscoveredGrant {
+  id                 String                  @id @db.VarChar(50)
+  opportunityNumber  String?                 @map("opportunity_number") @db.VarChar(100)
+  title              String                  @db.VarChar(500)
+  agency             String                  @db.VarChar(500)
+  agencyCode         String?                 @map("agency_code") @db.VarChar(50)
+  description        String?
+  awardFloor         Decimal                 @default(0) @map("award_floor") @db.Decimal(15, 2)
+  awardCeiling       Decimal                 @default(0) @map("award_ceiling") @db.Decimal(15, 2)
+  totalFunding       Decimal                 @default(0) @map("total_funding") @db.Decimal(15, 2)
+  closeDate          DateTime?               @map("close_date") @db.Date
+  postDate           DateTime?               @map("post_date") @db.Date
+  status             String                  @default("posted") @db.VarChar(50)
+  applicationUrl     String?                 @map("application_url")
+  costSharing        Boolean                 @default(false) @map("cost_sharing")
+  eligibility        Json                    @default("[]")
+  fundingCategories  Json                    @default("[]") @map("funding_categories")
+  fundingInstruments Json                    @default("[]") @map("funding_instruments")
+  alnNumbers         Json                    @default("[]") @map("aln_numbers")
+  contactName        String?                 @map("contact_name") @db.VarChar(255)
+  contactEmail       String?                 @map("contact_email") @db.VarChar(255)
+  contactPhone       String?                 @map("contact_phone") @db.VarChar(50)
+  grantEmbedding     Unsupported("vector")? @map("grant_embedding")
+  lastSyncedAt       DateTime                @default(now()) @map("last_synced_at")
+  apiSource          String                  @default("grants.gov") @map("api_source") @db.VarChar(50)
+  rawData            Json?                   @map("raw_data")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  grantVendorMatches DemoGrantVendorMatch[]
+  pipelineGrants     DemoPipelineGrant[]
+
+  @@index([status])
+  @@index([closeDate])
+  @@index([agency])
+  @@map("demo_discovered_grants")
+}
+
+model DemoPortVendor {
+  id                    String                  @id @db.VarChar(50)
+  name                  String                  @db.VarChar(500)
+  sector                String?                 @db.VarChar(100)
+  headquarters          String?                 @db.VarChar(255)
+  annualRevenue         Decimal                 @default(0) @map("annual_revenue") @db.Decimal(15, 2)
+  bondingCapacity       Decimal                 @default(0) @map("bonding_capacity") @db.Decimal(15, 2)
+  employeeCount         Int                     @default(0) @map("employee_count")
+  safetyRecord          Decimal                 @default(0.8) @map("safety_record") @db.Decimal(4, 2)
+  disadvantagedBusiness String?                 @map("disadvantaged_business") @db.VarChar(50)
+  capabilities          Json                    @default("[]")
+  certifications        Json                    @default("[]")
+  keyPersonnel          Json                    @default("[]") @map("key_personnel")
+  pastPortProjects      Json                    @default("[]") @map("past_port_projects")
+  description           String?
+  vendorEmbedding       Unsupported("vector")? @map("vendor_embedding")
+  lastSyncedAt          DateTime                @default(now()) @map("last_synced_at")
+  apiSource             String                  @default("usaspending") @map("api_source") @db.VarChar(50)
+  rawData               Json?                   @map("raw_data")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+  grantVendorMatches    DemoGrantVendorMatch[]
+
+  @@index([sector])
+  @@index([disadvantagedBusiness])
+  @@map("demo_port_vendors")
+}
+
+model DemoPipelineGrant {
+  id                   String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  grantId              String              @map("grant_id") @db.VarChar(50)
+  portProfileId        String              @map("port_profile_id") @db.Uuid
+  stage                String              @default("eligible") @db.VarChar(50)
+  notes                String              @default("")
+  overallScore         Int?                @map("overall_score")
+  eligibilityScore     Int?                @map("eligibility_score")
+  alignmentScore       Int?                @map("alignment_score")
+  impactScore          Int?                @map("impact_score")
+  competitivenessScore Int?                @map("competitiveness_score")
+  recommendation       String?             @db.VarChar(50)
+  eligibilityStatus    String?             @map("eligibility_status") @db.VarChar(50)
+  strengths            Json                @default("[]")
+  concerns             Json                @default("[]")
+  keyRequirements      Json                @default("[]") @map("key_requirements")
+  scoredAt             DateTime?           @map("scored_at")
+  addedAt              DateTime            @default(now()) @map("added_at")
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  grant                DemoDiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  portProfile          DemoPortProfile     @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, portProfileId])
+  @@index([portProfileId])
+  @@index([stage])
+  @@map("demo_pipeline_grants")
+}
+
+model DemoGrantVendorMatch {
+  id                  String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  grantId             String              @map("grant_id") @db.VarChar(50)
+  vendorId            String              @map("vendor_id") @db.VarChar(50)
+  overallScore        Int                 @map("overall_score")
+  capabilityAlignment Int                 @default(0) @map("capability_alignment")
+  certificationMatch  Int                 @default(0) @map("certification_match")
+  geographicFit       Int                 @default(0) @map("geographic_fit")
+  financialCapacity   Int                 @default(0) @map("financial_capacity")
+  strengths           Json                @default("[]")
+  gaps                Json                @default("[]")
+  recommendation      String              @db.VarChar(50)
+  vectorSimilarity    Float?              @map("vector_similarity")
+  computedAt          DateTime            @default(now()) @map("computed_at")
+  grant               DemoDiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  vendor              DemoPortVendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([grantId, vendorId])
+  @@index([grantId])
+  @@index([vendorId])
+  @@index([overallScore(sort: Desc)])
+  @@map("demo_grant_vendor_matches")
+}
