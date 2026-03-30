@@ -1,109 +1,37 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect } from "react";
-import Link from "next/link";
+import { useState, useCallback, useMemo } from "react";
 import {
   FileText,
-  Award,
-  Calendar,
   AlertTriangle,
-  AlertCircle,
   CheckCircle2,
-  Clock,
-  ArrowLeft,
   BarChart3,
-  DollarSign,
-  Target,
-  Loader2,
-  Send,
   Sparkles,
-  ListChecks,
-  CircleDot,
   ClipboardCheck,
+  DollarSign,
+  Banknote,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   getAllReports,
   getUpcomingReports,
   getOverdueReports,
-  getReportingAlerts,
   getReportingStats,
   getReportsForAward,
-  updateReportStatus,
-  generateReportContent,
-  generateSEFA,
-  getCloseoutChecklist,
-  updateCloseoutItem,
-  type ScheduledReport,
-  type ReportContent,
 } from "@/data/reporting";
-import { getAllAwards, getAwardById } from "@/data/awards";
+import { getAllAwards } from "@/data/awards";
+import { daysUntil, fmtDate, fmtShortDate, reportTypeLabel, statusColor, MONTH_NAMES } from "./components/helpers";
 
-// ─── Helpers ───
-
-function fmt(n: number): string {
-  if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
-  return `$${n.toLocaleString()}`;
-}
-
-function fmtFull(n: number): string {
-  return `$${n.toLocaleString()}`;
-}
-
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "-";
-  try {
-    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch {
-    return d;
-  }
-}
-
-function fmtShortDate(d: string): string {
-  try {
-    return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  } catch {
-    return d;
-  }
-}
-
-function daysUntil(dateStr: string): number {
-  return Math.ceil((new Date(dateStr).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-}
-
-function reportTypeLabel(type: string): string {
-  const map: Record<string, string> = {
-    sf425: "SF-425",
-    progress: "Progress Report",
-    sefa: "SEFA",
-    single_audit: "Single Audit",
-    closeout: "Closeout",
-    custom: "Custom",
-  };
-  return map[type] || type;
-}
-
-function statusColor(status: string): string {
-  const map: Record<string, string> = {
-    upcoming: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-    in_progress: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-    draft_ready: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-    submitted: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-    overdue: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-    on_track: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-    at_risk: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-    shortfall: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-  };
-  return map[status] || "bg-gray-100 text-gray-600";
-}
-
-// Month names for timeline
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Sub-views
+import ReportDetailView from "./components/ReportDetailView";
+import SEFAView from "./components/SEFAView";
+import CloseoutView from "./components/CloseoutView";
+import SF425FormView from "./components/SF425FormView";
+import SF270FormView from "./components/SF270FormView";
+import PPRFormView from "./components/PPRFormView";
+import ReportingCalendar from "./components/ReportingCalendar";
 
 // ─── Page ───
 
@@ -112,11 +40,13 @@ export default function ReportingPage() {
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [showSEFA, setShowSEFA] = useState(false);
   const [showCloseout, setShowCloseout] = useState<string | null>(null);
+  const [showSF425, setShowSF425] = useState<string | null>(null);
+  const [showSF270, setShowSF270] = useState<string | null>(null);
+  const [showPPR, setShowPPR] = useState<string | null>(null);
   const [, setRefresh] = useState(0);
   const forceRefresh = useCallback(() => setRefresh((n) => n + 1), []);
 
   const stats = useMemo(() => getReportingStats(), []);
-  const alerts = useMemo(() => getReportingAlerts(), []);
   const upcomingReports = useMemo(() => getUpcomingReports(90), []);
   const overdueReports = useMemo(() => getOverdueReports(), []);
   const allReports = useMemo(() => getAllReports(), []);
@@ -125,7 +55,7 @@ export default function ReportingPage() {
   // Build 6-month timeline data
   const timelineData = useMemo(() => {
     const now = new Date();
-    const months: { year: number; month: number; label: string; reports: ScheduledReport[] }[] = [];
+    const months: { year: number; month: number; label: string; reports: typeof allReports }[] = [];
 
     for (let i = -1; i < 5; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
@@ -133,10 +63,12 @@ export default function ReportingPage() {
       const month = d.getMonth();
       const label = `${MONTH_NAMES[month]} ${year}`;
 
-      const monthReports = allReports.filter((r) => {
-        const due = new Date(r.dueDate);
-        return due.getMonth() === month && due.getFullYear() === year && r.status !== "submitted";
-      }).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+      const monthReports = allReports
+        .filter((r) => {
+          const due = new Date(r.dueDate);
+          return due.getMonth() === month && due.getFullYear() === year && r.status !== "submitted";
+        })
+        .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
       months.push({ year, month, label, reports: monthReports });
     }
@@ -150,12 +82,42 @@ export default function ReportingPage() {
     return null;
   }, [overdueReports, upcomingReports]);
 
+  // ─── Sub-view routing ───
+
+  if (showSF425) {
+    return (
+      <SF425FormView
+        reportId={showSF425}
+        onBack={() => setShowSF425(null)}
+      />
+    );
+  }
+
+  if (showSF270) {
+    return (
+      <SF270FormView
+        reportId={showSF270}
+        onBack={() => setShowSF270(null)}
+      />
+    );
+  }
+
+  if (showPPR) {
+    return (
+      <PPRFormView
+        reportId={showPPR}
+        onBack={() => setShowPPR(null)}
+      />
+    );
+  }
+
   if (selectedReportId) {
     return (
       <ReportDetailView
         reportId={selectedReportId}
         onBack={() => setSelectedReportId(null)}
         onRefresh={forceRefresh}
+        onOpenSF425={(id) => { setSelectedReportId(null); setShowSF425(id); }}
       />
     );
   }
@@ -197,7 +159,6 @@ export default function ReportingPage() {
             </p>
           </div>
 
-          {/* Next deadline countdown */}
           {nextDeadline && (
             <div className="text-right shrink-0">
               {(() => {
@@ -218,7 +179,6 @@ export default function ReportingPage() {
           )}
         </div>
 
-        {/* Inline summary stats */}
         <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border/50">
           <div className="flex items-center gap-1.5">
             <div className="h-2 w-2 rounded-full bg-red-500" />
@@ -278,7 +238,9 @@ export default function ReportingPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="timeline">Timeline</TabsTrigger>
+          <TabsTrigger value="calendar">Calendar</TabsTrigger>
           <TabsTrigger value="by_award">By Award</TabsTrigger>
+          <TabsTrigger value="forms">Forms</TabsTrigger>
           <TabsTrigger value="tools">Tools</TabsTrigger>
         </TabsList>
 
@@ -291,9 +253,7 @@ export default function ReportingPage() {
 
               return (
                 <div key={month.label} className="relative">
-                  {/* Month row */}
-                  <div className={`flex items-stretch gap-0 ${isCurrent ? "" : ""}`}>
-                    {/* Month label column */}
+                  <div className="flex items-stretch gap-0">
                     <div className={`w-28 shrink-0 flex items-start pt-3 pb-3 pr-4 ${isCurrent ? "font-semibold" : ""}`}>
                       <div className="flex items-center gap-2">
                         {isCurrent && <div className="h-2 w-2 rounded-full bg-[#3d8b8b] animate-pulse" />}
@@ -301,7 +261,6 @@ export default function ReportingPage() {
                       </div>
                     </div>
 
-                    {/* Timeline line + dots */}
                     <div className="relative flex flex-col items-center w-6 shrink-0">
                       <div className={`w-px flex-1 ${isCurrent ? "bg-[#3d8b8b]" : "bg-border"}`} />
                       {hasReports && (
@@ -309,7 +268,6 @@ export default function ReportingPage() {
                       )}
                     </div>
 
-                    {/* Report cards */}
                     <div className={`flex-1 pl-4 py-2 ${!hasReports ? "min-h-[40px]" : ""}`}>
                       {hasReports ? (
                         <div className="space-y-2">
@@ -370,7 +328,6 @@ export default function ReportingPage() {
               );
             })}
 
-            {/* Timeline end cap */}
             <div className="flex items-stretch gap-0">
               <div className="w-28 shrink-0" />
               <div className="relative flex flex-col items-center w-6 shrink-0">
@@ -379,11 +336,16 @@ export default function ReportingPage() {
               </div>
               <div className="flex-1 pl-4 py-2">
                 <p className="text-xs text-muted-foreground italic">
-                  {allReports.filter(r => r.status !== "submitted").length - timelineData.reduce((s, m) => s + m.reports.length, 0)} more reports beyond this window
+                  {allReports.filter((r) => r.status !== "submitted").length - timelineData.reduce((s, m) => s + m.reports.length, 0)} more reports beyond this window
                 </p>
               </div>
             </div>
           </div>
+        </TabsContent>
+
+        {/* ── Calendar Tab ── */}
+        <TabsContent value="calendar">
+          <ReportingCalendar onSelectReport={(id) => setSelectedReportId(id)} />
         </TabsContent>
 
         {/* ── By Award Tab ── */}
@@ -461,6 +423,129 @@ export default function ReportingPage() {
           </div>
         </TabsContent>
 
+        {/* ── Forms Tab ── */}
+        <TabsContent value="forms">
+          <div className="mt-4 space-y-6">
+            <p className="text-sm text-muted-foreground">
+              Auto-populated federal report forms. Select an award and period to generate.
+            </p>
+
+            {/* SF-425 Reports */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-[#3d8b8b]" />
+                SF-425 Federal Financial Reports
+              </h3>
+              <div className="space-y-2">
+                {allReports
+                  .filter((r) => r.type === "sf425" && r.status !== "submitted")
+                  .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+                  .slice(0, 8)
+                  .map((r) => {
+                    const days = daysUntil(r.dueDate);
+                    const isOverdue = days < 0;
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => setShowSF425(r.id)}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all hover:shadow-md ${
+                          isOverdue ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20" : "border-border hover:border-[#3d8b8b]/30"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Badge className={`text-[10px] shrink-0 ${statusColor(isOverdue ? "overdue" : r.status)}`}>
+                            {isOverdue ? "overdue" : r.status.replace("_", " ")}
+                          </Badge>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{r.program} &mdash; SF-425</p>
+                            <p className="text-xs text-muted-foreground truncate">{r.awardTitle}</p>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs text-muted-foreground">{fmtShortDate(r.periodStart)} - {fmtShortDate(r.periodEnd)}</p>
+                          <p className="text-xs tabular-nums font-medium">Due {fmtShortDate(r.dueDate)}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+
+            {/* SF-270 Reimbursement Requests */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Banknote className="h-4 w-4 text-[#3d8b8b]" />
+                SF-270 Reimbursement Requests
+              </h3>
+              <div className="space-y-2">
+                {allReports
+                  .filter((r) => r.type === "sf425" && r.status !== "submitted")
+                  .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+                  .slice(0, 6)
+                  .map((r) => (
+                    <button
+                      key={`sf270-${r.id}`}
+                      onClick={() => setShowSF270(r.id)}
+                      className="w-full flex items-center justify-between p-3 rounded-lg border border-border text-left transition-all hover:shadow-md hover:border-[#3d8b8b]/30"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Banknote className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{r.program} &mdash; SF-270</p>
+                          <p className="text-xs text-muted-foreground truncate">{r.awardTitle}</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs text-muted-foreground">{fmtShortDate(r.periodStart)} - {fmtShortDate(r.periodEnd)}</p>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+
+            {/* SF-PPR Progress Reports */}
+            <div>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[#3d8b8b]" />
+                Performance Progress Reports (SF-PPR)
+              </h3>
+              <div className="space-y-2">
+                {allReports
+                  .filter((r) => r.type === "progress" && r.status !== "submitted")
+                  .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+                  .slice(0, 8)
+                  .map((r) => {
+                    const days = daysUntil(r.dueDate);
+                    const isOverdue = days < 0;
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => setShowPPR(r.id)}
+                        className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all hover:shadow-md ${
+                          isOverdue ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20" : "border-border hover:border-[#3d8b8b]/30"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <Badge className={`text-[10px] shrink-0 ${statusColor(isOverdue ? "overdue" : r.status)}`}>
+                            {isOverdue ? "overdue" : r.status.replace("_", " ")}
+                          </Badge>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{r.program} &mdash; {r.title}</p>
+                            <p className="text-xs text-muted-foreground truncate">{r.awardTitle}</p>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs text-muted-foreground">{fmtShortDate(r.periodStart)} - {fmtShortDate(r.periodEnd)}</p>
+                          <p className="text-xs tabular-nums font-medium">Due {fmtShortDate(r.dueDate)}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
         {/* ── Tools Tab ── */}
         <TabsContent value="tools">
           <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -474,21 +559,21 @@ export default function ReportingPage() {
               </CardContent>
             </Card>
 
-            {awards.filter((a) => a.status === "closeout_pending").map((award) => (
-              <Card
-                key={award.id}
-                className="cursor-pointer hover:shadow-md transition-shadow"
-                onClick={() => setShowCloseout(award.id)}
-              >
-                <CardContent className="pt-6 pb-6 text-center">
-                  <ClipboardCheck className="h-8 w-8 mx-auto text-amber-500 mb-2" />
-                  <h3 className="font-semibold">Closeout: {award.program}</h3>
-                  <p className="text-sm text-muted-foreground mt-1 truncate">
-                    {award.title}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
+            {awards
+              .filter((a) => a.status === "closeout_pending")
+              .map((award) => (
+                <Card
+                  key={award.id}
+                  className="cursor-pointer hover:shadow-md transition-shadow"
+                  onClick={() => setShowCloseout(award.id)}
+                >
+                  <CardContent className="pt-6 pb-6 text-center">
+                    <ClipboardCheck className="h-8 w-8 mx-auto text-amber-500 mb-2" />
+                    <h3 className="font-semibold">Closeout: {award.program}</h3>
+                    <p className="text-sm text-muted-foreground mt-1 truncate">{award.title}</p>
+                  </CardContent>
+                </Card>
+              ))}
 
             <Card className="opacity-60">
               <CardContent className="pt-6 pb-6 text-center">
@@ -503,489 +588,6 @@ export default function ReportingPage() {
           </div>
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════
-// REPORT DETAIL VIEW
-// ════════════════════════════════════════════════════════════
-
-function ReportDetailView({ reportId, onBack, onRefresh }: { reportId: string; onBack: () => void; onRefresh: () => void }) {
-  const [content, setContent] = useState<ReportContent | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [narrativeLoading, setNarrativeLoading] = useState(false);
-  const [narrative, setNarrative] = useState<string | null>(null);
-  const [, setRefresh] = useState(0);
-
-  const allReports = useMemo(() => getAllReports(), []);
-  const report = useMemo(() => allReports.find((r) => r.id === reportId), [allReports, reportId]);
-  const award = useMemo(() => report ? getAwardById(report.awardId) : undefined, [report]);
-
-  // Auto-populate report data on mount
-  useEffect(() => {
-    if (report && !content) {
-      const c = generateReportContent(reportId);
-      setContent(c);
-    }
-  }, [reportId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleGenerateReport = useCallback(() => {
-    if (!report) return;
-    setGenerating(true);
-    setTimeout(() => {
-      const c = generateReportContent(reportId);
-      setContent(c);
-      setGenerating(false);
-    }, 500);
-  }, [report, reportId]);
-
-  const handleGenerateNarrative = useCallback(async () => {
-    if (!report || !award) return;
-    setNarrativeLoading(true);
-
-    try {
-      const res = await fetch("/api/report-narrative", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          awardTitle: award.title,
-          program: award.program,
-          periodStart: report.periodStart,
-          periodEnd: report.periodEnd,
-          description: award.description,
-          financialSummary: content?.financialSummary,
-          matchSummary: content?.matchSummary,
-          completionPercentage: content?.completionPercentage,
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        setNarrative(data.narrative);
-      } else {
-        setNarrative("Unable to generate narrative. Ensure ANTHROPIC_API_KEY is configured.");
-      }
-    } catch {
-      setNarrative("Unable to generate narrative. Ensure ANTHROPIC_API_KEY is configured.");
-    } finally {
-      setNarrativeLoading(false);
-    }
-  }, [report, award, content]);
-
-  const handleMarkSubmitted = useCallback(() => {
-    if (!report) return;
-    updateReportStatus(reportId, "submitted");
-    setRefresh((n) => n + 1);
-    onRefresh();
-  }, [reportId, report, onRefresh]);
-
-  if (!report) return <p className="p-6 text-muted-foreground">Report not found.</p>;
-
-  const days = daysUntil(report.dueDate);
-  const isOverdue = days < 0;
-
-  return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
-      {/* Back + Header */}
-      <div>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
-          <ArrowLeft className="h-4 w-4" /> Back to Reporting
-        </button>
-
-        {/* Report header card */}
-        <div className={`rounded-xl border p-5 ${isOverdue ? "border-red-200 bg-red-50/30 dark:border-red-800 dark:bg-red-950/10" : "bg-muted/20"}`}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <Badge className={statusColor(isOverdue ? "overdue" : report.status)}>
-                  {isOverdue ? "overdue" : report.status.replace("_", " ")}
-                </Badge>
-                <Badge variant="outline">{report.program}</Badge>
-                <Badge variant="outline" className="text-[10px]">{reportTypeLabel(report.type)}</Badge>
-              </div>
-              <h1 className="text-xl font-bold tracking-tight">{report.title}</h1>
-              <Link href="/awards" className="text-sm text-muted-foreground mt-1 hover:text-[#3d8b8b] hover:underline inline-flex items-center gap-1">
-                <Award className="h-3 w-3" />
-                {report.awardTitle}
-              </Link>
-              <div className="flex items-center gap-4 mt-2">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Calendar className="h-3 w-3" />
-                  <span>Period: {fmtDate(report.periodStart)} - {fmtDate(report.periodEnd)}</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3" />
-                  <span>Due: {fmtDate(report.dueDate)}</span>
-                </div>
-              </div>
-            </div>
-            <div className={`rounded-lg border px-4 py-3 text-center shrink-0 ${isOverdue ? "border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30" : days <= 7 ? "border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30" : "border-[#3d8b8b]/20 bg-[#3d8b8b]/5"}`}>
-              <p className={`text-2xl font-bold tabular-nums ${isOverdue ? "text-red-600 dark:text-red-400" : days <= 7 ? "text-amber-600 dark:text-amber-400" : "text-[#3d8b8b]"}`}>
-                {isOverdue ? `${Math.abs(days)}d` : `${days}d`}
-              </p>
-              <p className={`text-[10px] uppercase tracking-wider font-medium ${isOverdue ? "text-red-500" : "text-muted-foreground"}`}>
-                {isOverdue ? "Overdue" : "Remaining"}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-2">
-        <Button onClick={handleGenerateReport} disabled={generating}>
-          {generating ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <BarChart3 className="h-3.5 w-3.5 mr-1" />}
-          Refresh Data
-        </Button>
-        {content && (
-          <Button variant="outline" onClick={handleGenerateNarrative} disabled={narrativeLoading}>
-            {narrativeLoading ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-            AI Draft Narrative
-          </Button>
-        )}
-        {report.status !== "submitted" && (
-          <Button variant="outline" onClick={handleMarkSubmitted}>
-            <Send className="h-3.5 w-3.5 mr-1" /> Mark Submitted
-          </Button>
-        )}
-      </div>
-
-      {/* Generated Content */}
-      {content && (
-        <div className="space-y-4">
-          {/* Financial Summary */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-4 w-4" /> Financial Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-4">
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Awarded</p>
-                  <p className="text-lg font-bold tabular-nums">{fmt(content.financialSummary.totalAwarded)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">This Period</p>
-                  <p className="text-lg font-bold tabular-nums">{fmt(content.financialSummary.totalExpendedThisPeriod)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Cumulative</p>
-                  <p className="text-lg font-bold tabular-nums">{fmt(content.financialSummary.totalExpendedCumulative)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Drawn Down</p>
-                  <p className="text-lg font-bold tabular-nums text-emerald-600">{fmt(content.financialSummary.totalDrawnDown)}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider">Remaining</p>
-                  <p className="text-lg font-bold tabular-nums">{fmt(content.financialSummary.remainingBalance)}</p>
-                </div>
-              </div>
-
-              {/* By Category */}
-              <h4 className="text-sm font-medium mb-2">Budget vs. Actual by Category</h4>
-              <div className="space-y-3">
-                {content.financialSummary.byCategory.map((cat) => {
-                  const pct = cat.budgeted > 0 ? Math.round((cat.spent / cat.budgeted) * 100) : 0;
-                  return (
-                    <div key={cat.name}>
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span>{cat.name}</span>
-                        <span className="tabular-nums text-muted-foreground">
-                          {fmtFull(cat.spent)} / {fmtFull(cat.budgeted)} ({pct}%)
-                        </span>
-                      </div>
-                      <div className="h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-500" : "bg-[#3d8b8b]"}`}
-                          style={{ width: `${Math.min(pct, 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Match Summary */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Target className="h-4 w-4" /> Match Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase">Required</p>
-                  <p className="text-lg font-bold tabular-nums">{fmtFull(Math.round(content.matchSummary.required))}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase">Committed</p>
-                  <p className={`text-lg font-bold tabular-nums ${content.matchSummary.status === "on_track" ? "text-emerald-600" : content.matchSummary.status === "at_risk" ? "text-amber-600" : "text-red-600"}`}>
-                    {fmtFull(content.matchSummary.committed)}
-                  </p>
-                </div>
-                <div className="text-center">
-                  <p className="text-xs text-muted-foreground uppercase">Status</p>
-                  <Badge className={`mt-1 ${statusColor(content.matchSummary.status)}`}>
-                    {content.matchSummary.status === "on_track" ? "On Track" : content.matchSummary.status === "at_risk" ? "At Risk" : "Shortfall"}
-                  </Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Completion */}
-          <Card>
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium">Overall Completion</span>
-                <span className="text-sm font-bold tabular-nums">{content.completionPercentage}%</span>
-              </div>
-              <div className="h-3 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-[#3d8b8b] rounded-full transition-all" style={{ width: `${content.completionPercentage}%` }} />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* AI Narrative */}
-          {narrative && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-purple-500" /> AI-Generated Progress Narrative
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <div className="whitespace-pre-wrap text-sm">{narrative}</div>
-                </div>
-                <p className="text-xs text-muted-foreground mt-3 pt-3 border-t">
-                  This narrative was generated by Claude and should be reviewed and edited before submission.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* Loading state */}
-      {!content && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Loader2 className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3 animate-spin" />
-            <p className="text-sm text-muted-foreground">Loading report data...</p>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════
-// SEFA VIEW
-// ════════════════════════════════════════════════════════════
-
-function SEFAView({ onBack }: { onBack: () => void }) {
-  const [fyEnd, setFyEnd] = useState("2025-09-30");
-  const sefa = useMemo(() => generateSEFA(fyEnd), [fyEnd]);
-
-  const fyYear = new Date(fyEnd).getFullYear();
-
-  return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
-      <div>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
-          <ArrowLeft className="h-4 w-4" /> Back to Reporting
-        </button>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
-              <BarChart3 className="h-5 w-5 text-[#3d8b8b]" />
-              Schedule of Expenditures of Federal Awards (SEFA)
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Fiscal Year Ending {fmtDate(fyEnd)}
-            </p>
-          </div>
-          <div className="shrink-0">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider block mb-1">Fiscal Year End</label>
-            <select
-              value={fyEnd}
-              onChange={(e) => setFyEnd(e.target.value)}
-              className="rounded-md border bg-background px-3 py-2 text-sm"
-            >
-              <option value="2023-09-30">FY 2023 (Sep 30, 2023)</option>
-              <option value="2024-09-30">FY 2024 (Sep 30, 2024)</option>
-              <option value="2025-09-30">FY 2025 (Sep 30, 2025)</option>
-              <option value="2026-09-30">FY 2026 (Sep 30, 2026)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Threshold Alert */}
-      <Card className={sefa.meetsAuditThreshold ? "border-amber-200 dark:border-amber-800" : ""}>
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center gap-3">
-            {sefa.meetsAuditThreshold ? (
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-            ) : (
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-            )}
-            <div>
-              <p className="font-medium text-sm">
-                Total Federal Expenditures: <span className="tabular-nums">{fmtFull(sefa.totalExpenditures)}</span>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {sefa.meetsAuditThreshold
-                  ? "Exceeds $750,000 threshold. Single Audit (2 CFR 200 Subpart F) is required."
-                  : "Below $750,000 threshold. Single Audit is not required."}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* SEFA Table */}
-      <Card>
-        <CardContent className="pt-4">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b">
-                  <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">CFDA/ALN</th>
-                  <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">Program</th>
-                  <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">Agency</th>
-                  <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">FAIN</th>
-                  <th className="text-left py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">Pass-Through</th>
-                  <th className="text-right py-2 text-xs font-medium text-muted-foreground uppercase">Expenditures</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sefa.entries.map((entry) => (
-                  <tr key={entry.awardId} className="border-b last:border-0 hover:bg-muted/50">
-                    <td className="py-2 pr-4 tabular-nums">{entry.cfdaNumber}</td>
-                    <td className="py-2 pr-4">{entry.programName}</td>
-                    <td className="py-2 pr-4 text-muted-foreground">{entry.awardingAgency}</td>
-                    <td className="py-2 pr-4 tabular-nums">{entry.fain}</td>
-                    <td className="py-2 pr-4 text-muted-foreground">{entry.passThrough || "Direct"}</td>
-                    <td className="py-2 text-right font-medium tabular-nums">{fmtFull(entry.totalExpenditures)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t-2 font-bold">
-                  <td colSpan={5} className="py-2 pr-4">Total Federal Expenditures</td>
-                  <td className="py-2 text-right tabular-nums">{fmtFull(sefa.totalExpenditures)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════
-// CLOSEOUT VIEW
-// ════════════════════════════════════════════════════════════
-
-function CloseoutView({ awardId, onBack, onRefresh }: { awardId: string; onBack: () => void; onRefresh: () => void }) {
-  const [, setRefresh] = useState(0);
-  const award = useMemo(() => getAwardById(awardId), [awardId]);
-  const checklist = useMemo(() => getCloseoutChecklist(awardId), [awardId]);
-
-  const totalRequired = checklist.items.filter((i) => i.required).length;
-  const completedRequired = checklist.items.filter((i) => i.required && i.completed).length;
-
-  if (!award) return <p className="p-6 text-muted-foreground">Award not found.</p>;
-
-  return (
-    <div className="flex-1 overflow-auto p-6 space-y-6">
-      <div>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
-          <ArrowLeft className="h-4 w-4" /> Back to Reporting
-        </button>
-        <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
-          <ClipboardCheck className="h-5 w-5 text-amber-500" />
-          Closeout: {award.program}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">{award.title}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Performance period ended {fmtDate(award.performancePeriod.end)} &middot; Closeout due within 120 days
-        </p>
-      </div>
-
-      {/* Progress */}
-      <Card>
-        <CardContent className="pt-4 pb-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">Closeout Progress</span>
-            <span className="text-sm font-bold tabular-nums">
-              {completedRequired}/{totalRequired} required items
-            </span>
-          </div>
-          <div className="h-3 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-[#3d8b8b] rounded-full transition-all"
-              style={{ width: `${totalRequired > 0 ? (completedRequired / totalRequired) * 100 : 0}%` }}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Checklist */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <ListChecks className="h-4 w-4" /> Closeout Checklist
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {checklist.items.map((item) => (
-              <label
-                key={item.id}
-                className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                  item.completed ? "bg-emerald-50 dark:bg-emerald-950/20" : "hover:bg-muted/50"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={item.completed}
-                  onChange={(e) => {
-                    updateCloseoutItem(awardId, item.id, e.target.checked);
-                    setRefresh((n) => n + 1);
-                    onRefresh();
-                  }}
-                  className="rounded mt-0.5"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-sm font-medium ${item.completed ? "line-through text-muted-foreground" : ""}`}>
-                      {item.label}
-                    </span>
-                    {item.required && <Badge variant="outline" className="text-[9px]">Required</Badge>}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
-                  {item.completedDate && (
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-0.5">
-                      Completed {fmtDate(item.completedDate)}
-                    </p>
-                  )}
-                </div>
-              </label>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }
