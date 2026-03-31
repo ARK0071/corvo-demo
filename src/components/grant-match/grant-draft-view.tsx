@@ -137,13 +137,33 @@ const qualityColors = {
 };
 
 function highlightGapAnnotations(text: string): React.ReactNode[] {
-  const parts = text.split(/(\[NEEDS:[^\]]+\])/g);
+  const parts = text.split(/(\[NEEDS:[^\]]+\]|\[Source:[^\]]+\]|\[To be provided by applicant\])/g);
   return parts.map((part, i) => {
     if (part.startsWith("[NEEDS:")) {
       return (
         <span
           key={i}
           className="inline-block bg-amber-200/60 dark:bg-amber-800/40 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 rounded text-sm font-medium mx-0.5"
+        >
+          {part}
+        </span>
+      );
+    }
+    if (part.startsWith("[Source:")) {
+      return (
+        <span
+          key={i}
+          className="inline-block bg-blue-100/60 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-1 py-0.5 rounded text-xs font-medium mx-0.5"
+        >
+          {part}
+        </span>
+      );
+    }
+    if (part === "[To be provided by applicant]") {
+      return (
+        <span
+          key={i}
+          className="inline-block bg-red-100/60 dark:bg-red-900/40 text-red-700 dark:text-red-300 px-1.5 py-0.5 rounded text-sm font-medium mx-0.5"
         >
           {part}
         </span>
@@ -588,6 +608,8 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   .conf-medium { background: #fefcbf; color: #975a16; }
   .conf-low { background: #fed7d7; color: #9b2c2c; }
   .gap { background: #fef3c7; padding: 2px 6px; border-radius: 3px; font-weight: 600; color: #92400e; }
+  .citation { background: #dbeafe; padding: 1px 5px; border-radius: 3px; font-size: 11px; font-weight: 500; color: #1e40af; font-family: sans-serif; }
+  .tbp { background: #fee2e2; padding: 2px 6px; border-radius: 3px; font-weight: 600; color: #991b1b; }
   .words { font-size: 12px; color: #999; font-family: sans-serif; }
   p { margin: 10px 0; }
   @media print { body { margin: 0; font-size: 11pt; } }
@@ -606,7 +628,7 @@ ${selectedDraft.sections
 <h2>${s.title} <span class="confidence conf-${s.confidence}">${s.confidence}</span> <span class="words">${s.wordCount}/${s.maxWords} words (${s.weight}%)</span></h2>
 ${s.content
   .split("\n\n")
-  .map((p) => `<p>${p.replace(/\[NEEDS:[^\]]+\]/g, (m) => `<span class="gap">${m}</span>`)}</p>`)
+  .map((p) => `<p>${p.replace(/\[NEEDS:[^\]]+\]/g, (m) => `<span class="gap">${m}</span>`).replace(/\[Source:[^\]]+\]/g, (m) => `<span class="citation">${m}</span>`).replace(/\[To be provided by applicant\]/g, (m) => `<span class="tbp">${m}</span>`)}</p>`)
   .join("\n")}
 </div>`
   )
@@ -895,7 +917,7 @@ function ReviewView({
   const ep = research.entityProfile;
   const gr = research.grantRequirements;
   const summary = research.researchSummary;
-  const hasRealRequirements = nofoUploaded || gr?.source === "nofo-extracted";
+  const hasRealRequirements = true; // Always allow generation — Claude estimates if NOFO not uploaded
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -1125,7 +1147,7 @@ function ReviewView({
                     ? "NOFO requirements extracted. Sections, forms, and scoring criteria are ready"
                     : research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
                     ? `Auto-fetched NOFO did not match (found: ${research.metadata.nofoValidation.detectedProgram}). Upload the correct NOFO`
-                    : "Upload the Notice of Funding Opportunity (NOFO) PDF to extract real application requirements"
+                    : "Optional: Upload the NOFO PDF to extract exact application requirements (otherwise Claude will estimate)"
                   }
                 </p>
               </div>
@@ -1166,7 +1188,7 @@ function ReviewView({
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                 {research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
                   ? `The auto-fetched NOFO was for "${research.metadata.nofoValidation.detectedProgram}" (${research.metadata.nofoValidation.detectedFiscalYear}) and was discarded. Please upload the correct NOFO for this grant.`
-                  : "Required before generating a draft. The NOFO contains the real application sections, scoring criteria, and form requirements."
+                  : "Optional. Uploading the NOFO improves accuracy of application sections, scoring criteria, and form requirements."
                 }
               </div>
             )}
@@ -1391,9 +1413,9 @@ function ReviewView({
             Generate Draft Application
             <ArrowRight className="h-4 w-4" />
           </Button>
-          {!hasRealRequirements && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" /> Upload the NOFO document above to enable draft generation
+          {!nofoUploaded && gr?.source !== "nofo-extracted" && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              Tip: Upload the NOFO for more accurate sections and scoring criteria
             </p>
           )}
         </div>

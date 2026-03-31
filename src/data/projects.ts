@@ -4,6 +4,35 @@
  * Tracks port infrastructure projects for grant matching and vendor outreach.
  */
 
+export interface ProjectReadiness {
+  nepaStatus: "not_started" | "categorical_exclusion" | "ea_in_progress" | "ea_complete" | "eis_in_progress" | "eis_complete" | "record_of_decision";
+  nepaDocument?: string;
+  nepaCompletionDate?: string;
+  designCompletion: number; // 0-100 percentage
+  designPhase: "conceptual" | "preliminary" | "final" | "complete";
+  permits: { name: string; status: "obtained" | "pending" | "not_required"; date?: string }[];
+  rightOfWay: "acquired" | "in_progress" | "not_needed";
+  procurementApproach?: string;
+  constructionStartTarget?: string;
+  shovelReady: boolean;
+}
+
+export interface ProjectPastPerformance {
+  priorFederalAwards: { program: string; amount: number; year: number; status: "completed_on_time" | "completed_late" | "active" | "closed" }[];
+  auditFindings: "none" | "minor" | "significant";
+  onTimeCompletion: number; // percentage of past projects completed on time
+}
+
+export interface ProjectMetrics {
+  jobsCreated?: number;
+  jobsRetained?: number;
+  tonnageImpact?: number;
+  emissionsReduction?: string;
+  safetyImpact?: string;
+  economicImpact?: string;
+  communitiesBenefited?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -17,6 +46,11 @@ export interface Project {
   endDate?: string;
   focusAreas: string[];
   notes?: string;
+  readiness?: ProjectReadiness;
+  pastPerformance?: ProjectPastPerformance;
+  metrics?: ProjectMetrics;
+  fundingSource?: string;
+  costShareSource?: string;
 }
 
 // Mutable in-memory project state
@@ -124,6 +158,40 @@ function initializePortFreeportDefaults(): void {
         "Freight movement",
       ],
       notes: "USACE partnership. Federal cost-share secured. NEPA Record of Decision obtained.",
+      readiness: {
+        nepaStatus: "record_of_decision",
+        nepaDocument: "Environmental Impact Statement (EIS)",
+        nepaCompletionDate: "2022-09-15",
+        designCompletion: 100,
+        designPhase: "complete",
+        permits: [
+          { name: "USACE Section 10/404 Permit", status: "obtained", date: "2022-11-01" },
+          { name: "TCEQ Water Quality Certification", status: "obtained", date: "2022-10-15" },
+          { name: "USCG Bridge Permit", status: "obtained", date: "2023-01-20" },
+        ],
+        rightOfWay: "acquired",
+        procurementApproach: "Design-bid-build, USACE-managed construction contract",
+        constructionStartTarget: "2023-06-01",
+        shovelReady: true,
+      },
+      pastPerformance: {
+        priorFederalAwards: [
+          { program: "USACE Civil Works", amount: 117_000_000, year: 2022, status: "active" },
+        ],
+        auditFindings: "none",
+        onTimeCompletion: 95,
+      },
+      metrics: {
+        jobsCreated: 850,
+        jobsRetained: 2400,
+        tonnageImpact: 15_000_000,
+        emissionsReduction: "Enables larger vessels with lower per-TEU fuel consumption, estimated 18% reduction in vessel emissions per ton of cargo",
+        safetyImpact: "Eliminates need for tide-restricted transit of large vessels, reducing collision risk",
+        economicImpact: "$3.2B estimated regional economic impact over 20 years",
+        communitiesBenefited: "Brazoria County (pop. 388,000), including Freeport, Clute, Lake Jackson, and Angleton",
+      },
+      fundingSource: "USACE federal appropriation + Port Freeport local match",
+      costShareSource: "Port Freeport Series 2024 Revenue Bonds + operating reserves",
     },
     {
       id: E.velascoExpansion,
@@ -145,11 +213,44 @@ function initializePortFreeportDefaults(): void {
         "Supply chain",
       ],
       notes: "Preliminary engineering 60% complete.",
+      readiness: {
+        nepaStatus: "ea_in_progress",
+        nepaDocument: "Environmental Assessment (EA)",
+        nepaCompletionDate: "2025-09-30",
+        designCompletion: 60,
+        designPhase: "preliminary",
+        permits: [
+          { name: "USACE Section 10/404 Permit", status: "pending" },
+          { name: "TCEQ Stormwater Permit", status: "pending" },
+          { name: "Brazoria County Site Development Permit", status: "obtained", date: "2024-08-15" },
+        ],
+        rightOfWay: "acquired",
+        procurementApproach: "Design-build with GMP, competitive RFP planned Q1 2026",
+        constructionStartTarget: "2026-03-01",
+        shovelReady: false,
+      },
+      pastPerformance: {
+        priorFederalAwards: [
+          { program: "PIDP FY2023", amount: 15_960_000, year: 2023, status: "active" },
+          { program: "TxDOT Rider 37", amount: 8_200_000, year: 2022, status: "active" },
+        ],
+        auditFindings: "none",
+        onTimeCompletion: 95,
+      },
+      metrics: {
+        jobsCreated: 1200,
+        jobsRetained: 3500,
+        tonnageImpact: 8_000_000,
+        economicImpact: "$1.8B estimated regional economic impact over 20 years",
+        communitiesBenefited: "Brazoria County, greater Houston metro area freight corridor",
+      },
+      fundingSource: "Federal grant + Port Freeport revenue bonds",
+      costShareSource: "Port Freeport Series 2024 Revenue Bonds ($36M authorized)",
     },
     {
       name: "Zero-Emission Equipment Deployment",
       description:
-        "Procurement and deployment of zero-emission cargo handling equipment including electric RTG cranes, yard tractors, and shore power systems.",
+        "Procurement and deployment of zero-emission cargo handling equipment including electric RTG cranes, yard tractors, and shore power systems to improve operational efficiency and energy resilience.",
       projectType: "equipment",
       status: "procurement",
       priority: "high",
@@ -158,14 +259,35 @@ function initializePortFreeportDefaults(): void {
       startDate: "2025-03-01",
       endDate: "2026-12-31",
       focusAreas: [
-        "Zero-emission equipment",
+        "Energy resilience",
         "Electrification",
         "Shore power",
         "Air quality",
-        "Environmental sustainability",
-        "Climate change",
+        "Operational efficiency",
+        "Equipment modernization",
       ],
       notes: "RFP for electric RTGs released. EPA Clean Ports application under development.",
+      readiness: {
+        nepaStatus: "categorical_exclusion",
+        nepaDocument: "Categorical Exclusion (CE) — equipment replacement on existing facilities",
+        designCompletion: 90,
+        designPhase: "final",
+        permits: [
+          { name: "Electrical infrastructure permit", status: "obtained", date: "2025-01-10" },
+          { name: "Air quality permit modification", status: "pending" },
+        ],
+        rightOfWay: "not_needed",
+        procurementApproach: "Competitive RFP for equipment + installation, sole source for OEM shore power",
+        constructionStartTarget: "2025-06-01",
+        shovelReady: true,
+      },
+      metrics: {
+        jobsCreated: 25,
+        jobsRetained: 180,
+        emissionsReduction: "Estimated 4,200 tons CO2e/year reduction; eliminates 98% of NOx from replaced diesel equipment",
+        safetyImpact: "Reduces diesel particulate exposure for 180+ terminal workers",
+        communitiesBenefited: "Freeport, Clute, and surrounding environmental justice communities within 1-mile radius of port operations",
+      },
     },
     {
       name: "Port Security Enhancement Program",
