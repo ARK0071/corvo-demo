@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { MessageSquare, Send, X, Loader2, ChevronLeft } from "lucide-react";
+import { useProfile } from "@/components/profile-provider";
 
 interface Message {
   id: string;
@@ -12,9 +13,13 @@ interface Message {
 
 interface GrantIntelligenceChatProps {
   onClose?: () => void;
+  /** Active Client Profile (defaults to ProfileProvider selection) */
+  profileId?: string;
 }
 
-export function GrantIntelligenceChat({ onClose }: GrantIntelligenceChatProps) {
+export function GrantIntelligenceChat({ onClose, profileId: profileIdProp }: GrantIntelligenceChatProps) {
+  const { profileId: profileFromContext } = useProfile();
+  const profileId = profileIdProp ?? profileFromContext;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -47,6 +52,7 @@ export function GrantIntelligenceChat({ onClose }: GrantIntelligenceChatProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          profileId,
           messages: [...messages, userMessage].map((m) => ({
             role: m.role,
             content: m.content,

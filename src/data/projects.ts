@@ -4,6 +4,8 @@
  * Tracks port infrastructure projects for grant matching and vendor outreach.
  */
 
+import { louisianaGatewayProjects } from "./louisiana-projects";
+
 export interface Project {
   id: string;
   name: string;
@@ -79,7 +81,12 @@ export function initializeProjectsForProfile(profileId: string): void {
 
   if (profileId === "lawa") {
     initializeLAWAProjects();
+  } else if (profileId === "louisiana-gateway-port") {
+    louisianaGatewayProjects.forEach((p) => createProject(p));
+  } else if (profileId === "port-freeport") {
+    initializePortFreeportDefaults();
   } else {
+    // Demo fallback: Port of LA and other profiles reuse Freeport project set until dedicated data exists
     initializePortFreeportDefaults();
   }
 }

@@ -2,6 +2,9 @@ import { streamText, stepCountIs, convertToModelMessages } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { GRANT_MATCH_SYSTEM_PROMPT } from "@/lib/grant-match-system-prompt";
 import { grantIntelligenceTools } from "@/tools/grant-intelligence/definitions";
+import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { initializeProjectsForProfile } from "@/data/projects";
+import { runWithProfileIdAsync } from "@/lib/profile-request-context";
 
 export const maxDuration = 60;
 
@@ -59,7 +62,8 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { messages } = await req.json();
+    const body = await req.json();
+    const { messages } = body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return new Response(
@@ -67,6 +71,11 @@ export async function POST(req: Request) {
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
+
+    const profileId =
+      typeof body.profileId === "string" && getProfile(body.profileId)
+        ? body.profileId
+        : DEFAULT_PROFILE_ID;
 
     const lastMessage = messages[messages.length - 1];
     const userText = typeof lastMessage?.content === "string"
@@ -89,19 +98,23 @@ export async function POST(req: Request) {
       );
     }
 
-    const modelMessages = await convertToModelMessages(messages, {
-      tools: grantIntelligenceTools,
-    });
+    return runWithProfileIdAsync(profileId, async () => {
+      initializeProjectsForProfile(profileId);
 
-    const result = streamText({
-      model: anthropic("claude-sonnet-4-5-20250929"),
-      system: GRANT_MATCH_SYSTEM_PROMPT,
-      messages: modelMessages,
-      tools: grantIntelligenceTools,
-      stopWhen: stepCountIs(8),
-    });
+      const modelMessages = await convertToModelMessages(messages, {
+        tools: grantIntelligenceTools,
+      });
 
-    return result.toUIMessageStreamResponse();
+      const result = streamText({
+        model: anthropic("claude-sonnet-4-5-20250929"),
+        system: GRANT_MATCH_SYSTEM_PROMPT,
+        messages: modelMessages,
+        tools: grantIntelligenceTools,
+        stopWhen: stepCountIs(8),
+      });
+
+      return result.toUIMessageStreamResponse();
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "An unexpected error occurred";
     const status = message.includes("rate") || message.includes("429") ? 429 : 500;

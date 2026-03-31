@@ -2,6 +2,8 @@
  * Server-side grant scoring. Used by /api/score-grants and grant-intelligence tools.
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import {
   buildGrantEmbeddingText,
@@ -19,9 +21,8 @@ import {
   type TopProjectMatch,
   type TopDomainMatch,
 } from "@/data/grant-scoring";
-import { getDefaultProfile } from "@/data/port-profile";
-import projectEmbeddingsData from "@/data/embeddings/project-embeddings.json";
-import profileEmbeddingData from "@/data/embeddings/profile-embedding.json";
+import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { initializeProjectsForProfile } from "@/data/projects";
 import domainEmbeddingsData from "@/data/embeddings/funding-domain-embeddings.json";
 
 interface ProjectEmbedding {
@@ -42,14 +43,45 @@ interface DomainEmbedding {
   vector: number[];
 }
 
+const EMBEDDINGS_ROOT = path.join(process.cwd(), "src/data/embeddings");
+
 const grantEmbeddingCache = new Map<string, number[]>();
 
-function loadProjectEmbeddings(): Record<string, ProjectEmbedding> {
-  return projectEmbeddingsData as unknown as Record<string, ProjectEmbedding>;
+function readJsonIfExists<T>(filePath: string): T | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
 }
 
-function loadProfileEmbedding(): ProfileEmbedding | null {
-  return profileEmbeddingData as unknown as ProfileEmbedding;
+function loadProjectEmbeddingsForProfile(profileId: string): Record<string, ProjectEmbedding> {
+  const scoped = path.join(EMBEDDINGS_ROOT, "profiles", profileId, "project-embeddings.json");
+  const fromProfile = readJsonIfExists<Record<string, ProjectEmbedding>>(scoped);
+  if (fromProfile && Object.keys(fromProfile).length > 0) return fromProfile;
+
+  if (profileId === "port-freeport") {
+    const legacy = path.join(EMBEDDINGS_ROOT, "project-embeddings.json");
+    const fromLegacy = readJsonIfExists<Record<string, ProjectEmbedding>>(legacy);
+    if (fromLegacy) return fromLegacy;
+  }
+
+  return {};
+}
+
+function loadProfileEmbeddingForProfile(profileId: string): ProfileEmbedding | null {
+  const scoped = path.join(EMBEDDINGS_ROOT, "profiles", profileId, "profile-embedding.json");
+  const fromProfile = readJsonIfExists<ProfileEmbedding>(scoped);
+  if (fromProfile) return fromProfile;
+
+  if (profileId === "port-freeport") {
+    const legacy = path.join(EMBEDDINGS_ROOT, "profile-embedding.json");
+    return readJsonIfExists<ProfileEmbedding>(legacy);
+  }
+
+  return null;
 }
 
 function loadDomainEmbeddings(): Record<string, DomainEmbedding> {
@@ -62,16 +94,20 @@ function hasValidVector(vec: number[]): boolean {
 
 /**
  * Score grants server-side (embedding + eligibility + impact).
+ * @param profileId — must match Client Profile / embeddings under `embeddings/profiles/{id}/`
  */
 export async function scoreGrantsServer(
   grants: DiscoveredGrant[],
-  _profileId?: string
+  profileId: string = DEFAULT_PROFILE_ID
 ): Promise<GrantScore[]> {
   if (grants.length === 0) return [];
 
-  const profile = getDefaultProfile();
-  const projectEmbeddings = loadProjectEmbeddings();
-  const profileEmbedding = loadProfileEmbedding();
+  const resolvedProfileId = getProfile(profileId) ? profileId : DEFAULT_PROFILE_ID;
+  initializeProjectsForProfile(resolvedProfileId);
+
+  const profile = getProfile(resolvedProfileId) ?? getProfile(DEFAULT_PROFILE_ID)!;
+  const projectEmbeddings = loadProjectEmbeddingsForProfile(resolvedProfileId);
+  const profileEmbedding = loadProfileEmbeddingForProfile(resolvedProfileId);
   const domainEmbeddings = loadDomainEmbeddings();
 
   const hasOpenAI = !!process.env.OPENAI_API_KEY;
@@ -81,6 +117,7 @@ export async function scoreGrantsServer(
   const domainCount = Object.values(domainEmbeddings).filter((d) => hasValidVector(d.vector)).length;
 
   console.log("[score-grants] Config:", {
+    profileId: resolvedProfileId,
     openaiKey: hasOpenAI ? "set" : "NOT SET",
     profileEmbedding: profileEmbedding ? (profileVecValid ? "valid" : "empty vector") : "missing file",
     projectEmbeddings: `${projectCount}/${Object.keys(projectEmbeddings).length} valid`,

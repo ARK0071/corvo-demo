@@ -7,9 +7,18 @@ import { Send, Loader2, RotateCcw, Anchor, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageBubble } from "../chat/message-bubble";
 import { GrantMatchSuggestions } from "./grant-match-suggestions";
+import { useProfile } from "@/components/profile-provider";
 
 export function GrantMatchChat() {
-  const transport = useMemo(() => new DefaultChatTransport({ api: "/api/grant-match-chat" }), []);
+  const { profileId } = useProfile();
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/grant-match-chat",
+        body: { profileId },
+      }),
+    [profileId]
+  );
   const { messages, sendMessage, status, setMessages, error } = useChat({
     transport,
   });

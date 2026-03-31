@@ -7,17 +7,26 @@ import {
   getPipelineGrantById,
   type PipelineGrant,
 } from "@/data/grant-pipeline";
-import { currentPortProfile } from "@/data/port-profile";
 import { fetchGrantDetails, type DiscoveredGrant } from "@/lib/grants-gov";
 import { scoreGrantsServer } from "@/lib/score-grants-server";
+import { getProfile, getDefaultProfile } from "@/data/profiles";
+import { getRequestProfileId } from "@/lib/profile-request-context";
 import type { GrantScore } from "@/data/grant-scoring";
 import { getAllProjects, getProjectById } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects } from "@/data/grant-project-matching";
 import { analyzeCompetitiveIntelligence } from "@/data/competitive-intelligence";
 import { buildGrantApplication as buildGrantApplicationCore } from "@/lib/grant-application-builder";
 
-// In-memory cache of grant scores (keyed by grant ID)
+// In-memory cache of grant scores (keyed by profileId:grantId)
 const grantScoreCache = new Map<string, GrantScore>();
+
+function scoreCacheKey(grantId: string): string {
+  return `${getRequestProfileId()}:${grantId}`;
+}
+
+function activeProfile() {
+  return getProfile(getRequestProfileId()) ?? getDefaultProfile();
+}
 
 /**
  * Get grants in the pipeline, optionally filtered by stage or urgency
@@ -111,12 +120,12 @@ export async function explainGrantScore(params: { grantId: string }) {
   }
 
   // Check cache first
-  let score = grantScoreCache.get(params.grantId);
+  let score = grantScoreCache.get(scoreCacheKey(params.grantId));
   if (!score) {
-    const [s] = await scoreGrantsServer([discoveredGrant]);
+    const [s] = await scoreGrantsServer([discoveredGrant], getRequestProfileId());
     if (s) {
       score = s;
-      grantScoreCache.set(params.grantId, score);
+      grantScoreCache.set(scoreCacheKey(params.grantId), score);
     } else {
       return { error: "Could not score grant" };
     }
@@ -212,7 +221,7 @@ export async function calculateFinancialScenario(params: {
   const bondInterest = totalBondCost - grantAmount;
 
   // Operating budget affordability
-  const operatingBudget = currentPortProfile.characteristics.operatingBudget || 50_000_000;
+  const operatingBudget = activeProfile().characteristics.operatingBudget || 50_000_000;
   const matchAsPercentOfBudget = (localMatch / operatingBudget) * 100;
 
   return {
@@ -450,20 +459,20 @@ export async function compareTwoGrants(params: {
     alnNumbers: [],
   });
 
-  let score1 = grantScoreCache.get(params.grantId1);
-  let score2 = grantScoreCache.get(params.grantId2);
+  let score1 = grantScoreCache.get(scoreCacheKey(params.grantId1));
+  let score2 = grantScoreCache.get(scoreCacheKey(params.grantId2));
   if (!score1 || !score2) {
-    const scores = await scoreGrantsServer([
-      toDiscovered(grant1),
-      toDiscovered(grant2),
-    ]);
+    const scores = await scoreGrantsServer(
+      [toDiscovered(grant1), toDiscovered(grant2)],
+      getRequestProfileId()
+    );
     if (scores[0]) {
       score1 = scores[0];
-      grantScoreCache.set(params.grantId1, score1);
+      grantScoreCache.set(scoreCacheKey(params.grantId1), score1);
     }
     if (scores[1]) {
       score2 = scores[1];
-      grantScoreCache.set(params.grantId2, score2);
+      grantScoreCache.set(scoreCacheKey(params.grantId2), score2);
     }
   }
   if (!score1 || !score2) {
@@ -650,7 +659,7 @@ export async function buildGrantApplication(params: {
   grantId: string;
   portName?: string;
 }): Promise<string> {
-  const portName = params.portName ?? currentPortProfile.name;
+  const portName = params.portName ?? activeProfile().name;
   return buildGrantApplicationCore({
     grantId: params.grantId,
     portName,

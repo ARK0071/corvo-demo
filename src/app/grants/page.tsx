@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -163,11 +163,50 @@ function UnifiedGrantsDashboard() {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
-  // Initialize projects for the active profile (re-runs on profile switch)
+  const prevProfileIdRef = useRef<string | null>(null);
+  const discoveredGrantsRef = useRef<DiscoveredGrant[]>([]);
+  discoveredGrantsRef.current = discoveredGrants;
+
+  // Score grants (embedding + rules) for the active Client Profile
+  const scoreGrants = useCallback(async (grants: DiscoveredGrant[]) => {
+    setScanning(true);
+    try {
+      const res = await fetch("/api/score-grants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grants, profileId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Scoring failed");
+      }
+      const { scores } = (await res.json()) as { scores: GrantScore[] };
+      const scoreMap = new Map<string, GrantScore>();
+      for (const score of scores) {
+        scoreMap.set(score.grantId, score);
+      }
+      setGrantScores(scoreMap);
+    } catch (err) {
+      console.error("Error scoring grants:", err);
+    } finally {
+      setScanning(false);
+    }
+  }, [profileId]);
+
+  // Initialize projects for the active profile; on profile switch, clear scores and re-score current results
   useEffect(() => {
     initializeProjectsForProfile(profileId);
     setProjects([...getAllProjects()]);
-  }, [profileId]);
+    const switched = prevProfileIdRef.current !== null && prevProfileIdRef.current !== profileId;
+    prevProfileIdRef.current = profileId;
+    if (switched) {
+      setGrantScores(new Map());
+      const g = discoveredGrantsRef.current;
+      if (g.length > 0) {
+        void scoreGrants(g);
+      }
+    }
+  }, [profileId, scoreGrants]); // scoreGrants updates when profileId updates (useCallback)
 
   const grantsListForMatching = useMemo(
     () => [
@@ -264,32 +303,6 @@ function UnifiedGrantsDashboard() {
       setSearchError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setSearching(false);
-    }
-  }
-
-  // Score grants via API (embedding-based + eligibility + impact)
-  async function scoreGrants(grants: DiscoveredGrant[]) {
-    setScanning(true);
-    try {
-      const res = await fetch("/api/score-grants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grants }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Scoring failed");
-      }
-      const { scores } = (await res.json()) as { scores: GrantScore[] };
-      const scoreMap = new Map<string, GrantScore>();
-      for (const score of scores) {
-        scoreMap.set(score.grantId, score);
-      }
-      setGrantScores(scoreMap);
-    } catch (err) {
-      console.error("Error scoring grants:", err);
-    } finally {
-      setScanning(false);
     }
   }
 
@@ -1583,7 +1596,7 @@ function UnifiedGrantsDashboard() {
                       await fetch("/api/embed-project", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(created),
+                        body: JSON.stringify({ ...created, profileId }),
                       });
                     } catch {
                       // Non-blocking: embed failed, scoring will use project without embedding
