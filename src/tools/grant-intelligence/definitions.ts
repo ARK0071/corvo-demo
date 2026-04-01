@@ -135,7 +135,7 @@ export const grantIntelligenceTools = {
 
   build_grant_application: {
     description:
-      "Generate a draft grant application narrative for a specific grant. Fetches grant details and uses AI to produce structured application content (executive summary, statement of need, project description, outcomes, capacity, budget narrative). Use when the user wants to apply for a grant or build/start a grant application.",
+      "Generate a draft grant application narrative for a specific grant. Fetches grant details from Grants.gov, enriches with port profile and project data, and uses AI to produce structured application content aligned to official NOFO requirements when available. Use when the user wants to apply for a grant or build/start a grant application.",
     inputSchema: z.object({
       grantId: z
         .string()
@@ -144,8 +144,12 @@ export const grantIntelligenceTools = {
         .string()
         .optional()
         .describe("Port authority name for personalization (e.g., 'Port of Los Angeles')"),
+      projectId: z
+        .string()
+        .optional()
+        .describe("Specific project ID to tailor the application to. If omitted, the best-matching project is auto-selected."),
     }),
-    execute: async (params: { grantId: string; portName?: string }) =>
+    execute: async (params: { grantId: string; portName?: string; projectId?: string }) =>
       buildGrantApplication(params),
   },
 };

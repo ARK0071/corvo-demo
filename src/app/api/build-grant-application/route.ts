@@ -212,14 +212,18 @@ COMMUNITY IMPACT PROGRAMS:
 ${entity.communityImpact.map(c => `- ${c}`).join("\n")}
 
 INSTRUCTIONS:
-1. Write in formal federal grant prose - the kind a port director or CFO would recognize as a credible first draft.
-2. Optimize for the evaluation criteria above. Each criterion should be clearly addressed.
-3. Use specific data from the applicant background. Cite real numbers - tonnage, jobs, economic impact, past awards.
-4. Where data is missing or you need human verification, insert an inline annotation in exactly this format: [NEEDS: specific description of what's missing]. Be specific, not generic - e.g., "[NEEDS: updated Phase 2 construction cost estimate from engineer]" not "[NEEDS: more information]".
-5. Stay within the word limit of ${section.maxWords} words.
-6. Do NOT hallucinate data. If a specific number or fact is not provided above, flag it with a [NEEDS: ...] annotation.
-7. Structure with clear paragraphs. Use no markdown headers - this will be rendered as flowing prose sections.
-8. Reference the ${grantReqs.programName} priorities and ${grantReqs.agency || "federal agency"} strategic goals where relevant.
+1. Write for a federal reviewer who reads 200+ applications per cycle. Lead every paragraph with the key fact or number. Be easy to score.
+2. Optimize for the evaluation criteria above. Each criterion should be clearly addressed with data.
+3. Use specific data from the applicant background. Every claim needs a number — not "significant impact" but "$3.2B regional economic impact" or "30 million tons annually."
+4. CITE every data point inline: [Source: Entity Profile], [Source: Operations Data], [Source: Economic Impact Data], [Source: Past Awards], [Source: Project Data], [Source: Applicant Estimate]. The reviewer must be able to trace every number.
+5. Where data is missing, insert: [NEEDS: specific description]. Be specific — "[NEEDS: updated Phase 2 cost estimate from engineer]" not "[NEEDS: more information]".
+6. Do NOT hallucinate data. If a number is not provided above, flag it with [NEEDS: ...].
+7. Stay within the word limit of ${section.maxWords} words.
+8. Structure with clear paragraphs. Use no markdown headers - rendered as flowing prose sections.
+9. Reference ${grantReqs.programName} priorities and ${grantReqs.agency || "federal agency"} strategic goals.
+10. ADDRESS SHOVEL READINESS: If this section relates to project description or readiness, explicitly state NEPA status, design completion %, permits in hand vs pending, procurement approach, and target construction start date. If the project is shovel-ready, say so.
+11. PHASE LARGE PROJECTS: If total project cost exceeds $5M, break into phases with cost per phase, timeline, and what's independently deliverable at each phase.
+12. LANGUAGE: Frame energy and environmental work as "energy resilience", "energy dominance", "reliability", "operational efficiency" — NOT "green", "clean energy", or "climate action." Use "emissions reduction" only when tied to regulatory compliance or cost savings. Justice40 and disadvantaged community language is required where the NOFO demands it, but lead with economic uplift, jobs, and infrastructure access.
 
 Write the complete section now. Output ONLY the section text - no preamble, no meta-commentary.`;
 }
@@ -309,12 +313,16 @@ export async function POST(req: Request) {
     }
     const entity: EntityProfile = mergeWithDefaults(body.entityProfile);
 
-    // Require real grant requirements (from NOFO extraction)
+    // If no sections provided, generate default sections based on the grant program
     if (!body.grantRequirements?.sections?.length) {
-      return new Response(
-        JSON.stringify({ error: "Grant requirements are required. Upload the NOFO document first." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      body.grantRequirements = body.grantRequirements || {};
+      body.grantRequirements.sections = [
+        { id: "section-0", title: "Project Narrative", description: "Describe the proposed project, its goals, and how it addresses the program objectives.", maxWords: 5000, weight: 30, evaluationCriteria: ["Project merit", "Alignment with program goals"], requiredElements: [] },
+        { id: "section-1", title: "Statement of Need", description: "Explain why this project is needed, including data on current conditions and deficiencies.", maxWords: 3000, weight: 20, evaluationCriteria: ["Demonstrated need", "Supporting data"], requiredElements: [] },
+        { id: "section-2", title: "Project Budget & Cost Effectiveness", description: "Provide a detailed budget and demonstrate cost effectiveness of the proposed project.", maxWords: 2000, weight: 20, evaluationCriteria: ["Budget reasonableness", "Cost effectiveness"], requiredElements: [] },
+        { id: "section-3", title: "Organizational Capability", description: "Demonstrate the applicant's capacity to successfully manage and complete the project.", maxWords: 2000, weight: 15, evaluationCriteria: ["Past performance", "Staff qualifications", "Management plan"], requiredElements: [] },
+        { id: "section-4", title: "Project Schedule & Milestones", description: "Provide a realistic project timeline with key milestones and deliverables.", maxWords: 1500, weight: 15, evaluationCriteria: ["Feasibility of timeline", "Clear milestones"], requiredElements: [] },
+      ];
     }
 
     const grantReqs: GrantRequirements = {
@@ -340,7 +348,7 @@ export async function POST(req: Request) {
       const prompt = buildSectionPrompt(section, entity, grantReqs);
 
       const result = await generateText({
-        model: anthropic("claude-sonnet-4-5-20250929"),
+        model: anthropic("claude-sonnet-4-20250514"),
         prompt,
       });
 

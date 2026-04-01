@@ -653,15 +653,36 @@ export async function getCompetitiveIntelligence(params: { grantId: string }) {
 
 /**
  * Build a grant application narrative using AI.
- * Uses the configured prompt in grant-application-prompt.ts.
+ * Enriches with port profile and best-matching project for specificity.
  */
 export async function buildGrantApplication(params: {
   grantId: string;
   portName?: string;
+  projectId?: string;
 }): Promise<string> {
-  const portName = params.portName ?? activeProfile().name;
+  const profile = activeProfile();
+  const portName = params.portName ?? profile.name;
+
+  let project = params.projectId ? getProjectById(params.projectId) : undefined;
+  if (!project) {
+    try {
+      const grant = await fetchGrantDetails(params.grantId);
+      const allProjects = getAllProjects();
+      if (allProjects.length > 0) {
+        const projectMatches = matchGrantToProjects(grant, allProjects);
+        if (projectMatches.length > 0 && projectMatches[0].matchScore >= 30) {
+          project = getProjectById(projectMatches[0].projectId) ?? undefined;
+        }
+      }
+    } catch {
+      // If grant fetch fails here, buildGrantApplicationCore will handle it
+    }
+  }
+
   return buildGrantApplicationCore({
     grantId: params.grantId,
     portName,
+    portProfile: profile,
+    project,
   });
 }
