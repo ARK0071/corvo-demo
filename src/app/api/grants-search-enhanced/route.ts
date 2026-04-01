@@ -5,9 +5,7 @@ import { enhanceUSDOTGrant } from "@/lib/usdot-grants";
 /**
  * POST /api/grants-search-enhanced
  *
- * Grant search via Grants.gov only (single query — no extra USDOT-specific parallel searches).
- * DOT-related opportunities still appear when they match your keyword; `enhanceUSDOTGrant`
- * enriches known program titles with typical funding metadata when applicable.
+ * Grant search via Grants.gov search2. `enhanceUSDOTGrant` enriches known DOT program titles when applicable.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -16,11 +14,14 @@ export async function POST(request: NextRequest) {
     const params: GrantsSearchParams = {};
 
     if (body.keyword && typeof body.keyword === "string") {
-      params.keyword = body.keyword.trim().slice(0, 200);
+      const kw = body.keyword.trim().slice(0, 200);
+      if (kw) params.keyword = kw;
     }
 
-    if (body.agency && typeof body.agency === "string") {
-      params.agency = body.agency.trim();
+    if (typeof body.agencies === "string" && body.agencies.trim()) {
+      params.agencies = body.agencies.trim().slice(0, 500);
+    } else if (body.agency && typeof body.agency === "string" && body.agency.trim()) {
+      params.agency = body.agency.trim().slice(0, 200);
     }
 
     if (Array.isArray(body.oppStatuses)) {
@@ -32,8 +33,30 @@ export async function POST(request: NextRequest) {
 
     if (Array.isArray(body.fundingCategories)) {
       params.fundingCategories = body.fundingCategories.filter(
-        (c: unknown) => typeof c === "string"
+        (c: unknown) => typeof c === "string" && /^[A-Z0-9]{1,6}$/i.test(c)
       );
+    }
+
+    if (Array.isArray(body.fundingInstruments)) {
+      params.fundingInstruments = body.fundingInstruments.filter(
+        (c: unknown) => typeof c === "string" && /^[A-Z]{1,3}$/i.test(c)
+      );
+    }
+
+    if (Array.isArray(body.eligibilities)) {
+      params.eligibilities = body.eligibilities.filter(
+        (c: unknown) => typeof c === "string" && /^\d{2}$/.test(c)
+      );
+    }
+
+    if (body.oppNum && typeof body.oppNum === "string") {
+      const o = body.oppNum.trim().slice(0, 120);
+      if (o) params.oppNum = o;
+    }
+
+    if (body.aln && typeof body.aln === "string") {
+      const a = body.aln.trim().slice(0, 40);
+      if (a) params.aln = a;
     }
 
     if (typeof body.rows === "number" && body.rows > 0 && body.rows <= 200) {
@@ -47,15 +70,31 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.sortBy && typeof body.sortBy === "string") {
-      params.sortBy = body.sortBy;
+      const s = body.sortBy.trim().slice(0, 80);
+      if (/^[a-zA-Z0-9_|.-]+$/.test(s)) {
+        params.sortBy = s;
+      }
     }
 
-    const mainKeyword =
-      params.keyword || "port OR maritime OR transportation OR infrastructure OR seaport";
+    const hasStructuredFilters = Boolean(
+      params.oppNum ||
+        params.aln ||
+        params.agencies ||
+        params.agency ||
+        (params.fundingCategories?.length ?? 0) > 0 ||
+        (params.fundingInstruments?.length ?? 0) > 0 ||
+        (params.eligibilities?.length ?? 0) > 0
+    );
+
+    const keywordForSearch =
+      params.keyword ||
+      (hasStructuredFilters
+        ? undefined
+        : "port OR maritime OR transportation OR infrastructure OR seaport");
 
     const { grants: rawGrants, totalCount } = await searchGrants({
       ...params,
-      keyword: mainKeyword,
+      keyword: keywordForSearch,
     });
 
     const grants = rawGrants.map((g) => enhanceUSDOTGrant(g));

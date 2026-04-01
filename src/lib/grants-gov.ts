@@ -106,12 +106,19 @@ interface OpportunityDetail {
 
 export interface GrantsSearchParams {
   keyword?: string;
+  /** Grants.gov `agencies` — pipe-separated office codes (e.g. `DOT-MA|EPA`). */
+  agencies?: string;
+  /** @deprecated Prefer `agencies` */
   agency?: string;
   oppStatuses?: string[];        // ["posted", "forecasted", "closed", "archived"]
   fundingCategories?: string[];
+  fundingInstruments?: string[];
+  eligibilities?: string[];
+  oppNum?: string;
+  aln?: string;
   rows?: number;                 // Results per page (default: 25)
   startRecordNum?: number;       // Pagination offset
-  sortBy?: string;               // Sort field
+  sortBy?: string;               // e.g. openDate|desc
 }
 
 // Clear expired cache entries
@@ -149,13 +156,22 @@ export async function searchGrants(params: GrantsSearchParams): Promise<{
   };
 
   if (params.keyword) requestBody.keyword = params.keyword;
-  if (params.agency) requestBody.agencies = params.agency;
+  const agencies = params.agencies?.trim() || params.agency?.trim();
+  if (agencies) requestBody.agencies = agencies;
   if (params.oppStatuses && params.oppStatuses.length > 0) {
     requestBody.oppStatuses = params.oppStatuses.join("|");
   }
   if (params.fundingCategories && params.fundingCategories.length > 0) {
     requestBody.fundingCategories = params.fundingCategories.join("|");
   }
+  if (params.fundingInstruments && params.fundingInstruments.length > 0) {
+    requestBody.fundingInstruments = params.fundingInstruments.join("|");
+  }
+  if (params.eligibilities && params.eligibilities.length > 0) {
+    requestBody.eligibilities = params.eligibilities.join("|");
+  }
+  if (params.oppNum?.trim()) requestBody.oppNum = params.oppNum.trim();
+  if (params.aln?.trim()) requestBody.aln = params.aln.trim();
   if (params.sortBy) requestBody.sortBy = params.sortBy;
 
   try {

@@ -12,6 +12,7 @@ import {
   Loader2,
   ChevronRight,
   ChevronDown,
+  ChevronLeft,
   ArrowRight,
   ArrowLeft,
   X,
@@ -36,6 +37,11 @@ import {
   isInPipeline,
 } from "@/data/grant-pipeline";
 import { VendorSearch } from "@/components/vendor-search/vendor-search";
+import {
+  GrantDiscoveryFilters,
+  getDefaultGrantDiscoveryFilters,
+} from "@/components/grant-discovery/grant-discovery-filters";
+import { buildAgenciesParam, type GrantDiscoveryFilterState } from "@/lib/grants-gov-filters";
 import { getEmbeddingSimilarityForProject, type GrantScore } from "@/data/grant-scoring";
 import { useProfile } from "@/components/profile-provider";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
@@ -128,9 +134,11 @@ function UnifiedGrantsDashboard() {
     [router]
   );
 
-  // Discover tab state
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(["posted", "forecasted"]);
+  // Discover tab state (Grants.gov search2 + sidebar filters)
+  const [discoveryFilters, setDiscoveryFilters] = useState<GrantDiscoveryFilterState>(() =>
+    getDefaultGrantDiscoveryFilters()
+  );
+  const [showDiscoverFilters, setShowDiscoverFilters] = useState(true);
   const [discoveredGrants, setDiscoveredGrants] = useState<DiscoveredGrant[]>([]);
   const [grantScores, setGrantScores] = useState<Map<string, GrantScore>>(new Map());
   const [showOnlyEligible, setShowOnlyEligible] = useState(false);
@@ -140,6 +148,9 @@ function UnifiedGrantsDashboard() {
   const [includeProfile, setIncludeProfile] = useState(true);
   const [includeEligibility, setIncludeEligibility] = useState(true);
   const [includeImpact, setIncludeImpact] = useState(true);
+  const [sortingSectionOpen, setSortingSectionOpen] = useState(true);
+  const [projectsSectionOpen, setProjectsSectionOpen] = useState(true);
+  const [fundingDomainsSectionOpen, setFundingDomainsSectionOpen] = useState(true);
 
   // Client-side grant search cache (avoids redundant API calls for same query)
   const [searchCache] = useState(() => new Map<string, { grants: DiscoveredGrant[]; totalCount: number }>());
@@ -257,11 +268,33 @@ function UnifiedGrantsDashboard() {
     setSearchError(null);
 
     try {
-      let keyword = searchQuery.trim();
-      const rows = 100;
-      const statuses = selectedStatuses.length > 0 ? selectedStatuses : undefined;
+      const keyword = discoveryFilters.keyword.trim();
+      const rows = discoveryFilters.rows;
+      const statuses =
+        discoveryFilters.oppStatuses.length > 0 ? discoveryFilters.oppStatuses : undefined;
+      const agencies = buildAgenciesParam(discoveryFilters);
+      const sortBy = discoveryFilters.sortBy.trim() || undefined;
 
-      const cacheKey = JSON.stringify({ keyword, statuses, rows });
+      const requestPayload = {
+        keyword: keyword || undefined,
+        oppStatuses: statuses,
+        rows,
+        ...(agencies ? { agencies } : {}),
+        ...(discoveryFilters.fundingCategories.length > 0
+          ? { fundingCategories: discoveryFilters.fundingCategories }
+          : {}),
+        ...(discoveryFilters.fundingInstruments.length > 0
+          ? { fundingInstruments: discoveryFilters.fundingInstruments }
+          : {}),
+        ...(discoveryFilters.eligibilities.length > 0
+          ? { eligibilities: discoveryFilters.eligibilities }
+          : {}),
+        ...(discoveryFilters.oppNum.trim() ? { oppNum: discoveryFilters.oppNum.trim() } : {}),
+        ...(discoveryFilters.aln.trim() ? { aln: discoveryFilters.aln.trim() } : {}),
+        ...(sortBy ? { sortBy } : {}),
+      };
+
+      const cacheKey = JSON.stringify(requestPayload);
 
       let grants: DiscoveredGrant[];
       let totalCountValue: number;
@@ -276,11 +309,7 @@ function UnifiedGrantsDashboard() {
         const res = await fetch("/api/grants-search-enhanced", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            keyword,
-            oppStatuses: statuses,
-            rows,
-          }),
+          body: JSON.stringify(requestPayload),
         });
 
         if (!res.ok) {
@@ -432,16 +461,14 @@ function UnifiedGrantsDashboard() {
     router.push(`/grant-match?${params.toString()}`);
   }
 
-  function toggleStatus(status: string) {
-    setSelectedStatuses((prev) =>
-      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
-    );
-  }
-
   return (
     <>
       <div className="flex-1 overflow-y-auto">
-        <div className={`mx-auto px-6 py-8 ${activeTab === "outreach" ? "max-w-[90rem]" : "max-w-6xl"}`}>
+        <div
+          className={`mx-auto px-6 py-8 ${
+            activeTab === "outreach" || activeTab === "discover" ? "max-w-[90rem]" : "max-w-6xl"
+          }`}
+        >
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-3">
@@ -466,259 +493,374 @@ function UnifiedGrantsDashboard() {
         {/* Tab content - tab selection driven by URL ?tab= param, sidebar provides navigation */}
         <div className="w-full">
           {activeTab === "discover" && (
-            <div className="mt-2">
-            <Card className="p-5 mb-6">
-              <div className="space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                    placeholder="Search grants (automatically includes USDOT programs: PIDP, RAISE, INFRA, MEGA)"
-                    className="w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                </div>
-
-                <div>
-                  <p className="text-xs text-muted-foreground mb-2">Filter by status:</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["posted", "forecasted", "closed", "archived"].map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => toggleStatus(status)}
-                        className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                          selectedStatuses.includes(status)
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                        }`}
-                      >
-                        {status.charAt(0).toUpperCase() + status.slice(1)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button onClick={handleSearch} disabled={searching} className="gap-2">
+            <div className="mt-2 flex gap-4 items-start">
+              {showDiscoverFilters && (
+                <div className="w-80 shrink-0 sticky top-4 space-y-3">
+                  <Button
+                    onClick={handleSearch}
+                    disabled={searching}
+                    className="w-full gap-2"
+                    size="sm"
+                  >
                     {searching ? (
                       <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Searching grants...
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Searching Grants.gov…
                       </>
                     ) : (
                       <>
-                        <Search className="h-4 w-4" />
+                        <Search className="h-3.5 w-3.5" />
                         Search Federal Grants
                       </>
                     )}
                   </Button>
+                  <GrantDiscoveryFilters
+                    filters={discoveryFilters}
+                    onChange={setDiscoveryFilters}
+                    onReset={() => setDiscoveryFilters(getDefaultGrantDiscoveryFilters())}
+                  />
+                </div>
+              )}
 
+              <div className="flex-1 min-w-0 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!showDiscoverFilters && (
+                      <>
+                        <Button
+                          onClick={handleSearch}
+                          disabled={searching}
+                          size="sm"
+                          className="gap-1 h-7 text-[11px]"
+                        >
+                          {searching ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Search className="h-3 w-3" />
+                          )}
+                          Search
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowDiscoverFilters(true)}
+                          className="gap-1 h-7 text-[11px]"
+                        >
+                          <SlidersHorizontal className="h-3 w-3" />
+                          Filters
+                        </Button>
+                      </>
+                    )}
+                    {showDiscoverFilters && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowDiscoverFilters(false)}
+                        className="gap-1 h-7 text-[11px]"
+                      >
+                        <ChevronLeft className="h-3 w-3" />
+                        Hide filters
+                      </Button>
+                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                      Grants.gov search2: agencies, CFDA, categories, instruments, eligibility, sort, and page size.
+                    </p>
+                  </div>
                   {discoveredGrants.length > 0 && (
                     <Button
                       variant="outline"
+                      size="sm"
                       onClick={() => scoreGrants(discoveredGrants)}
                       disabled={scanning}
-                      className="gap-2"
+                      className="gap-1.5 h-7 text-[11px]"
                     >
                       {scanning ? (
                         <>
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                          Analyzing...
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Analyzing…
                         </>
                       ) : (
                         <>
-                          <Award className="h-4 w-4" />
-                          Re-scan Matches
+                          <Award className="h-3 w-3" />
+                          Re-scan matches
                         </>
                       )}
                     </Button>
                   )}
                 </div>
-              </div>
-            </Card>
 
             {discoveredGrants.length > 0 && (
               <Card className="p-4 mb-4">
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium">Show:</span>
-                      <button
-                        onClick={() => setShowOnlyEligible(!showOnlyEligible)}
-                        className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                          showOnlyEligible
-                            ? "bg-primary text-primary-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                        }`}
-                      >
-                        Eligible for {selectedProfile.name} Only
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium">Sort by:</span>
-                      {(
-                        [
-                          ["score", "Match Score"],
-                          ["funding", "Funding"],
-                          ["deadline", "Deadline"],
-                        ] as const
-                      ).map(([value, label]) => (
-                        <button
-                          key={value}
-                          onClick={() => setSortBy(value)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                            sortBy === value
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-muted-foreground hover:bg-muted/80"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="border-b border-border/50 pb-2 -mx-1 px-1">
+                    <button
+                      type="button"
+                      onClick={() => setSortingSectionOpen((o) => !o)}
+                      className="w-full flex items-center gap-2 text-left rounded-md py-1.5 -my-1 hover:bg-muted/60 transition-colors"
+                    >
+                      {sortingSectionOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="text-xs font-semibold">Sorting</span>
+                      {!sortingSectionOpen && (
+                        <span className="text-[10px] text-muted-foreground font-normal truncate">
+                          ·{" "}
+                          {sortBy === "score"
+                            ? "Match score"
+                            : sortBy === "funding"
+                              ? "Funding"
+                              : "Deadline"}
+                          {showOnlyEligible ? " · Eligible only" : ""}
+                          {(!includeProfile || !includeEligibility || !includeImpact) &&
+                            " · Custom score mix"}
+                        </span>
+                      )}
+                    </button>
                   </div>
 
-                  <div className="border-t pt-3">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-medium text-muted-foreground">Include in score:</span>
-                      {([
-                        ["Profile", includeProfile, setIncludeProfile] as const,
-                        ["Eligibility", includeEligibility, setIncludeEligibility] as const,
-                        ["Impact", includeImpact, setIncludeImpact] as const,
-                      ]).map(([label, value, setter]) => (
-                        <button
-                          key={label}
-                          onClick={() => setter(!value)}
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                            value
-                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
-                              : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  {sortingSectionOpen && (
+                    <>
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium">Show:</span>
+                          <button
+                            onClick={() => setShowOnlyEligible(!showOnlyEligible)}
+                            className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                              showOnlyEligible
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted text-muted-foreground hover:bg-muted/80"
+                            }`}
+                          >
+                            Eligible for {selectedProfile.name} Only
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-medium">Sort by:</span>
+                          {(
+                            [
+                              ["score", "Match Score"],
+                              ["funding", "Funding"],
+                              ["deadline", "Deadline"],
+                            ] as const
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              onClick={() => setSortBy(value)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                sortBy === value
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-3">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] font-medium text-muted-foreground">
+                            Include in score:
+                          </span>
+                          {([
+                            ["Profile", includeProfile, setIncludeProfile] as const,
+                            ["Eligibility", includeEligibility, setIncludeEligibility] as const,
+                            ["Impact", includeImpact, setIncludeImpact] as const,
+                          ]).map(([label, value, setter]) => (
+                            <button
+                              key={label}
+                              onClick={() => setter(!value)}
+                              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                value
+                                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
+                                  : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   {projects.length > 0 && (
                     <div className="border-t pt-3">
-                      <div className="flex items-center gap-2 mb-1.5">
-                        <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] font-medium text-muted-foreground">Projects:</span>
-                        <button
-                          onClick={() => setSelectedProjectIds("all")}
-                          className={`text-[10px] hover:underline ${
-                            selectedProjectIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
-                          }`}
-                        >
-                          All
-                        </button>
-                        <span className="text-[10px] text-muted-foreground/50">|</span>
-                        <button
-                          onClick={() => setSelectedProjectIds(new Set())}
-                          className={`text-[10px] hover:underline ${
-                            selectedProjectIds !== "all" && selectedProjectIds.size === 0 ? "text-primary font-medium" : "text-muted-foreground"
-                          }`}
-                        >
-                          None
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {projects.map((project) => {
-                          const isSelected = selectedProjectIds === "all" || selectedProjectIds.has(project.id);
-                          return (
+                      <button
+                        type="button"
+                        onClick={() => setProjectsSectionOpen((o) => !o)}
+                        className="w-full flex items-center gap-2 text-left rounded-md py-1.5 -mx-1 px-1 mb-1 hover:bg-muted/60 transition-colors"
+                      >
+                        {projectsSectionOpen ? (
+                          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        )}
+                        <SlidersHorizontal className="h-3 w-3 text-muted-foreground shrink-0" />
+                        <span className="text-xs font-semibold">Projects</span>
+                        {!projectsSectionOpen && (
+                          <span className="text-[10px] text-muted-foreground font-normal truncate">
+                            ·{" "}
+                            {selectedProjectIds === "all"
+                              ? "All"
+                              : selectedProjectIds.size === 0
+                                ? "None"
+                                : `${selectedProjectIds.size} selected`}
+                          </span>
+                        )}
+                      </button>
+                      {projectsSectionOpen && (
+                        <>
+                          <div className="flex items-center gap-2 mb-1.5 pl-6">
+                            <span className="text-[10px] font-medium text-muted-foreground">Filter:</span>
                             <button
-                              key={project.id}
-                              onClick={() => {
-                                if (selectedProjectIds === "all") {
-                                  const allExceptThis = new Set(projects.map((p) => p.id));
-                                  allExceptThis.delete(project.id);
-                                  setSelectedProjectIds(allExceptThis);
-                                } else {
-                                  const next = new Set(selectedProjectIds);
-                                  if (next.has(project.id)) {
-                                    next.delete(project.id);
-                                  } else {
-                                    next.add(project.id);
-                                  }
-                                  if (next.size === projects.length) setSelectedProjectIds("all");
-                                  else setSelectedProjectIds(next);
-                                }
-                              }}
-                              className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                                isSelected
-                                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30"
-                                  : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                              onClick={() => setSelectedProjectIds("all")}
+                              className={`text-[10px] hover:underline ${
+                                selectedProjectIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
                               }`}
-                              title={project.description}
                             >
-                              {project.name.length > 40 ? project.name.slice(0, 40) + "..." : project.name}
+                              All
                             </button>
-                          );
-                        })}
-                      </div>
+                            <span className="text-[10px] text-muted-foreground/50">|</span>
+                            <button
+                              onClick={() => setSelectedProjectIds(new Set())}
+                              className={`text-[10px] hover:underline ${
+                                selectedProjectIds !== "all" && selectedProjectIds.size === 0
+                                  ? "text-primary font-medium"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              None
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 pl-6">
+                            {projects.map((project) => {
+                              const isSelected =
+                                selectedProjectIds === "all" || selectedProjectIds.has(project.id);
+                              return (
+                                <button
+                                  key={project.id}
+                                  onClick={() => {
+                                    if (selectedProjectIds === "all") {
+                                      const allExceptThis = new Set(projects.map((p) => p.id));
+                                      allExceptThis.delete(project.id);
+                                      setSelectedProjectIds(allExceptThis);
+                                    } else {
+                                      const next = new Set(selectedProjectIds);
+                                      if (next.has(project.id)) {
+                                        next.delete(project.id);
+                                      } else {
+                                        next.add(project.id);
+                                      }
+                                      if (next.size === projects.length) setSelectedProjectIds("all");
+                                      else setSelectedProjectIds(next);
+                                    }
+                                  }}
+                                  className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                    isSelected
+                                      ? "bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30"
+                                      : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                                  }`}
+                                  title={project.description}
+                                >
+                                  {project.name.length > 40 ? project.name.slice(0, 40) + "..." : project.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
                   <div className="border-t pt-3">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <SlidersHorizontal className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-[10px] font-medium text-muted-foreground">Funding domains:</span>
-                      <button
-                        onClick={() => setSelectedDomainIds("all")}
-                        className={`text-[10px] hover:underline ${
-                          selectedDomainIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
-                        }`}
-                      >
-                        All
-                      </button>
-                      <span className="text-[10px] text-muted-foreground/50">|</span>
-                      <button
-                        onClick={() => setSelectedDomainIds(new Set())}
-                        className={`text-[10px] hover:underline ${
-                          selectedDomainIds !== "all" && selectedDomainIds.size === 0 ? "text-primary font-medium" : "text-muted-foreground"
-                        }`}
-                      >
-                        None
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {FUNDING_DOMAINS.map((domain) => {
-                        const isSelected = selectedDomainIds === "all" || selectedDomainIds.has(domain.id);
-                        return (
+                    <button
+                      type="button"
+                      onClick={() => setFundingDomainsSectionOpen((o) => !o)}
+                      className="w-full flex items-center gap-2 text-left rounded-md py-1.5 -mx-1 px-1 mb-1 hover:bg-muted/60 transition-colors"
+                    >
+                      {fundingDomainsSectionOpen ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      <SlidersHorizontal className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <span className="text-xs font-semibold">Funding domains</span>
+                      {!fundingDomainsSectionOpen && (
+                        <span className="text-[10px] text-muted-foreground font-normal truncate">
+                          ·{" "}
+                          {selectedDomainIds === "all"
+                            ? "All"
+                            : selectedDomainIds.size === 0
+                              ? "None"
+                              : `${selectedDomainIds.size} selected`}
+                        </span>
+                      )}
+                    </button>
+                    {fundingDomainsSectionOpen && (
+                      <>
+                        <div className="flex items-center gap-2 mb-1.5 pl-6">
+                          <span className="text-[10px] font-medium text-muted-foreground">Filter:</span>
                           <button
-                            key={domain.id}
-                            onClick={() => {
-                              if (selectedDomainIds === "all") {
-                                const allExceptThis = new Set(FUNDING_DOMAINS.map((d) => d.id));
-                                allExceptThis.delete(domain.id);
-                                setSelectedDomainIds(allExceptThis);
-                              } else {
-                                const next = new Set(selectedDomainIds);
-                                if (next.has(domain.id)) {
-                                  next.delete(domain.id);
-                                } else {
-                                  next.add(domain.id);
-                                }
-                                if (next.size === FUNDING_DOMAINS.length) setSelectedDomainIds("all");
-                                else setSelectedDomainIds(next);
-                              }
-                            }}
-                            className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
-                              isSelected
-                                ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30"
-                                : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                            onClick={() => setSelectedDomainIds("all")}
+                            className={`text-[10px] hover:underline ${
+                              selectedDomainIds === "all" ? "text-primary font-medium" : "text-muted-foreground"
                             }`}
                           >
-                            {domain.name}
+                            All
                           </button>
-                        );
-                      })}
-                    </div>
+                          <span className="text-[10px] text-muted-foreground/50">|</span>
+                          <button
+                            onClick={() => setSelectedDomainIds(new Set())}
+                            className={`text-[10px] hover:underline ${
+                              selectedDomainIds !== "all" && selectedDomainIds.size === 0
+                                ? "text-primary font-medium"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            None
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 pl-6">
+                          {FUNDING_DOMAINS.map((domain) => {
+                            const isSelected =
+                              selectedDomainIds === "all" || selectedDomainIds.has(domain.id);
+                            return (
+                              <button
+                                key={domain.id}
+                                onClick={() => {
+                                  if (selectedDomainIds === "all") {
+                                    const allExceptThis = new Set(FUNDING_DOMAINS.map((d) => d.id));
+                                    allExceptThis.delete(domain.id);
+                                    setSelectedDomainIds(allExceptThis);
+                                  } else {
+                                    const next = new Set(selectedDomainIds);
+                                    if (next.has(domain.id)) {
+                                      next.delete(domain.id);
+                                    } else {
+                                      next.add(domain.id);
+                                    }
+                                    if (next.size === FUNDING_DOMAINS.length) setSelectedDomainIds("all");
+                                    else setSelectedDomainIds(next);
+                                  }
+                                }}
+                                className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                                  isSelected
+                                    ? "bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/30"
+                                    : "bg-muted text-muted-foreground hover:bg-muted/80 border border-transparent"
+                                }`}
+                              >
+                                {domain.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               </Card>
@@ -1124,6 +1266,7 @@ function UnifiedGrantsDashboard() {
                 <p className="text-xs mt-1">Results from Grants.gov, Federal Register, GovCon, and other sources</p>
               </div>
             )}
+              </div>
             </div>
           )}
 
