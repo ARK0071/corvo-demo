@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import Link from "next/link";
 import {
   Award,
@@ -24,21 +24,25 @@ import {
   Wallet,
   CircleDot,
   FileText,
+  RefreshCw,
+  Loader2,
+  Database,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import {
-  getAllAwards,
+  getAllAwards as getInMemoryAwards,
   getAwardById,
-  getAwardStats,
+  getAwardStats as getInMemoryStats,
   getExpensesForAward,
   getDrawdownsForAward,
   getBudgetModsForAward,
   getMatchStatus,
-  getAttentionItems,
+  getAttentionItems as getInMemoryAttentionItems,
   validateExpense,
   logExpense,
   checkExpenseAllowability,
@@ -147,9 +151,96 @@ export default function AwardsPage() {
   const [, setRefresh] = useState(0);
   const forceRefresh = useCallback(() => setRefresh((n) => n + 1), []);
 
-  const awards = useMemo(() => getAllAwards(), []);
-  const stats = useMemo(() => getAwardStats(), []);
-  const attentionItems = useMemo(() => getAttentionItems(), []);
+  // DB-first data loading
+  const tenant = useTenant();
+  const tenantHeaders = useTenantHeaders();
+  const [awards, setAwards] = useState<AwardType[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [dataSource, setDataSource] = useState<"db" | "memory">("memory");
+
+  // Fetch awards from the database API
+  const fetchFromDB = useCallback(async () => {
+    try {
+      const res = await fetch("/api/awards", {
+        headers: {
+          ...tenantHeaders,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to fetch awards from DB");
+      }
+
+      const data = await res.json();
+      if (data.awards && data.awards.length > 0) {
+        setAwards(data.awards);
+        setDataSource("db");
+        setLastSynced(new Date());
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("[Awards] DB fetch error:", error);
+      return false;
+    }
+  }, [tenantHeaders]);
+
+  // Load data on mount and when tenant changes
+  useEffect(() => {
+    if (tenant.isLoading) return;
+
+    const loadData = async () => {
+      setIsLoading(true);
+      const dbSuccess = await fetchFromDB();
+
+      // Fallback to in-memory data if DB returns nothing
+      if (!dbSuccess) {
+        const inMemoryAwards = getInMemoryAwards();
+        setAwards(inMemoryAwards);
+        setDataSource("memory");
+      }
+      setIsLoading(false);
+    };
+
+    loadData();
+  }, [tenant.isLoading, tenant.environment, tenant.portId, fetchFromDB]);
+
+  // Refresh handler
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchFromDB();
+    setIsRefreshing(false);
+    forceRefresh();
+  }, [fetchFromDB, forceRefresh]);
+
+  // Compute stats from awards data
+  const stats = useMemo(() => {
+    if (awards.length === 0) return getInMemoryStats();
+
+    let totalAwarded = 0;
+    let totalSpent = 0;
+    let totalDrawn = 0;
+
+    for (const award of awards) {
+      totalAwarded += award.totalAmount;
+      const spent = award.budgetCategories.reduce((s, c) => s + c.spent, 0);
+      totalSpent += spent;
+      // Note: totalDrawn would need to come from drawdown data
+    }
+
+    return {
+      totalAwards: awards.length,
+      totalAwarded,
+      totalSpent,
+      totalDrawn: getInMemoryStats().totalDrawn, // Fallback for now
+      totalRemaining: totalAwarded - totalSpent,
+    };
+  }, [awards]);
+
+  const attentionItems = useMemo(() => getInMemoryAttentionItems(), []);
 
   if (selectedAwardId) {
     return (
@@ -164,6 +255,18 @@ export default function AwardsPage() {
   const criticalItems = attentionItems.filter((a) => a.severity === "critical");
   const warningItems = attentionItems.filter((a) => a.severity === "warning");
 
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#3d8b8b] mx-auto mb-3" />
+          <p className="text-sm text-muted-foreground">Loading awards...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
       {/* Header */}
@@ -174,12 +277,35 @@ export default function AwardsPage() {
             Awards
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Post-award grant management for Port Freeport
+            Post-award grant management for {tenant.portName}
           </p>
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <Database className="h-2.5 w-2.5" />
+              {dataSource === "db" ? "Database" : "Demo Data"}
+            </Badge>
+            {lastSynced && (
+              <span className="text-[10px] text-muted-foreground">
+                Last synced: {lastSynced.toLocaleTimeString()}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-3xl font-bold tabular-nums text-[#3d8b8b]">{fmt(stats.totalAwarded)}</p>
-          <p className="text-xs text-muted-foreground">across {stats.totalAwards} awards</p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="gap-1.5"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+          <div className="text-right">
+            <p className="text-3xl font-bold tabular-nums text-[#3d8b8b]">{fmt(stats.totalAwarded)}</p>
+            <p className="text-xs text-muted-foreground">across {stats.totalAwards} awards</p>
+          </div>
         </div>
       </div>
 
