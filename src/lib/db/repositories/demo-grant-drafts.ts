@@ -7,6 +7,29 @@ function getPortId(): string {
   return getTenantConfig().portId;
 }
 
+// Helper to resolve portProfileId from UUID or slug
+async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string | null> {
+  const portId = getPortId();
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (uuidRegex.test(portProfileIdOrSlug)) {
+    return portProfileIdOrSlug;
+  }
+
+  // Look up the port profile by portId
+  const portProfile = await prisma.demoPortProfile.findFirst({
+    where: { portId },
+    select: { id: true },
+  });
+
+  if (!portProfile) {
+    console.error(`[demo-grant-drafts] No port profile found for portId: ${portId}`);
+    return null;
+  }
+
+  return portProfile.id;
+}
+
 // Draft status type
 export type DraftStatus = "researching" | "drafting" | "reviewing" | "ready" | "submitted";
 
@@ -124,9 +147,15 @@ export async function createDraft(
     sections?: DraftSection[];
     attachmentsChecklist?: AttachmentItem[];
   },
-  portProfileId: string
+  portProfileIdOrSlug: string
 ): Promise<GrantDraft> {
   const portId = getPortId();
+
+  // Resolve portProfileId from slug if needed
+  const portProfileId = await resolvePortProfileId(portProfileIdOrSlug);
+  if (!portProfileId) {
+    throw new Error(`Could not resolve port profile for: ${portProfileIdOrSlug}`);
+  }
 
   // Calculate initial completeness
   const sections = data.sections || [];

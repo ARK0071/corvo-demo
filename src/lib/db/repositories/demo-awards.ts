@@ -9,6 +9,7 @@ import {
   Prisma,
 } from "@/generated/prisma";
 import { getTenantConfig } from "../tenant-config";
+import { parseDateRequired } from "../date-utils";
 import type {
   Award,
   BudgetCategory,
@@ -26,6 +27,29 @@ import type {
 // Get current port ID from tenant config
 function getPortId(): string {
   return getTenantConfig().portId;
+}
+
+// Helper to resolve portProfileId from UUID or slug
+async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string | null> {
+  const portId = getPortId();
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (uuidRegex.test(portProfileIdOrSlug)) {
+    return portProfileIdOrSlug;
+  }
+
+  // Look up the port profile by portId
+  const portProfile = await prisma.demoPortProfile.findFirst({
+    where: { portId },
+    select: { id: true },
+  });
+
+  if (!portProfile) {
+    console.error(`[demo-awards] No port profile found for portId: ${portId}`);
+    return null;
+  }
+
+  return portProfile.id;
 }
 
 // Type for award with relations
@@ -198,9 +222,15 @@ export async function createAward(
     projectIds?: string[];
     budgetCategories?: { name: string; ceiling: number }[];
   },
-  portProfileId: string
+  portProfileIdOrSlug: string
 ): Promise<Award> {
   const portId = getPortId();
+
+  // Resolve portProfileId from slug if needed
+  const portProfileId = await resolvePortProfileId(portProfileIdOrSlug);
+  if (!portProfileId) {
+    throw new Error(`Could not resolve port profile for: ${portProfileIdOrSlug}`);
+  }
 
   const award = await prisma.demoAward.create({
     data: {
@@ -213,8 +243,8 @@ export async function createAward(
       title: data.title,
       description: data.description || "",
       totalAmount: data.totalAmount,
-      performancePeriodStart: new Date(data.performancePeriod.start),
-      performancePeriodEnd: new Date(data.performancePeriod.end),
+      performancePeriodStart: parseDateRequired(data.performancePeriod.start, "performancePeriod.start"),
+      performancePeriodEnd: parseDateRequired(data.performancePeriod.end, "performancePeriod.end"),
       matchPercentage: data.matchPercentage,
       matchTypes: data.matchTypes || [],
       matchCommitted: 0,
@@ -345,7 +375,7 @@ export async function logExpense(data: {
       portId,
       awardId: data.awardId,
       categoryId: data.categoryId,
-      date: new Date(data.date),
+      date: parseDateRequired(data.date, "expense date"),
       description: data.description,
       vendor: data.vendor,
       amount: data.amount,
@@ -420,7 +450,7 @@ export async function addMatchEntry(data: {
     data: {
       portId,
       awardId: data.awardId,
-      date: new Date(data.date),
+      date: parseDateRequired(data.date, "match entry date"),
       description: data.description,
       amount: data.amount,
       type: data.type,

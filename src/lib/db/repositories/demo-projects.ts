@@ -1,6 +1,7 @@
 import { prisma } from "../client";
 import { DemoProject as PrismaProject, Prisma } from "@/generated/prisma";
 import { getTenantConfig } from "../tenant-config";
+import { parseDate } from "../date-utils";
 import type { Project, ProjectReadiness, ProjectPastPerformance, ProjectMetrics } from "@/data/projects";
 
 // Get current port ID from tenant config
@@ -85,8 +86,8 @@ function toPrismaCreate(
     priority: project.priority || "medium",
     budget: project.budget || 0,
     location: project.location || null,
-    startDate: project.startDate ? new Date(project.startDate) : null,
-    endDate: project.endDate ? new Date(project.endDate) : null,
+    startDate: parseDate(project.startDate),
+    endDate: parseDate(project.endDate),
     focusAreas: project.focusAreas || [],
     notes: project.notes || null,
     fundingSource: project.fundingSource || null,
@@ -94,13 +95,13 @@ function toPrismaCreate(
     // Readiness fields
     nepaStatus: project.readiness?.nepaStatus || "not_started",
     nepaDocument: project.readiness?.nepaDocument || null,
-    nepaCompletionDate: project.readiness?.nepaCompletionDate ? new Date(project.readiness.nepaCompletionDate) : null,
+    nepaCompletionDate: parseDate(project.readiness?.nepaCompletionDate),
     designCompletion: project.readiness?.designCompletion || 0,
     designPhase: project.readiness?.designPhase || "conceptual",
     permits: project.readiness?.permits || [],
     rightOfWay: project.readiness?.rightOfWay || "not_needed",
     procurementApproach: project.readiness?.procurementApproach || null,
-    constructionStartTarget: project.readiness?.constructionStartTarget ? new Date(project.readiness.constructionStartTarget) : null,
+    constructionStartTarget: parseDate(project.readiness?.constructionStartTarget),
     shovelReady: project.readiness?.shovelReady || false,
     // Past performance fields
     priorFederalAwards: project.pastPerformance?.priorFederalAwards || [],
@@ -301,8 +302,8 @@ export async function updateProject(
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.budget !== undefined) updateData.budget = data.budget;
   if (data.location !== undefined) updateData.location = data.location || null;
-  if (data.startDate !== undefined) updateData.startDate = data.startDate ? new Date(data.startDate) : null;
-  if (data.endDate !== undefined) updateData.endDate = data.endDate ? new Date(data.endDate) : null;
+  if (data.startDate !== undefined) updateData.startDate = parseDate(data.startDate);
+  if (data.endDate !== undefined) updateData.endDate = parseDate(data.endDate);
   if (data.focusAreas !== undefined) updateData.focusAreas = data.focusAreas;
   if (data.notes !== undefined) updateData.notes = data.notes || null;
   if (data.fundingSource !== undefined) updateData.fundingSource = data.fundingSource || null;
@@ -313,7 +314,7 @@ export async function updateProject(
     if (data.readiness.nepaStatus !== undefined) updateData.nepaStatus = data.readiness.nepaStatus;
     if (data.readiness.nepaDocument !== undefined) updateData.nepaDocument = data.readiness.nepaDocument || null;
     if (data.readiness.nepaCompletionDate !== undefined) {
-      updateData.nepaCompletionDate = data.readiness.nepaCompletionDate ? new Date(data.readiness.nepaCompletionDate) : null;
+      updateData.nepaCompletionDate = parseDate(data.readiness.nepaCompletionDate);
     }
     if (data.readiness.designCompletion !== undefined) updateData.designCompletion = data.readiness.designCompletion;
     if (data.readiness.designPhase !== undefined) updateData.designPhase = data.readiness.designPhase;
@@ -321,7 +322,7 @@ export async function updateProject(
     if (data.readiness.rightOfWay !== undefined) updateData.rightOfWay = data.readiness.rightOfWay;
     if (data.readiness.procurementApproach !== undefined) updateData.procurementApproach = data.readiness.procurementApproach || null;
     if (data.readiness.constructionStartTarget !== undefined) {
-      updateData.constructionStartTarget = data.readiness.constructionStartTarget ? new Date(data.readiness.constructionStartTarget) : null;
+      updateData.constructionStartTarget = parseDate(data.readiness.constructionStartTarget);
     }
     if (data.readiness.shovelReady !== undefined) updateData.shovelReady = data.readiness.shovelReady;
   }

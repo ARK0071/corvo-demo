@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import {
   LayoutDashboard,
@@ -17,8 +17,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  getAllPipelineGrants,
-  getStageCount,
+  getAllPipelineGrants as getInMemoryPipelineGrants,
   type PipelineGrant,
 } from "@/data/grant-pipeline";
 import {
@@ -30,6 +29,7 @@ import {
 import { getAwardStats } from "@/data/awards";
 import { getReportingStats } from "@/data/reporting";
 import { useProfile } from "@/components/profile-provider";
+import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 
 // ─── Helpers ───
 
@@ -63,7 +63,10 @@ interface NewsArticle {
 
 export default function PorterDashboardPage() {
   const { profileId } = useProfile();
+  const tenant = useTenant();
+  const tenantHeaders = useTenantHeaders();
   const [pipeline, setPipeline] = useState<PipelineGrant[]>([]);
+  const [pipelineLoading, setPipelineLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectStats, setProjectStats] = useState<ReturnType<typeof getProjectStats> | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
@@ -71,27 +74,62 @@ export default function PorterDashboardPage() {
   const [awardStats, setAwardStats] = useState<ReturnType<typeof getAwardStats> | null>(null);
   const [reportingStats, setReportingStats] = useState<ReturnType<typeof getReportingStats> | null>(null);
 
+  // Fetch pipeline from database
+  const fetchPipelineFromDB = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pipeline", {
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("Failed to fetch pipeline");
+      const data = await res.json();
+      if (data.grants && data.grants.length > 0) {
+        setPipeline(data.grants);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("[Dashboard] Pipeline fetch error:", error);
+      return false;
+    }
+  }, [tenantHeaders]);
+
   useEffect(() => {
-    initializeProjectsForProfile(profileId);
-    setPipeline(getAllPipelineGrants());
-    setProjects(getAllProjects());
-    setProjectStats(getProjectStats());
-    setAwardStats(getAwardStats());
-    setReportingStats(getReportingStats());
+    if (tenant.isLoading) return;
 
-    fetch("/api/newsroom")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setNews((data.articles ?? []).slice(0, 5)))
-      .catch(() => setNews([]))
-      .finally(() => setNewsLoading(false));
-  }, []);
+    const loadData = async () => {
+      // Load pipeline from DB, fallback to in-memory
+      setPipelineLoading(true);
+      const pipelineSuccess = await fetchPipelineFromDB();
+      if (!pipelineSuccess) {
+        setPipeline(getInMemoryPipelineGrants());
+      }
+      setPipelineLoading(false);
 
+      // Load other data
+      initializeProjectsForProfile(profileId);
+      setProjects(getAllProjects());
+      setProjectStats(getProjectStats());
+      setAwardStats(getAwardStats());
+      setReportingStats(getReportingStats());
+
+      // Load news
+      fetch("/api/newsroom", { headers: tenantHeaders })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setNews((data.articles ?? []).slice(0, 5)))
+        .catch(() => setNews([]))
+        .finally(() => setNewsLoading(false));
+    };
+
+    loadData();
+  }, [tenant.isLoading, tenant.environment, tenant.portId, profileId, fetchPipelineFromDB, tenantHeaders]);
+
+  // Calculate stage counts from the pipeline state
   const stageCounts = useMemo(() => ({
-    eligible: getStageCount("eligible"),
-    applied: getStageCount("applied"),
-    underReview: getStageCount("under_review"),
-    awarded: getStageCount("awarded"),
-    rejected: getStageCount("rejected"),
+    eligible: pipeline.filter(g => g.stage === "eligible").length,
+    applied: pipeline.filter(g => g.stage === "applied").length,
+    underReview: pipeline.filter(g => g.stage === "under_review").length,
+    awarded: pipeline.filter(g => g.stage === "awarded").length,
+    rejected: pipeline.filter(g => g.stage === "rejected").length,
     total: pipeline.length,
   }), [pipeline]);
 
@@ -184,7 +222,11 @@ export default function PorterDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {stageCounts.total === 0 ? (
+            {pipelineLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : stageCounts.total === 0 ? (
               <EmptyHint
                 text="No grants in pipeline yet."
                 linkLabel="Discover Grants"

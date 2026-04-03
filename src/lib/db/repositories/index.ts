@@ -8,6 +8,7 @@ export * as Grants from "./grants";
 export * as Vendors from "./vendors";
 export * as Pipeline from "./pipeline";
 export * as Matches from "./matches";
+export * as Reports from "./reports";
 
 // Demo-specific exports (OpenAI embeddings - 1536 dims, with portId filter)
 export * as DemoGrants from "./demo-grants";
@@ -17,6 +18,7 @@ export * as DemoMatches from "./demo-matches";
 export * as DemoProjects from "./demo-projects";
 export * as DemoAwards from "./demo-awards";
 export * as DemoGrantDrafts from "./demo-grant-drafts";
+export * as DemoReports from "./demo-reports";
 
 // Re-export the active repositories based on config
 // Use these for automatic table selection
@@ -35,3 +37,7 @@ export const ActivePipeline = dbConfig.useDemoTables
 export const ActiveMatches = dbConfig.useDemoTables
   ? require("./demo-matches")
   : require("./matches");
+
+export const ActiveReports = dbConfig.useDemoTables
+  ? require("./demo-reports")
+  : require("./reports");

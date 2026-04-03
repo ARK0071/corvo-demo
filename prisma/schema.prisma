@@ -255,6 +255,8 @@ model Award {
   expenses               Expense[]
   drawdownRequests       DrawdownRequest[]
   budgetModifications    BudgetModification[]
+  scheduledReports       ScheduledReport[]
+  closeoutChecklist      CloseoutChecklist?
 
   @@index([portProfileId])
   @@index([status])
@@ -407,6 +409,45 @@ model GrantRequirements {
   grant               DiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
 
   @@map("grant_requirements")
+}
+
+// =============================================================================
+// SCHEDULED REPORTS - Production report tracking for awards
+// =============================================================================
+
+model ScheduledReport {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId          String    @map("award_id") @db.Uuid
+  type             String    @db.VarChar(50)
+  title            String    @db.VarChar(255)
+  dueDate          DateTime  @map("due_date") @db.Date
+  periodStart      DateTime  @map("period_start") @db.Date
+  periodEnd        DateTime  @map("period_end") @db.Date
+  status           String    @default("upcoming") @db.VarChar(50)
+  submittedDate    DateTime? @map("submitted_date") @db.Date
+  notes            String    @default("")
+  generatedContent Json?     @map("generated_content")
+  narrativeDraft   String?   @map("narrative_draft")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  award            Award     @relation(fields: [awardId], references: [id], onDelete: Cascade)
+
+  @@unique([awardId, type, periodStart])
+  @@index([awardId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("scheduled_reports")
+}
+
+model CloseoutChecklist {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId   String   @unique @map("award_id") @db.Uuid
+  items     Json     @default("[]")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  award     Award    @relation(fields: [awardId], references: [id], onDelete: Cascade)
+
+  @@map("closeout_checklists")
 }
 
 // =============================================================================
@@ -841,6 +882,8 @@ model DemoAward {
   expenses               DemoExpense[]
   drawdownRequests       DemoDrawdownRequest[]
   budgetModifications    DemoBudgetModification[]
+  scheduledReports       DemoScheduledReport[]
+  closeoutChecklist      DemoCloseoutChecklist?
 
   @@index([portId])
   @@index([portProfileId])
@@ -970,4 +1013,47 @@ model DemoGrantDraft {
   @@index([portId])
   @@index([portProfileId])
   @@map("demo_grant_drafts")
+}
+
+// =============================================================================
+// SCHEDULED REPORTS - Report tracking for awards
+// =============================================================================
+
+model DemoScheduledReport {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId           String    @map("port_id") @db.VarChar(100)
+  awardId          String    @map("award_id") @db.Uuid
+  type             String    @db.VarChar(50)
+  title            String    @db.VarChar(255)
+  dueDate          DateTime  @map("due_date") @db.Date
+  periodStart      DateTime  @map("period_start") @db.Date
+  periodEnd        DateTime  @map("period_end") @db.Date
+  status           String    @default("upcoming") @db.VarChar(50)
+  submittedDate    DateTime? @map("submitted_date") @db.Date
+  notes            String    @default("")
+  generatedContent Json?     @map("generated_content")
+  narrativeDraft   String?   @map("narrative_draft")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  award            DemoAward @relation(fields: [awardId], references: [id], onDelete: Cascade)
+
+  @@unique([awardId, type, periodStart, portId])
+  @@index([portId])
+  @@index([awardId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("demo_scheduled_reports")
+}
+
+model DemoCloseoutChecklist {
+  id        String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId    String    @map("port_id") @db.VarChar(100)
+  awardId   String    @unique @map("award_id") @db.Uuid
+  items     Json      @default("[]")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  award     DemoAward @relation(fields: [awardId], references: [id], onDelete: Cascade)
+
+  @@index([portId])
+  @@map("demo_closeout_checklists")
 }

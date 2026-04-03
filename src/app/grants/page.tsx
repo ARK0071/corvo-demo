@@ -417,7 +417,7 @@ function UnifiedGrantsDashboard() {
         console.log("[Grant Search] Cache miss, fetching from API...");
         const res = await fetch("/api/grants-search-enhanced", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
           body: JSON.stringify(requestPayload),
         });
 
@@ -503,8 +503,8 @@ function UnifiedGrantsDashboard() {
 
   // Add grant to pipeline - persists to DB if available, falls back to in-memory
   async function handleAddToPipeline(grant: DiscoveredGrant) {
-    // Update local state immediately for responsiveness
-    addToPipelineLocal({
+    // Create the pipeline grant object
+    const newPipelineGrant: PipelineGrant = {
       id: grant.id,
       opportunityNumber: grant.opportunityNumber,
       title: grant.title,
@@ -521,19 +521,54 @@ function UnifiedGrantsDashboard() {
       contactName: grant.contactName,
       contactEmail: grant.contactEmail,
       contactPhone: grant.contactPhone,
-    });
-    setPipelineGrants([...getInMemoryPipelineGrants()]);
+      stage: "eligible",
+      addedAt: new Date().toISOString(),
+      notes: "",
+    };
+
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => [...prev, newPipelineGrant]);
+    } else {
+      // Update in-memory store for memory-sourced data
+      addToPipelineLocal(newPipelineGrant);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
     setActiveTab("pipeline");
 
     // Persist to DB in background (non-blocking)
+    // Include full grant data so it gets stored in DemoDiscoveredGrant
     try {
       await fetch("/api/pipeline", {
         method: "POST",
         headers: { ...tenantHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
           grantId: grant.id,
-          portProfileId: profileId, // Use profile ID as port profile for now
+          portProfileId: profileId,
           stage: "eligible",
+          grant: {
+            opportunityNumber: grant.opportunityNumber,
+            title: grant.title,
+            agency: grant.agency,
+            agencyCode: grant.agencyCode,
+            description: grant.description,
+            awardFloor: grant.awardFloor,
+            awardCeiling: grant.awardCeiling,
+            totalFunding: grant.totalFunding,
+            closeDate: grant.closeDate,
+            postDate: grant.postDate,
+            status: grant.status,
+            applicationUrl: grant.applicationUrl,
+            eligibility: grant.eligibility,
+            fundingCategories: grant.fundingCategories,
+            fundingInstruments: grant.fundingInstruments,
+            costSharing: grant.costSharing,
+            alnNumbers: grant.alnNumbers,
+            contactName: grant.contactName,
+            contactEmail: grant.contactEmail,
+            contactPhone: grant.contactPhone,
+          },
         }),
       });
     } catch (error) {
@@ -556,9 +591,17 @@ function UnifiedGrantsDashboard() {
     if (newIndex >= 0 && newIndex < stages.length) {
       const newStage = stages[newIndex];
 
-      // Update local state immediately
-      moveGrantToStageLocal(grant.id, newStage);
-      setPipelineGrants([...getInMemoryPipelineGrants()]);
+      // Optimistic update - update state immediately based on data source
+      if (pipelineDataSource === "db") {
+        // Update React state directly for DB-sourced data
+        setPipelineGrants(prev => prev.map(g =>
+          g.id === grant.id ? { ...g, stage: newStage } : g
+        ));
+      } else {
+        // Update in-memory store for memory-sourced data
+        moveGrantToStageLocal(grant.id, newStage);
+        setPipelineGrants([...getInMemoryPipelineGrants()]);
+      }
 
       // Persist to DB in background
       try {
@@ -579,11 +622,21 @@ function UnifiedGrantsDashboard() {
 
   // Save notes for a grant
   async function handleSaveNotes(grantId: string) {
-    // Update local state immediately
-    updateGrantNotesLocal(grantId, notesText);
-    setPipelineGrants([...getInMemoryPipelineGrants()]);
-    setEditingNotes(null);
     const savedNotes = notesText;
+
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => prev.map(g =>
+        g.id === grantId ? { ...g, notes: savedNotes } : g
+      ));
+    } else {
+      // Update in-memory store for memory-sourced data
+      updateGrantNotesLocal(grantId, savedNotes);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
+
+    setEditingNotes(null);
     setNotesText("");
 
     // Persist to DB in background
@@ -604,9 +657,15 @@ function UnifiedGrantsDashboard() {
 
   // Remove grant from pipeline
   async function handleRemoveFromPipeline(grantId: string) {
-    // Update local state immediately
-    removeFromPipelineLocal(grantId);
-    setPipelineGrants([...getInMemoryPipelineGrants()]);
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => prev.filter(g => g.id !== grantId));
+    } else {
+      // Update in-memory store for memory-sourced data
+      removeFromPipelineLocal(grantId);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
 
     // Persist to DB in background
     try {

@@ -2,6 +2,7 @@ import { prisma } from "../client";
 import { DiscoveredGrant as PrismaGrant, Prisma } from "@/generated/prisma";
 import { DiscoveredGrant } from "@/lib/grants-gov";
 import { findSimilarGrants, findGrantsForProfile } from "../vector";
+import { parseDate } from "../date-utils";
 
 // Convert Prisma model to application type
 function toDiscoveredGrant(grant: PrismaGrant): DiscoveredGrant {
@@ -44,8 +45,8 @@ function toPrismaCreate(
     awardFloor: grant.awardFloor,
     awardCeiling: grant.awardCeiling,
     totalFunding: grant.totalFunding,
-    closeDate: grant.closeDate ? new Date(grant.closeDate) : null,
-    postDate: grant.postDate ? new Date(grant.postDate) : null,
+    closeDate: parseDate(grant.closeDate),
+    postDate: parseDate(grant.postDate),
     status: grant.status,
     applicationUrl: grant.applicationUrl || null,
     eligibility: grant.eligibility,

@@ -2,6 +2,7 @@ import { prisma } from "../client";
 import { DemoDiscoveredGrant as PrismaGrant, Prisma } from "@/generated/prisma";
 import { DiscoveredGrant } from "@/lib/grants-gov";
 import { getTenantConfig } from "../tenant-config";
+import { parseDate } from "../date-utils";
 
 // Get current port ID from tenant config
 function getPortId(): string {
@@ -51,8 +52,8 @@ function toPrismaCreate(
     awardFloor: grant.awardFloor,
     awardCeiling: grant.awardCeiling,
     totalFunding: grant.totalFunding,
-    closeDate: grant.closeDate ? new Date(grant.closeDate) : null,
-    postDate: grant.postDate ? new Date(grant.postDate) : null,
+    closeDate: parseDate(grant.closeDate),
+    postDate: parseDate(grant.postDate),
     status: grant.status,
     applicationUrl: grant.applicationUrl || null,
     eligibility: grant.eligibility,

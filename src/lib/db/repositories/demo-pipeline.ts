@@ -96,10 +96,10 @@ export async function getPipelineGrantById(grantId: string): Promise<PipelineGra
   return result ? toPipelineGrantWithGrant(result) : undefined;
 }
 
-// Add a grant to the pipeline (requires portProfileId)
+// Add a grant to the pipeline (resolves portProfileId from portId if needed)
 export async function addToPipeline(
   grantId: string,
-  portProfileId: string,
+  portProfileIdOrSlug: string,
   initialData?: { notes?: string; stage?: PipelineStage }
 ): Promise<PipelineGrant | null> {
   const portId = getPortId();
@@ -112,6 +112,25 @@ export async function addToPipeline(
 
   if (existing) {
     return toPipelineGrantWithGrant(existing);
+  }
+
+  // Resolve portProfileId - if it's not a valid UUID, look it up by portId
+  let portProfileId = portProfileIdOrSlug;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (!uuidRegex.test(portProfileIdOrSlug)) {
+    // Look up the port profile by portId
+    const portProfile = await prisma.demoPortProfile.findFirst({
+      where: { portId },
+      select: { id: true },
+    });
+
+    if (!portProfile) {
+      console.error(`[demo-pipeline] No port profile found for portId: ${portId}`);
+      return null;
+    }
+
+    portProfileId = portProfile.id;
   }
 
   const result = await prisma.demoPipelineGrant.create({

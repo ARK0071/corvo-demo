@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
 import * as DemoPipeline from "@/lib/db/repositories/demo-pipeline";
+import * as DemoGrants from "@/lib/db/repositories/demo-grants";
 import type { PipelineStage } from "@/data/grant-pipeline";
+import type { DiscoveredGrant } from "@/lib/grants-gov";
 
 // GET: List all pipeline grants or by stage
 export async function GET(request: NextRequest) {
@@ -42,13 +44,42 @@ export async function POST(request: NextRequest) {
     setTenantConfigFromHeaders(request.headers);
     const body = await request.json();
 
-    const { grantId, portProfileId, notes, stage } = body;
+    const { grantId, portProfileId, notes, stage, grant } = body;
 
     if (!grantId || !portProfileId) {
       return NextResponse.json(
         { error: "grantId and portProfileId are required" },
         { status: 400 }
       );
+    }
+
+    // If grant data is provided, store it in the database first
+    // This ensures the foreign key constraint is satisfied
+    if (grant) {
+      const grantData: DiscoveredGrant = {
+        id: grantId,
+        opportunityNumber: grant.opportunityNumber || "",
+        title: grant.title || "",
+        agency: grant.agency || "",
+        agencyCode: grant.agencyCode || "",
+        description: grant.description || "",
+        awardFloor: grant.awardFloor || 0,
+        awardCeiling: grant.awardCeiling || 0,
+        totalFunding: grant.totalFunding || 0,
+        closeDate: grant.closeDate || "",
+        postDate: grant.postDate || "",
+        status: grant.status || "posted",
+        applicationUrl: grant.applicationUrl || "",
+        eligibility: grant.eligibility || [],
+        fundingCategories: grant.fundingCategories || [],
+        fundingInstruments: grant.fundingInstruments || [],
+        costSharing: grant.costSharing || false,
+        alnNumbers: grant.alnNumbers || [],
+        contactName: grant.contactName,
+        contactEmail: grant.contactEmail,
+        contactPhone: grant.contactPhone,
+      };
+      await DemoGrants.upsertGrant(grantData);
     }
 
     const pipelineGrant = await DemoPipeline.addToPipeline(grantId, portProfileId, {
