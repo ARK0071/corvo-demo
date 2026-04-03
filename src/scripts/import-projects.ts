@@ -18,9 +18,27 @@
 import "dotenv/config";
 
 import { prisma } from "@/lib/db/client";
+import { AVAILABLE_PORTS } from "@/lib/db/tenant-config";
 import * as fs from "fs";
 import * as path from "path";
 import { parse } from "csv-parse/sync";
+
+/**
+ * Resolve port slug to short portId
+ * e.g., "port-freeport" -> "freeport", "freeport" -> "freeport"
+ */
+function resolvePortId(portSlugOrId: string): string {
+  // Try to find by slug first
+  const bySlug = AVAILABLE_PORTS.find((p) => p.slug === portSlugOrId);
+  if (bySlug) return bySlug.id;
+
+  // Try to find by id
+  const byId = AVAILABLE_PORTS.find((p) => p.id === portSlugOrId);
+  if (byId) return byId.id;
+
+  // Return as-is if not found (for custom ports)
+  return portSlugOrId;
+}
 
 interface CSVRow {
   [key: string]: string | undefined;
@@ -158,13 +176,14 @@ function parseProjectRow(row: CSVRow): ProjectData {
 }
 
 async function getOrCreatePortProfile(
+  portId: string,
   portSlug: string,
   environment: "demo" | "test" | "production"
 ): Promise<string> {
   if (environment === "demo") {
-    // For demo, use portId as the identifier
+    // For demo, use portId (short form) as the identifier
     const existing = await prisma.demoPortProfile.findFirst({
-      where: { portId: portSlug },
+      where: { portId },
     });
 
     if (existing) {
@@ -173,11 +192,12 @@ async function getOrCreatePortProfile(
     }
 
     // Create new demo port profile
+    const portInfo = AVAILABLE_PORTS.find((p) => p.id === portId);
     const created = await prisma.demoPortProfile.create({
       data: {
-        portId: portSlug,
+        portId,
         slug: portSlug,
-        name: portSlug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        name: portInfo?.name || portSlug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
         entityType: "Port Authority",
         classification: "Seaport",
       },
@@ -229,11 +249,17 @@ async function getOrCreatePortProfile(
 }
 
 async function importProjects(
-  portSlug: string,
+  portSlugOrId: string,
   csvPath: string,
   environment: "demo" | "test" | "production"
 ): Promise<void> {
-  console.log(`\nImporting projects for port: ${portSlug}`);
+  // Resolve the port slug to short portId for database storage
+  const portId = resolvePortId(portSlugOrId);
+  const portSlug = AVAILABLE_PORTS.find((p) => p.id === portId)?.slug || portSlugOrId;
+
+  console.log(`\nImporting projects for port: ${portSlugOrId}`);
+  console.log(`  Resolved portId: ${portId}`);
+  console.log(`  Resolved portSlug: ${portSlug}`);
   console.log(`Environment: ${environment}`);
   console.log(`CSV file: ${csvPath}\n`);
 
@@ -258,7 +284,7 @@ async function importProjects(
   }
 
   // Get or create port profile
-  const portProfileId = await getOrCreatePortProfile(portSlug, environment);
+  const portProfileId = await getOrCreatePortProfile(portId, portSlug, environment);
 
   // Import projects
   let created = 0;
@@ -273,7 +299,7 @@ async function importProjects(
         // Check if project exists by name
         const existing = await prisma.demoProject.findFirst({
           where: {
-            portId: portSlug,
+            portId, // Use resolved short portId
             portProfileId,
             name: project.name,
           },
@@ -294,7 +320,7 @@ async function importProjects(
         } else {
           await prisma.demoProject.create({
             data: {
-              portId: portSlug,
+              portId, // Use resolved short portId
               portProfileId,
               ...project,
               focusAreas: project.focusAreas,

@@ -222,12 +222,56 @@ export async function searchProjects(
   };
 }
 
+// Helper to get or create port profile, returning its UUID
+async function getOrCreatePortProfileId(portIdOrSlug: string): Promise<string> {
+  const portId = getPortId();
+
+  // Check if it's already a valid UUID (36 chars with dashes)
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(portIdOrSlug);
+
+  if (isUuid) {
+    // Verify it exists
+    const existing = await prisma.demoPortProfile.findFirst({
+      where: { id: portIdOrSlug, portId },
+    });
+    if (existing) return existing.id;
+  }
+
+  // Try to find by slug
+  const bySlug = await prisma.demoPortProfile.findFirst({
+    where: { slug: portIdOrSlug, portId },
+  });
+  if (bySlug) return bySlug.id;
+
+  // Try to find by portId matching
+  const byPortId = await prisma.demoPortProfile.findFirst({
+    where: { portId },
+  });
+  if (byPortId) return byPortId.id;
+
+  // Create new port profile if none exists
+  const created = await prisma.demoPortProfile.create({
+    data: {
+      portId,
+      slug: portIdOrSlug,
+      name: portIdOrSlug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+      entityType: "Port Authority",
+      classification: "Seaport",
+    },
+  });
+  return created.id;
+}
+
 // Create project
 export async function createProject(
   data: Omit<Project, "id"> & { id?: string },
-  portProfileId: string
+  portProfileIdOrSlug: string
 ): Promise<Project> {
   const portId = getPortId();
+
+  // Resolve portProfileId from slug or UUID
+  const portProfileId = await getOrCreatePortProfileId(portProfileIdOrSlug);
+
   const createData = toPrismaCreate(data, portId, portProfileId);
   const project = await prisma.demoProject.create({
     data: createData,

@@ -1765,9 +1765,9 @@ function UnifiedGrantsDashboard() {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 if (confirm(`Delete project "${project.name}"?`)) {
-                                  // Update local state immediately
+                                  // Update local state immediately (filter from current state)
                                   deleteProjectLocal(project.id);
-                                  setProjects([...getInMemoryProjects()]);
+                                  setProjects((prev) => prev.filter((p) => p.id !== project.id));
 
                                   // Persist to DB in background
                                   try {
@@ -1911,9 +1911,13 @@ function UnifiedGrantsDashboard() {
                 project={editingProject}
                 onSave={async (projectData) => {
                   if (editingProject) {
-                    // Update existing project
+                    // Update existing project in local state
                     updateProjectLocal(editingProject.id, projectData);
-                    setProjects([...getInMemoryProjects()]);
+                    setProjects((prev) =>
+                      prev.map((p) =>
+                        p.id === editingProject.id ? { ...p, ...projectData } : p
+                      )
+                    );
 
                     // Persist to DB in background
                     try {
@@ -1928,23 +1932,35 @@ function UnifiedGrantsDashboard() {
                   } else {
                     // Create new project
                     const created = createProjectLocal(projectData);
-                    setProjects([...getInMemoryProjects()]);
+
+                    // Add to current projects state (preserving DB-loaded projects)
+                    setProjects((prev) => [...prev, created]);
 
                     // Persist to DB and generate embedding in background
                     try {
                       // First create in DB
-                      await fetch("/api/projects", {
+                      const res = await fetch("/api/projects", {
                         method: "POST",
                         headers: { ...tenantHeaders, "Content-Type": "application/json" },
                         body: JSON.stringify({ ...projectData, portProfileId: profileId }),
                       });
 
-                      // Then generate embedding
-                      await fetch("/api/embed-project", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ ...created, profileId }),
-                      });
+                      if (res.ok) {
+                        const dbProject = await res.json();
+                        // Update local state with DB-assigned ID if different
+                        if (dbProject.id && dbProject.id !== created.id) {
+                          setProjects((prev) =>
+                            prev.map((p) => (p.id === created.id ? { ...p, id: dbProject.id } : p))
+                          );
+                        }
+
+                        // Then generate embedding
+                        await fetch("/api/embed-project", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ ...dbProject, profileId }),
+                        });
+                      }
                     } catch (error) {
                       console.error("[Projects] Failed to persist:", error);
                     }
