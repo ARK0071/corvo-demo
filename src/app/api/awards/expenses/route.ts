@@ -63,7 +63,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT: Update expense status
+// PUT: Update expense status with workflow enforcement
+// Valid transitions: logged → flagged, logged → approved, flagged → approved, approved → drawn
+// Drawn expenses are immutable per 2 CFR 200.305
 export async function PUT(request: NextRequest) {
   try {
     setTenantConfigFromHeaders(request.headers);
@@ -74,6 +76,37 @@ export async function PUT(request: NextRequest) {
     if (!expenseId || !status) {
       return NextResponse.json(
         { error: "expenseId and status are required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate status transition
+    const VALID_TRANSITIONS: Record<string, string[]> = {
+      logged: ["flagged", "approved"],
+      flagged: ["approved", "logged"],
+      approved: ["drawn"],
+      drawn: [], // immutable — no transitions allowed
+    };
+
+    // Get current expense to check transition
+    const allExpenses = await DemoAwards.getAllExpenses();
+    const current = allExpenses.find((e) => e.id === expenseId);
+
+    if (!current) {
+      return NextResponse.json({ error: "Expense not found" }, { status: 404 });
+    }
+
+    if (current.status === "drawn") {
+      return NextResponse.json(
+        { error: "Drawn expenses are immutable — they cannot be modified (2 CFR 200.305)" },
+        { status: 400 }
+      );
+    }
+
+    const allowed = VALID_TRANSITIONS[current.status] || [];
+    if (!allowed.includes(status)) {
+      return NextResponse.json(
+        { error: `Invalid status transition: ${current.status} → ${status}. Allowed: ${allowed.join(", ") || "none"}` },
         { status: 400 }
       );
     }

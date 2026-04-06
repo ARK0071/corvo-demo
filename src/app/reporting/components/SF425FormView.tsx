@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   ArrowLeft,
   DollarSign,
@@ -11,41 +11,45 @@ import {
   Info,
   Lock,
   Unlock,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  generateSF425,
-  saveSF425Draft,
-  getSF425Draft,
-  type SF425FormData,
-  type SF425LineItem,
-} from "@/data/federal-report-templates";
+import { useSF425FormData, useDraftPersistence } from "../hooks/useAwardFormData";
 import { getAgencyTemplate } from "@/data/agency-templates";
-import { getAllReports } from "@/data/reporting";
-import { getAwardById } from "@/data/awards";
+import type { SF425FormData, SF425LineItem } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull } from "./helpers";
 
 interface SF425FormViewProps {
   reportId: string;
+  awardId: string;
+  periodStart: string;
+  periodEnd: string;
+  program: string;
+  awardTitle: string;
+  dueDate: string;
+  awardingAgency?: string;
   onBack: () => void;
 }
 
-export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) {
-  const report = useMemo(() => getAllReports().find((r) => r.id === reportId), [reportId]);
-  const award = useMemo(() => (report ? getAwardById(report.awardId) : undefined), [report]);
-  const agencyTemplate = useMemo(() => (award ? getAgencyTemplate(award.awardingAgency) : null), [award]);
+export default function SF425FormView({
+  reportId, awardId, periodStart, periodEnd,
+  program, awardTitle, dueDate, awardingAgency, onBack,
+}: SF425FormViewProps) {
+  const { data: apiData, loading, error, refresh } = useSF425FormData(awardId, periodStart, periodEnd);
+  const { saveDraft } = useDraftPersistence(reportId);
+  const agencyTemplate = awardingAgency ? getAgencyTemplate(awardingAgency) : null;
 
-  const [formData, setFormData] = useState<SF425FormData | null>(() => {
-    if (!report) return null;
-    const draft = getSF425Draft(reportId);
-    if (draft) return draft;
-    return generateSF425(report.awardId, report.periodStart, report.periodEnd);
-  });
-
+  const [formData, setFormData] = useState<SF425FormData | null>(null);
   const [editMode, setEditMode] = useState(false);
-  const [remarks, setRemarks] = useState(formData?.remarks || "");
+  const [remarks, setRemarks] = useState("");
+
+  // Sync API data into local state on first load
+  if (apiData && !formData) {
+    setFormData(apiData);
+    setRemarks(apiData.remarks || "");
+  }
 
   const handleOverride = useCallback(
     (lineNumber: string, newValue: number) => {
@@ -57,21 +61,49 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
         ),
       };
       setFormData(updated);
-      saveSF425Draft(reportId, updated);
+      saveDraft(updated);
     },
-    [formData, reportId]
+    [formData, saveDraft]
   );
 
   const handleSaveRemarks = useCallback(() => {
     if (!formData) return;
     const updated = { ...formData, remarks };
     setFormData(updated);
-    saveSF425Draft(reportId, updated);
-  }, [formData, remarks, reportId]);
+    saveDraft(updated);
+  }, [formData, remarks, saveDraft]);
 
-  if (!report || !formData) {
-    return <p className="p-6 text-muted-foreground">Report not found.</p>;
+  const handleRefresh = useCallback(() => {
+    setFormData(null);
+    refresh();
+  }, [refresh]);
+
+  if (loading && !formData) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
+
+  if (error && !formData) {
+    return (
+      <div className="flex-1 p-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <Card className="border-red-200">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="h-8 w-8 mx-auto text-red-500 mb-3" />
+            <p className="text-sm text-red-600">{error}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={handleRefresh}>Retry</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!formData) return null;
 
   const { validation } = formData;
 
@@ -90,27 +122,20 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
               SF-425 Federal Financial Report
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {report.program} &mdash; {report.awardTitle}
+              {program} &mdash; {awardTitle}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Period: {fmtDate(report.periodStart)} - {fmtDate(report.periodEnd)} &middot; Due: {fmtDate(report.dueDate)}
+              Period: {fmtDate(periodStart)} - {fmtDate(periodEnd)} &middot; Due: {fmtDate(dueDate)}
             </p>
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditMode(!editMode)}
-            >
+            <Button variant="outline" size="sm" onClick={handleRefresh}>Refresh</Button>
+            <Button variant="outline" size="sm" onClick={() => setEditMode(!editMode)}>
               {editMode ? <Lock className="h-3.5 w-3.5 mr-1" /> : <Unlock className="h-3.5 w-3.5 mr-1" />}
               {editMode ? "Lock" : "Edit"}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.print()}
-            >
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print
             </Button>
           </div>
@@ -155,7 +180,7 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
         </CardContent>
       </Card>
 
-      {/* Form Header Section */}
+      {/* Form Header */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Report Header (Lines 1-9)</CardTitle>
@@ -175,7 +200,7 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
         </CardContent>
       </Card>
 
-      {/* Financial Section (Lines 10-10l) */}
+      {/* Transactions (Lines 10a-10l) */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Transactions (Lines 10a-10l)</CardTitle>
@@ -226,14 +251,7 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
               </thead>
               <tbody>
                 {formData.lineItems.filter((l) => l.lineNumber.startsWith("11")).map((item) => (
-                  <LineItemRow
-                    key={item.lineNumber}
-                    item={item}
-                    editMode={editMode}
-                    onOverride={handleOverride}
-                    hasError={false}
-                    hasWarning={false}
-                  />
+                  <LineItemRow key={item.lineNumber} item={item} editMode={editMode} onOverride={handleOverride} hasError={false} hasWarning={false} />
                 ))}
               </tbody>
             </table>
@@ -319,7 +337,6 @@ export default function SF425FormView({ reportId, onBack }: SF425FormViewProps) 
         </Card>
       )}
 
-      {/* Submission Info */}
       {agencyTemplate && (
         <div className="text-xs text-muted-foreground text-center pb-4">
           Submit via {agencyTemplate.submissionPortal} &middot; {agencyTemplate.submissionMethod}
@@ -341,11 +358,7 @@ function FormField({ label, value }: { label: string; value: string }) {
 }
 
 function LineItemRow({
-  item,
-  editMode,
-  onOverride,
-  hasError,
-  hasWarning,
+  item, editMode, onOverride, hasError, hasWarning,
 }: {
   item: SF425LineItem;
   editMode: boolean;

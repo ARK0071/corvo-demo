@@ -41,7 +41,7 @@ const grantMatchItems = [
   { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },
   { title: "Grant Intelligence", url: "/grant-match", icon: Anchor },
   { title: "Awards", url: "/awards", icon: Award },
-  { title: "Reporting", url: "/reporting", icon: FileText },
+  { title: "Reporting", url: "/reporting/overview", icon: FileText },
   { title: "Competitive Intel", url: "/competitive-intel", icon: BarChart3 },
   { title: "Newsroom", url: "/newsroom", icon: Newspaper },
 ];

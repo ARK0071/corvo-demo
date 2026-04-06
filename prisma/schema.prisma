@@ -884,6 +884,9 @@ model DemoAward {
   budgetModifications    DemoBudgetModification[]
   scheduledReports       DemoScheduledReport[]
   closeoutChecklist      DemoCloseoutChecklist?
+  subrecipients          DemoSubrecipient[]
+  complianceChecklists   DemoComplianceChecklist[]
+  auditFindings          DemoAuditFinding[]
 
   @@index([portId])
   @@index([portProfileId])
@@ -1056,4 +1059,146 @@ model DemoCloseoutChecklist {
 
   @@index([portId])
   @@map("demo_closeout_checklists")
+}
+
+// =============================================================================
+// SUBRECIPIENT MONITORING - 2 CFR 200.331-332
+// =============================================================================
+
+model DemoSubrecipient {
+  id                    String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId                String                  @map("port_id") @db.VarChar(100)
+  awardId               String                  @map("award_id") @db.Uuid
+  entityName            String                  @map("entity_name") @db.VarChar(255)
+  uei                   String?                 @db.VarChar(20)
+  classification        String                  @db.VarChar(20) // "subrecipient" | "contractor"
+  classificationAnswers Json                    @default("[]") @map("classification_answers")
+  riskLevel             String                  @default("standard") @map("risk_level") @db.VarChar(20)
+  riskFactors           Json                    @default("[]") @map("risk_factors")
+  monitoringIntensity   String                  @default("standard") @map("monitoring_intensity") @db.VarChar(20)
+  subawardAmount        Decimal                 @map("subaward_amount") @db.Decimal(15, 2)
+  cumulativeSpend       Decimal                 @default(0) @map("cumulative_spend") @db.Decimal(15, 2)
+  singleAuditRequired   Boolean                 @default(false) @map("single_audit_required")
+  status                String                  @default("active") @db.VarChar(20)
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+  award                 DemoAward               @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  reports               DemoSubrecipientReport[]
+
+  @@index([portId])
+  @@index([awardId])
+  @@map("demo_subrecipients")
+}
+
+model DemoSubrecipientReport {
+  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId          String           @map("port_id") @db.VarChar(100)
+  subrecipientId  String           @map("subrecipient_id") @db.Uuid
+  reportType      String           @map("report_type") @db.VarChar(50)
+  title           String           @db.VarChar(255)
+  dueDate         DateTime         @map("due_date") @db.Date
+  status          String           @default("pending") @db.VarChar(20) // pending, received, overdue, waived
+  receivedDate    DateTime?        @map("received_date") @db.Date
+  notes           String           @default("")
+  attachments     Json             @default("[]")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  subrecipient    DemoSubrecipient @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+
+  @@index([portId])
+  @@index([subrecipientId])
+  @@index([dueDate])
+  @@map("demo_subrecipient_reports")
+}
+
+// =============================================================================
+// COMPLIANCE CHECKLISTS - Buy America, Davis-Bacon, NEPA, Title VI/DBE
+// =============================================================================
+
+model DemoComplianceChecklist {
+  id             String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId         String                       @map("port_id") @db.VarChar(100)
+  awardId        String                       @map("award_id") @db.Uuid
+  template       String                       @db.VarChar(50) // buy_america, davis_bacon, nepa, title_vi_dbe
+  title          String                       @db.VarChar(255)
+  status         String                       @default("in_progress") @db.VarChar(20)
+  completedItems Int                          @default(0) @map("completed_items")
+  totalItems     Int                          @map("total_items")
+  createdAt      DateTime                     @default(now()) @map("created_at")
+  updatedAt      DateTime                     @updatedAt @map("updated_at")
+  award          DemoAward                    @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  items          DemoComplianceChecklistItem[]
+
+  @@unique([awardId, template, portId])
+  @@index([portId])
+  @@index([awardId])
+  @@map("demo_compliance_checklists")
+}
+
+model DemoComplianceChecklistItem {
+  id            String                  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId        String                  @map("port_id") @db.VarChar(100)
+  checklistId   String                  @map("checklist_id") @db.Uuid
+  section       String                  @db.VarChar(100)
+  requirement   String
+  cfrReference  String?                 @map("cfr_reference") @db.VarChar(50)
+  isCompleted   Boolean                 @default(false) @map("is_completed")
+  completedAt   DateTime?               @map("completed_at")
+  completedBy   String?                 @map("completed_by") @db.VarChar(255)
+  notes         String                  @default("")
+  attachments   Json                    @default("[]")
+  sortOrder     Int                     @default(0) @map("sort_order")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+  checklist     DemoComplianceChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([portId])
+  @@index([checklistId])
+  @@map("demo_compliance_checklist_items")
+}
+
+// =============================================================================
+// AUDIT READINESS - Findings, Corrective Actions
+// =============================================================================
+
+model DemoAuditFinding {
+  id                String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId            String                    @map("port_id") @db.VarChar(100)
+  awardId           String?                   @map("award_id") @db.Uuid
+  auditYear         Int                       @map("audit_year")
+  findingNumber     String                    @map("finding_number") @db.VarChar(50)
+  title             String                    @db.VarChar(255)
+  description       String
+  complianceArea    String                    @map("compliance_area") @db.VarChar(100)
+  severity          String                    @db.VarChar(30) // material_weakness, significant_deficiency, finding
+  status            String                    @default("open") @db.VarChar(20)
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+  award             DemoAward?                @relation(fields: [awardId], references: [id])
+  correctiveActions DemoCorrectiveActionPlan[]
+
+  @@index([portId])
+  @@index([awardId])
+  @@index([status])
+  @@map("demo_audit_findings")
+}
+
+model DemoCorrectiveActionPlan {
+  id          String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId      String           @map("port_id") @db.VarChar(100)
+  findingId   String           @map("finding_id") @db.Uuid
+  action      String
+  responsible String           @db.VarChar(255)
+  targetDate  DateTime         @map("target_date") @db.Date
+  status      String           @default("pending") @db.VarChar(20) // pending, in_progress, completed, overdue
+  evidence    Json             @default("[]")
+  completedAt DateTime?        @map("completed_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  finding     DemoAuditFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([portId])
+  @@index([findingId])
+  @@index([status])
+  @@map("demo_corrective_action_plans")
 }

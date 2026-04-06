@@ -1,58 +1,79 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   ArrowLeft,
   Banknote,
-  CheckCircle2,
   AlertCircle,
   Printer,
   Info,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  generateSF270,
-  saveSF270Draft,
-  getSF270Draft,
-  type SF270FormData,
-} from "@/data/federal-report-templates";
+import { useSF270FormData, useDrawdowns, useDraftPersistence } from "../hooks/useAwardFormData";
 import { getAgencyTemplate } from "@/data/agency-templates";
-import { getAllReports } from "@/data/reporting";
-import { getAwardById, getDrawdownsForAward } from "@/data/awards";
+import type { SF270FormData } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull, fmt } from "./helpers";
 
 interface SF270FormViewProps {
   reportId: string;
+  awardId: string;
+  periodStart: string;
+  periodEnd: string;
+  program: string;
+  awardTitle: string;
+  awardingAgency?: string;
   onBack: () => void;
 }
 
-export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) {
-  const report = useMemo(() => getAllReports().find((r) => r.id === reportId), [reportId]);
-  const award = useMemo(() => (report ? getAwardById(report.awardId) : undefined), [report]);
-  const drawdowns = useMemo(() => (award ? getDrawdownsForAward(award.id) : []), [award]);
-  const agencyTemplate = useMemo(() => (award ? getAgencyTemplate(award.awardingAgency) : null), [award]);
+export default function SF270FormView({
+  reportId, awardId, periodStart, periodEnd,
+  program, awardTitle, awardingAgency, onBack,
+}: SF270FormViewProps) {
+  const { data: apiData, loading, error, refresh } = useSF270FormData(awardId, periodStart, periodEnd);
+  const { data: drawdowns } = useDrawdowns(awardId);
+  const { saveDraft } = useDraftPersistence(reportId);
+  const agencyTemplate = awardingAgency ? getAgencyTemplate(awardingAgency) : null;
 
-  const [formData, setFormData] = useState<SF270FormData | null>(() => {
-    if (!report) return null;
-    const draft = getSF270Draft(reportId);
-    if (draft) return draft;
-    return generateSF270(report.awardId, report.periodStart, report.periodEnd);
-  });
+  const [formData, setFormData] = useState<SF270FormData | null>(null);
+
+  if (apiData && !formData) {
+    setFormData(apiData);
+  }
 
   const handleRegenerate = useCallback(() => {
-    if (!report) return;
-    const fresh = generateSF270(report.awardId, report.periodStart, report.periodEnd);
-    if (fresh) {
-      setFormData(fresh);
-      saveSF270Draft(reportId, fresh);
-    }
-  }, [report, reportId]);
+    setFormData(null);
+    refresh();
+  }, [refresh]);
 
-  if (!report || !formData) {
-    return <p className="p-6 text-muted-foreground">Report not found.</p>;
+  if (loading && !formData) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
+
+  if (error && !formData) {
+    return (
+      <div className="flex-1 p-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <Card className="border-red-200">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="h-8 w-8 mx-auto text-red-500 mb-3" />
+            <p className="text-sm text-red-600">{error}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={handleRegenerate}>Retry</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!formData) return null;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-6">
@@ -69,7 +90,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
               SF-270 Request for Advance or Reimbursement
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {report.program} &mdash; {report.awardTitle}
+              {program} &mdash; {awardTitle}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
               Period: {fmtDate(formData.computationPeriod.start)} - {fmtDate(formData.computationPeriod.end)}
@@ -77,9 +98,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={handleRegenerate}>
-              Regenerate
-            </Button>
+            <Button variant="outline" size="sm" onClick={handleRegenerate}>Regenerate</Button>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print
             </Button>
@@ -87,7 +106,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
         </div>
       </div>
 
-      {/* Summary Card */}
+      {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-4 pb-4 text-center">
@@ -135,7 +154,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
         </Card>
       )}
 
-      {/* Form Header */}
+      {/* Request Information */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Request Information</CardTitle>
@@ -200,7 +219,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
       </Card>
 
       {/* Drawdown History */}
-      {drawdowns.length > 0 && (
+      {drawdowns && drawdowns.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Prior Drawdown Requests</CardTitle>
@@ -222,9 +241,7 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
                       <td className="py-2 pr-4">{fmtDate(d.submittedDate || d.createdAt)}</td>
                       <td className="py-2 pr-4 text-right tabular-nums font-medium">{fmtFull(d.totalAmount)}</td>
                       <td className="py-2 pr-4">
-                        <Badge variant="outline" className="text-[10px]">
-                          {d.status.replace("_", " ")}
-                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">{d.status.replace("_", " ")}</Badge>
                       </td>
                       <td className="py-2 text-muted-foreground">{fmtDate(d.paymentDate)}</td>
                     </tr>
@@ -263,7 +280,6 @@ export default function SF270FormView({ reportId, onBack }: SF270FormViewProps) 
         </CardContent>
       </Card>
 
-      {/* Submission Info */}
       {agencyTemplate && (
         <div className="text-xs text-muted-foreground text-center pb-4">
           Submit via {agencyTemplate.submissionPortal} &middot; {agencyTemplate.submissionMethod}

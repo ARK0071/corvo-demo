@@ -148,6 +148,7 @@ const AWARD_COLORS_DOT = [
 
 export default function AwardsPage() {
   const [selectedAwardId, setSelectedAwardId] = useState<string | null>(null);
+  const [showIntake, setShowIntake] = useState(false);
   const [, setRefresh] = useState(0);
   const forceRefresh = useCallback(() => setRefresh((n) => n + 1), []);
 
@@ -242,6 +243,20 @@ export default function AwardsPage() {
 
   const attentionItems = useMemo(() => getInMemoryAttentionItems(), []);
 
+  if (showIntake) {
+    return (
+      <AwardIntakeForm
+        tenantHeaders={tenantHeaders}
+        portId={tenant.portId}
+        onBack={() => setShowIntake(false)}
+        onCreated={() => {
+          setShowIntake(false);
+          handleRefresh();
+        }}
+      />
+    );
+  }
+
   if (selectedAwardId) {
     return (
       <AwardDetailView
@@ -301,6 +316,14 @@ export default function AwardsPage() {
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
             Refresh
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowIntake(true)}
+            className="gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add Award
           </Button>
           <div className="text-right">
             <p className="text-3xl font-bold tabular-nums text-[#3d8b8b]">{fmt(stats.totalAwarded)}</p>
@@ -473,19 +496,80 @@ export default function AwardsPage() {
 // ════════════════════════════════════════════════════════════
 
 function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBack: () => void; onRefresh: () => void }) {
+  const tenant = useTenant();
+  const tenantHeaders = useTenantHeaders();
   const [activeTab, setActiveTab] = useState("overview");
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [showDrawdownForm, setShowDrawdownForm] = useState(false);
   const [showBudgetModForm, setShowBudgetModForm] = useState(false);
   const [showMatchForm, setShowMatchForm] = useState(false);
   const [, setRefresh] = useState(0);
-  const refresh = useCallback(() => { setRefresh((n) => n + 1); onRefresh(); }, [onRefresh]);
 
-  const award = useMemo(() => getAwardById(awardId), [awardId]);
-  const expenses = useMemo(() => getExpensesForAward(awardId), [awardId]);
-  const drawdowns = useMemo(() => getDrawdownsForAward(awardId), [awardId]);
-  const budgetMods = useMemo(() => getBudgetModsForAward(awardId), [awardId]);
-  const matchStatus = useMemo(() => getMatchStatus(awardId), [awardId]);
+  // DB-driven data loading
+  const [award, setAward] = useState<AwardType | null>(null);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [drawdowns, setDrawdowns] = useState<DrawdownRequest[]>([]);
+  const [budgetMods, setBudgetMods] = useState<ReturnType<typeof getBudgetModsForAward>>([]);
+  const [matchStatus, setMatchStatus] = useState<ReturnType<typeof getMatchStatus>>({ required: 0, committed: 0, percentage: 0, status: "on_track" as const });
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+
+  const fetchDetail = useCallback(async () => {
+    const h = { ...tenantHeaders, "Content-Type": "application/json" };
+    try {
+      const [rawRes, expRes, ddRes] = await Promise.all([
+        fetch(`/api/awards/form-data?awardId=${awardId}&formType=raw`, { headers: h }),
+        fetch(`/api/awards/expenses?awardId=${awardId}`, { headers: h }),
+        fetch(`/api/awards/drawdowns?awardId=${awardId}`, { headers: h }),
+      ]);
+      if (rawRes.ok) {
+        const data = await rawRes.json();
+        setAward(data.award || null);
+        if (data.award) {
+          const ms = data.award.matchRequirement;
+          setMatchStatus({
+            required: ms.required,
+            committed: ms.committed,
+            percentage: ms.required > 0 ? Math.round((ms.committed / ms.required) * 100) : 100,
+            status: (ms.required > 0 ? (ms.committed / ms.required >= 0.8 ? "on_track" : ms.committed / ms.required >= 0.5 ? "at_risk" : "shortfall") : "on_track") as "on_track" | "at_risk" | "shortfall",
+          });
+        }
+      }
+      if (expRes.ok) { const d = await expRes.json(); setExpenses(d.expenses || []); }
+      if (ddRes.ok) { const d = await ddRes.json(); setDrawdowns(d.drawdowns || []); }
+    } catch { /* */ }
+    setDetailLoading(false);
+  }, [awardId, tenantHeaders]);
+
+  useEffect(() => {
+    if (!tenant.isLoading) fetchDetail();
+  }, [awardId, tenant.isLoading]);
+
+  const refresh = useCallback(() => { setRefresh((n) => n + 1); fetchDetail(); onRefresh(); }, [onRefresh, fetchDetail]);
+
+  const handleDelete = useCallback(async () => {
+    if (!confirm(`Delete "${award?.title}"? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/awards?id=${awardId}`, {
+        method: "DELETE",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        onBack();
+        onRefresh();
+      }
+    } catch { /* */ }
+    setDeleting(false);
+  }, [awardId, award, tenantHeaders, onBack, onRefresh]);
+
+  if (detailLoading) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   if (!award) return <p className="p-6 text-muted-foreground">Award not found.</p>;
 
@@ -510,14 +594,24 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
             <h1 className="text-xl font-bold tracking-tight">{award.title}</h1>
             <p className="text-sm text-muted-foreground mt-1">{award.awardingAgency}</p>
             <p className="text-xs text-muted-foreground mt-0.5">CFDA/ALN: {award.cfda} | Period: {fmtDate(award.performancePeriod.start)} - {fmtDate(award.performancePeriod.end)}</p>
-            <Link href="/reporting" className="inline-flex items-center gap-1 text-xs text-[#3d8b8b] hover:underline mt-1.5">
+            <Link href={`/reporting/awards/${awardId}`} className="inline-flex items-center gap-1 text-xs text-[#3d8b8b] hover:underline mt-1.5">
               <FileText className="h-3 w-3" />
-              {getReportsForAward(awardId).filter(r => r.status !== "submitted").length} pending reports
+              View in Reporting Module
             </Link>
           </div>
-          <div className="text-right shrink-0">
+          <div className="text-right shrink-0 space-y-2">
             <p className="text-2xl font-bold tabular-nums text-[#3d8b8b]">{fmt(award.totalAmount)}</p>
             <p className="text-sm text-muted-foreground">Total Award</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+            >
+              {deleting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <X className="h-3.5 w-3.5 mr-1" />}
+              Delete Award
+            </Button>
           </div>
         </div>
       </div>
@@ -872,11 +966,21 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
 // ─── Expense Row ───
 
 function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: AwardType; onRefresh: () => void }) {
+  const headers = useTenantHeaders();
   const [expanded, setExpanded] = useState(false);
   const cat = award.budgetCategories.find((c) => c.id === expense.categoryId);
 
   const canApprove = expense.status === "logged";
   const canFlag = expense.status === "logged" || expense.status === "approved";
+
+  const handleStatusChange = async (status: string) => {
+    await fetch("/api/awards/expenses", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ expenseId: expense.id, status }),
+    });
+    onRefresh();
+  };
 
   return (
     <div className={`rounded-lg border ${expense.status === "flagged" ? "border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-950/20" : "border-transparent"}`}>
@@ -920,12 +1024,12 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
           {(canApprove || canFlag) && (
             <div className="flex items-center gap-2 pt-1">
               {canApprove && (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); updateExpenseStatus(expense.id, "approved"); onRefresh(); }}>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); handleStatusChange("approved"); }}>
                   <CheckCircle2 className="h-3 w-3 mr-1" /> Approve
                 </Button>
               )}
               {canFlag && (
-                <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={(e) => { e.stopPropagation(); updateExpenseStatus(expense.id, "flagged"); onRefresh(); }}>
+                <Button size="sm" variant="outline" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={(e) => { e.stopPropagation(); handleStatusChange("flagged"); }}>
                   <AlertTriangle className="h-3 w-3 mr-1" /> Flag
                 </Button>
               )}
@@ -940,6 +1044,7 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
 // ─── Drawdown Row ───
 
 function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; onStatusChange: () => void }) {
+  const headers = useTenantHeaders();
   const statusFlow: Record<string, DrawdownRequest["status"] | null> = {
     draft: "submitted",
     submitted: "approved",
@@ -947,6 +1052,16 @@ function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; 
     payment_received: null,
   };
   const nextStatus = statusFlow[drawdown.status];
+
+  const handleAdvance = async () => {
+    if (!nextStatus) return;
+    await fetch("/api/awards/drawdowns", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: drawdown.id, status: nextStatus }),
+    });
+    onStatusChange();
+  };
 
   return (
     <Card>
@@ -968,7 +1083,7 @@ function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; 
           <div className="flex items-center gap-3 shrink-0">
             <span className="text-lg font-bold tabular-nums">{fmtFull(drawdown.totalAmount)}</span>
             {nextStatus && (
-              <Button size="sm" variant="outline" onClick={() => { updateDrawdownStatus(drawdown.id, nextStatus); onStatusChange(); }}>
+              <Button size="sm" variant="outline" onClick={handleAdvance}>
                 Mark {nextStatus.replace("_", " ")}
               </Button>
             )}
@@ -982,6 +1097,7 @@ function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; 
 // ─── Expense Form ───
 
 function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: () => void; onSave: () => void }) {
+  const headers = useTenantHeaders();
   const [categoryId, setCategoryId] = useState(award.budgetCategories[0]?.id || "");
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [description, setDescription] = useState("");
@@ -1002,23 +1118,27 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
     return result;
   }, [award.id, categoryId, amount, date, description]);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const result = handleValidate();
     if (!result.valid && !overrideJustification) return;
 
-    logExpense({
-      awardId: award.id,
-      categoryId,
-      date,
-      description,
-      vendor,
-      amount: parseFloat(amount) || 0,
-      attachments: attachmentName ? [attachmentName] : [],
-      overrideJustification: overrideJustification || undefined,
+    await fetch("/api/awards/expenses", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        awardId: award.id,
+        categoryId,
+        date,
+        description,
+        vendor,
+        amount: parseFloat(amount) || 0,
+        attachments: attachmentName ? [attachmentName] : [],
+        overrideJustification: overrideJustification || undefined,
+      }),
     });
 
     onSave();
-  }, [award.id, categoryId, date, description, vendor, amount, attachmentName, overrideJustification, handleValidate, onSave]);
+  }, [award.id, categoryId, date, description, vendor, amount, attachmentName, overrideJustification, handleValidate, onSave, headers]);
 
   return (
     <Card className="border-[#3d8b8b]/30">
@@ -1127,9 +1247,22 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
 // ─── Drawdown Form ───
 
 function DrawdownForm({ award, onClose, onSave }: { award: AwardType; onClose: () => void; onSave: () => void }) {
-  const eligibleExpenses = useMemo(() => getEligibleExpensesForDrawdown(award.id), [award.id]);
+  const headers = useTenantHeaders();
+  const [eligibleExpenses, setEligibleExpenses] = useState<Expense[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [notes, setNotes] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const res = await fetch(`/api/awards/expenses?awardId=${award.id}`, {
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEligibleExpenses((data.expenses || []).filter((e: Expense) => e.status === "approved"));
+      }
+    })();
+  }, [award.id, headers]);
 
   const toggleExpense = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -1144,11 +1277,15 @@ function DrawdownForm({ award, onClose, onSave }: { award: AwardType; onClose: (
     [eligibleExpenses, selectedIds]
   );
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (selectedIds.size === 0) return;
-    createDrawdown({ awardId: award.id, expenseIds: Array.from(selectedIds), notes });
+    await fetch("/api/awards/drawdowns", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ awardId: award.id, expenseIds: Array.from(selectedIds), notes }),
+    });
     onSave();
-  }, [award.id, selectedIds, notes, onSave]);
+  }, [award.id, selectedIds, notes, onSave, headers]);
 
   return (
     <Card className="border-[#3d8b8b]/30">
@@ -1205,13 +1342,15 @@ function DrawdownForm({ award, onClose, onSave }: { award: AwardType; onClose: (
 // ─── Budget Modification Form ───
 
 function BudgetModForm({ award, onClose, onSave }: { award: AwardType; onClose: () => void; onSave: () => void }) {
+  const headers = useTenantHeaders();
   const [fromId, setFromId] = useState(award.budgetCategories[0]?.id || "");
   const [toId, setToId] = useState(award.budgetCategories[1]?.id || "");
   const [amount, setAmount] = useState("");
   const [justification, setJustification] = useState("");
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!fromId || !toId || fromId === toId || !amount || !justification) return;
+    // Budget mod API not yet built — use in-memory fallback
     createBudgetMod({ awardId: award.id, fromCategoryId: fromId, toCategoryId: toId, amount: parseFloat(amount), justification });
     onSave();
   }, [award.id, fromId, toId, amount, justification, onSave]);
@@ -1268,24 +1407,29 @@ function BudgetModForm({ award, onClose, onSave }: { award: AwardType; onClose: 
 // ─── Match Entry Form ───
 
 function MatchEntryForm({ award, onClose, onSave }: { award: AwardType; onClose: () => void; onSave: () => void }) {
+  const headers = useTenantHeaders();
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [matchType, setMatchType] = useState<MatchType>(award.matchRequirement.types[0] || "cash");
   const [documentation, setDocumentation] = useState("");
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!description || !amount) return;
-    addMatchEntry({
-      awardId: award.id,
-      date,
-      description,
-      amount: parseFloat(amount) || 0,
-      type: matchType,
-      documentation: documentation || undefined,
+    await fetch("/api/awards/match-ledger", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        awardId: award.id,
+        date,
+        description,
+        amount: parseFloat(amount) || 0,
+        type: matchType,
+        documentation: documentation || undefined,
+      }),
     });
     onSave();
-  }, [award.id, date, description, amount, matchType, documentation, onSave]);
+  }, [award.id, date, description, amount, matchType, documentation, onSave, headers]);
 
   return (
     <Card className="border-[#3d8b8b]/30">
@@ -1339,5 +1483,333 @@ function MatchEntryForm({ award, onClose, onSave }: { award: AwardType; onClose:
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Award Intake Form ───
+
+const AGENCIES = [
+  "U.S. Department of Transportation / Maritime Administration",
+  "U.S. Department of Transportation / Federal Railroad Administration",
+  "U.S. Department of Transportation / Federal Transit Administration",
+  "U.S. Department of Transportation / Federal Highway Administration",
+  "U.S. Department of Transportation / Federal Aviation Administration",
+  "U.S. Environmental Protection Agency",
+  "Texas Department of Transportation",
+  "U.S. Army Corps of Engineers",
+  "U.S. Department of Energy",
+];
+
+const PROGRAMS = [
+  "PIDP", "CRISI", "INFRA", "RAISE", "EPA Clean Ports", "FTA Capital",
+  "TxDOT SCP", "TxDOT Rider 37", "FAA AIP", "FHWA NHPP", "Other",
+];
+
+function AwardIntakeForm({ tenantHeaders, portId, onBack, onCreated }: {
+  tenantHeaders: Record<string, string>;
+  portId: string;
+  onBack: () => void;
+  onCreated: () => void;
+}) {
+  const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Step 0: Basic info
+  const [fain, setFain] = useState("");
+  const [cfda, setCfda] = useState("");
+  const [awardingAgency, setAwardingAgency] = useState(AGENCIES[0]);
+  const [program, setProgram] = useState(PROGRAMS[0]);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
+  // Step 1: Financials
+  const [totalAmount, setTotalAmount] = useState("");
+  const [matchPercentage, setMatchPercentage] = useState("20");
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
+
+  // Step 2: Budget categories
+  const [categories, setCategories] = useState<{ name: string; ceiling: string }[]>([
+    { name: "Construction", ceiling: "" },
+    { name: "Engineering & Design", ceiling: "" },
+  ]);
+
+  const addCategory = () => setCategories((prev) => [...prev, { name: "", ceiling: "" }]);
+  const removeCategory = (i: number) => setCategories((prev) => prev.filter((_, idx) => idx !== i));
+  const updateCategory = (i: number, field: "name" | "ceiling", value: string) => {
+    setCategories((prev) => prev.map((c, idx) => idx === i ? { ...c, [field]: value } : c));
+  };
+
+  const totalBudget = categories.reduce((s, c) => s + (parseFloat(c.ceiling) || 0), 0);
+  const awardAmt = parseFloat(totalAmount) || 0;
+  const budgetDiff = awardAmt - totalBudget;
+
+  const handleSubmit = async () => {
+    setSaving(true);
+    setError(null);
+
+    try {
+      // Get portProfileId
+      const profileRes = await fetch("/api/awards?status=active", {
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+      });
+      let portProfileId = portId;
+      if (profileRes.ok) {
+        const data = await profileRes.json();
+        // Use portProfileId from existing awards if available
+        if (data.awards?.length > 0) {
+          // Awards don't expose portProfileId directly, so we'll use the portId
+        }
+      }
+
+      const res = await fetch("/api/awards", {
+        method: "POST",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          portProfileId: portId,
+          fain,
+          cfda,
+          awardingAgency,
+          program,
+          title,
+          description,
+          totalAmount: awardAmt,
+          performancePeriod: { start: periodStart, end: periodEnd },
+          matchPercentage: parseInt(matchPercentage) || 0,
+          matchTypes: ["cash"],
+          status: "active",
+          budgetCategories: categories
+            .filter((c) => c.name && c.ceiling)
+            .map((c) => ({ name: c.name, ceiling: parseFloat(c.ceiling) || 0 })),
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to create award");
+      }
+
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create award");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const steps = ["Award Details", "Financials & Period", "Budget Categories", "Review"];
+
+  return (
+    <div className="flex-1 overflow-auto p-6 space-y-6">
+      <div>
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+          <ArrowLeft className="h-4 w-4" /> Back to Awards
+        </button>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <Award className="h-6 w-6 text-[#3d8b8b]" />
+          New Award Intake
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">Register a new federal or state grant award</p>
+      </div>
+
+      {/* Steps */}
+      <div className="flex items-center gap-2">
+        {steps.map((label, i) => (
+          <div key={label} className="flex items-center gap-2">
+            <button
+              onClick={() => i <= step ? setStep(i) : null}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                i === step ? "bg-[#3d8b8b] text-white" : i < step ? "bg-[#3d8b8b]/10 text-[#3d8b8b]" : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {i < step && <CheckCircle2 className="h-3 w-3" />}
+              {label}
+            </button>
+            {i < steps.length - 1 && <ChevronDown className="h-3 w-3 text-muted-foreground rotate-[-90deg]" />}
+          </div>
+        ))}
+      </div>
+
+      {error && (
+        <Card className="border-red-200">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <p className="text-sm text-red-600">{error}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 0: Award Details */}
+      {step === 0 && (
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Award Details</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium block mb-1">Federal Award ID (FAIN) *</label>
+                <Input value={fain} onChange={(e) => setFain(e.target.value)} placeholder="e.g., 693JF72240015" />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">CFDA/ALN Number *</label>
+                <Input value={cfda} onChange={(e) => setCfda(e.target.value)} placeholder="e.g., 20.823" />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Awarding Agency *</label>
+                <select value={awardingAgency} onChange={(e) => setAwardingAgency(e.target.value)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                  {AGENCIES.map((a) => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Program *</label>
+                <select value={program} onChange={(e) => setProgram(e.target.value)} className="w-full rounded-md border bg-background px-3 py-2 text-sm">
+                  {PROGRAMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-sm font-medium block mb-1">Award Title *</label>
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Velasco Terminal Sustainability Expansion" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-sm font-medium block mb-1">Description</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief description of the award scope..." className="w-full rounded-md border bg-background px-3 py-2 text-sm resize-y h-20" />
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setStep(1)} disabled={!fain || !cfda || !title}>Next: Financials</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 1: Financials */}
+      {step === 1 && (
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Financials & Performance Period</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium block mb-1">Total Award Amount *</label>
+                <Input type="number" value={totalAmount} onChange={(e) => setTotalAmount(e.target.value)} placeholder="0.00" />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Match Percentage (%)</label>
+                <Input type="number" value={matchPercentage} onChange={(e) => setMatchPercentage(e.target.value)} placeholder="20" min="0" max="100" />
+                {awardAmt > 0 && parseInt(matchPercentage) > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Match required: {fmtFull(Math.round(awardAmt * (parseInt(matchPercentage) / (100 - parseInt(matchPercentage)))))}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Performance Period Start *</label>
+                <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Performance Period End *</label>
+                <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+              </div>
+            </div>
+            <div className="flex justify-between">
+              <Button variant="outline" onClick={() => setStep(0)}>Back</Button>
+              <Button onClick={() => setStep(2)} disabled={!totalAmount || !periodStart || !periodEnd}>Next: Budget</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 2: Budget Categories */}
+      {step === 2 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              Budget Categories
+              <Button variant="outline" size="sm" onClick={addCategory}><Plus className="h-3.5 w-3.5 mr-1" /> Add Category</Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {categories.map((cat, i) => (
+              <div key={i} className="flex items-center gap-3">
+                <Input
+                  value={cat.name}
+                  onChange={(e) => updateCategory(i, "name", e.target.value)}
+                  placeholder="Category name"
+                  className="flex-1"
+                />
+                <Input
+                  type="number"
+                  value={cat.ceiling}
+                  onChange={(e) => updateCategory(i, "ceiling", e.target.value)}
+                  placeholder="Budget ceiling"
+                  className="w-40"
+                />
+                {categories.length > 1 && (
+                  <Button variant="ghost" size="sm" onClick={() => removeCategory(i)}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+
+            <div className={`flex items-center justify-between pt-3 border-t text-sm ${Math.abs(budgetDiff) > 0.01 ? "text-amber-600" : "text-emerald-600"}`}>
+              <span>Budget total: {fmtFull(totalBudget)}</span>
+              <span>
+                {Math.abs(budgetDiff) < 0.01
+                  ? "Matches award amount"
+                  : budgetDiff > 0
+                  ? `${fmtFull(budgetDiff)} unallocated`
+                  : `${fmtFull(Math.abs(budgetDiff))} over-allocated`}
+              </span>
+            </div>
+
+            <div className="flex justify-between pt-2">
+              <Button variant="outline" onClick={() => setStep(1)}>Back</Button>
+              <Button onClick={() => setStep(3)}>Next: Review</Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Step 3: Review */}
+      {step === 3 && (
+        <Card>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Review & Create</CardTitle></CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div><span className="text-muted-foreground">FAIN:</span> <span className="font-medium">{fain}</span></div>
+              <div><span className="text-muted-foreground">CFDA:</span> <span className="font-medium">{cfda}</span></div>
+              <div><span className="text-muted-foreground">Agency:</span> <span className="font-medium">{awardingAgency}</span></div>
+              <div><span className="text-muted-foreground">Program:</span> <Badge variant="outline">{program}</Badge></div>
+              <div className="col-span-2"><span className="text-muted-foreground">Title:</span> <span className="font-medium">{title}</span></div>
+              <div><span className="text-muted-foreground">Amount:</span> <span className="font-bold text-[#3d8b8b]">{fmtFull(awardAmt)}</span></div>
+              <div><span className="text-muted-foreground">Match:</span> <span className="font-medium">{matchPercentage}%</span></div>
+              <div><span className="text-muted-foreground">Period:</span> <span className="font-medium">{fmtDate(periodStart)} — {fmtDate(periodEnd)}</span></div>
+              <div><span className="text-muted-foreground">Budget Categories:</span> <span className="font-medium">{categories.filter((c) => c.name).length}</span></div>
+            </div>
+
+            {categories.filter((c) => c.name && c.ceiling).length > 0 && (
+              <div className="border rounded-lg p-3 space-y-1">
+                {categories.filter((c) => c.name && c.ceiling).map((c, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span>{c.name}</span>
+                    <span className="tabular-nums font-medium">{fmtFull(parseFloat(c.ceiling) || 0)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-between pt-2">
+              <Button variant="outline" onClick={() => setStep(2)}>Back</Button>
+              <Button onClick={handleSubmit} disabled={saving}>
+                {saving ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+                Create Award
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
