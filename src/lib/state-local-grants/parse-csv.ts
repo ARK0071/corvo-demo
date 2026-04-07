@@ -19,7 +19,7 @@ export function parseStateLocalCsvContents(csvText: string): ParseStateLocalCsvR
   const parsed = Papa.parse<Record<string, string>>(csvText, {
     header: true,
     skipEmptyLines: "greedy",
-    transformHeader: (h) => h.trim(),
+    transformHeader: (h: string) => h.trim(),
   });
 
   if (parsed.errors?.length) {

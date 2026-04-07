@@ -344,7 +344,7 @@ export async function getUpcomingDeadlineCount(): Promise<number> {
     },
   });
 
-  return results.filter((r) => {
+  return results.filter((r: typeof results[number]) => {
     const closeDate = r.grant?.closeDate;
     if (!closeDate) return false;
     return closeDate >= now && closeDate <= thirtyDaysFromNow;

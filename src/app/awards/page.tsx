@@ -510,7 +510,7 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [drawdowns, setDrawdowns] = useState<DrawdownRequest[]>([]);
   const [budgetMods, setBudgetMods] = useState<ReturnType<typeof getBudgetModsForAward>>([]);
-  const [matchStatus, setMatchStatus] = useState<ReturnType<typeof getMatchStatus>>({ required: 0, committed: 0, percentage: 0, status: "on_track" as const });
+  const [matchStatus, setMatchStatus] = useState<ReturnType<typeof getMatchStatus>>({ required: 0, committed: 0, percentage: 0, target: 0, status: "on_track" as const, periodProgress: 0 });
   const [detailLoading, setDetailLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
 
@@ -531,7 +531,9 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
             required: ms.required,
             committed: ms.committed,
             percentage: ms.required > 0 ? Math.round((ms.committed / ms.required) * 100) : 100,
+            target: ms.required,
             status: (ms.required > 0 ? (ms.committed / ms.required >= 0.8 ? "on_track" : ms.committed / ms.required >= 0.5 ? "at_risk" : "shortfall") : "on_track") as "on_track" | "at_risk" | "shortfall",
+            periodProgress: 50, // Default mid-period
           });
         }
       }

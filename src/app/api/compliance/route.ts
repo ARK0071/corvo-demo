@@ -126,24 +126,30 @@ export async function GET(request: NextRequest) {
         prisma.demoExpense.findMany({ where: { portId } }),
       ]);
 
-      const openFindings = findings.filter((f) => f.status === "open" || f.status === "in_progress");
-      const materialWeaknesses = openFindings.filter((f) => f.severity === "material_weakness");
-      const overdueReports = reports.filter((r) => r.status !== "submitted" && new Date(r.dueDate) < new Date());
-      const overdueSubReports = subs.flatMap((s) => s.reports).filter((r) => r.status === "pending" && new Date(r.dueDate) < new Date());
+      const openFindings = findings.filter((f: typeof findings[number]) => f.status === "open" || f.status === "in_progress");
+      const materialWeaknesses = openFindings.filter((f: typeof findings[number]) => f.severity === "material_weakness");
+      const overdueReports = reports.filter((r: typeof reports[number]) => r.status !== "submitted" && new Date(r.dueDate) < new Date());
+      const overdueSubReports = subs.flatMap((s: typeof subs[number]) => s.reports).filter((r: typeof subs[number]["reports"][number]) => r.status === "pending" && new Date(r.dueDate) < new Date());
 
       // 12 Single Audit compliance areas
+      type Finding = typeof findings[number];
+      type Expense = typeof expenses[number];
+      type Drawdown = typeof drawdowns[number];
+      type Checklist = typeof checklists[number];
+      type Subrecipient = typeof subs[number];
+
       const areas = [
-        { id: "activities_allowed", name: "Activities Allowed/Unallowed", status: openFindings.some((f) => f.complianceArea === "activities_allowed") ? "red" : "green" },
-        { id: "allowable_costs", name: "Allowable Costs/Cost Principles", status: expenses.some((e) => e.status === "flagged") ? "yellow" : "green" },
-        { id: "cash_management", name: "Cash Management", status: drawdowns.some((d) => d.status === "submitted" && new Date(d.submittedDate!).getTime() < Date.now() - 90 * 86400000) ? "yellow" : "green" },
+        { id: "activities_allowed", name: "Activities Allowed/Unallowed", status: openFindings.some((f: Finding) => f.complianceArea === "activities_allowed") ? "red" : "green" },
+        { id: "allowable_costs", name: "Allowable Costs/Cost Principles", status: expenses.some((e: Expense) => e.status === "flagged") ? "yellow" : "green" },
+        { id: "cash_management", name: "Cash Management", status: drawdowns.some((d: Drawdown) => d.status === "submitted" && new Date(d.submittedDate!).getTime() < Date.now() - 90 * 86400000) ? "yellow" : "green" },
         { id: "eligibility", name: "Eligibility", status: "green" },
         { id: "equipment", name: "Equipment/Real Property", status: "green" },
-        { id: "matching", name: "Matching/Level of Effort", status: openFindings.some((f) => f.complianceArea === "matching") ? "red" : "green" },
+        { id: "matching", name: "Matching/Level of Effort", status: openFindings.some((f: Finding) => f.complianceArea === "matching") ? "red" : "green" },
         { id: "period_of_performance", name: "Period of Performance", status: "green" },
-        { id: "procurement", name: "Procurement/Suspension/Debarment", status: checklists.some((c) => c.status === "non_compliant") ? "red" : checklists.length === 0 ? "yellow" : "green" },
+        { id: "procurement", name: "Procurement/Suspension/Debarment", status: checklists.some((c: Checklist) => c.status === "non_compliant") ? "red" : checklists.length === 0 ? "yellow" : "green" },
         { id: "program_income", name: "Program Income", status: "green" },
         { id: "reporting", name: "Reporting", status: overdueReports.length > 0 ? "red" : "green" },
-        { id: "subrecipient_monitoring", name: "Subrecipient Monitoring", status: overdueSubReports.length > 0 ? "red" : subs.length > 0 && subs.every((s) => s.riskLevel === "low" || s.riskLevel === "standard") ? "green" : subs.length > 0 ? "yellow" : "green" },
+        { id: "subrecipient_monitoring", name: "Subrecipient Monitoring", status: overdueSubReports.length > 0 ? "red" : subs.length > 0 && subs.every((s: Subrecipient) => s.riskLevel === "low" || s.riskLevel === "standard") ? "green" : subs.length > 0 ? "yellow" : "green" },
         { id: "special_tests", name: "Special Tests and Provisions", status: materialWeaknesses.length > 0 ? "red" : "green" },
       ];
 
@@ -274,7 +280,7 @@ export async function PUT(request: NextRequest) {
       const checklistItems = await prisma.demoComplianceChecklistItem.findMany({
         where: { checklistId: item.checklistId },
       });
-      const completedCount = checklistItems.filter((i) => i.isCompleted).length;
+      const completedCount = checklistItems.filter((i: typeof checklistItems[number]) => i.isCompleted).length;
       const allDone = completedCount === checklistItems.length;
 
       await prisma.demoComplianceChecklist.update({

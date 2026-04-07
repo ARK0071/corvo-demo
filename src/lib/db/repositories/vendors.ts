@@ -120,20 +120,20 @@ export async function searchVendors(
 
   // Post-filter by capabilities if specified
   if (params.capabilities && params.capabilities.length > 0) {
-    const capLower = params.capabilities.map((c) => c.toLowerCase());
-    result = result.filter((v) =>
-      capLower.some((cap) =>
-        v.capabilities.some((vc) => vc.toLowerCase().includes(cap))
+    const capLower = params.capabilities.map((c: string) => c.toLowerCase());
+    result = result.filter((v: PortVendor) =>
+      capLower.some((cap: string) =>
+        v.capabilities.some((vc: string) => vc.toLowerCase().includes(cap))
       )
     );
   }
 
   // Post-filter by certifications if specified
   if (params.certifications && params.certifications.length > 0) {
-    const certLower = params.certifications.map((c) => c.toLowerCase());
-    result = result.filter((v) =>
-      certLower.some((cert) =>
-        v.certifications.some((vc) => vc.toLowerCase().includes(cert))
+    const certLower = params.certifications.map((c: string) => c.toLowerCase());
+    result = result.filter((v: PortVendor) =>
+      certLower.some((cert: string) =>
+        v.certifications.some((vc: string) => vc.toLowerCase().includes(cert))
       )
     );
   }
@@ -248,7 +248,7 @@ export async function getVendorCountsByDBE(): Promise<Record<string, number>> {
   });
 
   return results.reduce(
-    (acc, r) => {
+    (acc: Record<string, number>, r: typeof results[number]) => {
       if (r.disadvantagedBusiness) {
         acc[r.disadvantagedBusiness] = r._count;
       }

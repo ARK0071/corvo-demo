@@ -515,7 +515,7 @@ export async function createDrawdown(data: {
   const expenses = await prisma.demoExpense.findMany({
     where: { id: { in: data.expenseIds }, portId },
   });
-  const totalAmount = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  const totalAmount = expenses.reduce((s: number, e: typeof expenses[number]) => s + Number(e.amount), 0);
 
   const drawdown = await prisma.demoDrawdownRequest.create({
     data: {
@@ -672,11 +672,11 @@ export async function getAwardStats(): Promise<{
     }),
   ]);
 
-  const totalAwarded = awards.reduce((s, a) => s + Number(a.totalAmount), 0);
-  const totalSpent = expenses.reduce((s, e) => s + Number(e.amount), 0);
-  const totalDrawn = drawdowns.reduce((s, d) => s + Number(d.totalAmount), 0);
-  const activeCount = awards.filter((a) => a.status === "active").length;
-  const closeoutCount = awards.filter((a) => a.status === "closeout_pending").length;
+  const totalAwarded = awards.reduce((s: number, a: typeof awards[number]) => s + Number(a.totalAmount), 0);
+  const totalSpent = expenses.reduce((s: number, e: typeof expenses[number]) => s + Number(e.amount), 0);
+  const totalDrawn = drawdowns.reduce((s: number, d: typeof drawdowns[number]) => s + Number(d.totalAmount), 0);
+  const activeCount = awards.filter((a: typeof awards[number]) => a.status === "active").length;
+  const closeoutCount = awards.filter((a: typeof awards[number]) => a.status === "closeout_pending").length;
 
   return {
     totalAwarded,

@@ -347,7 +347,7 @@ export async function getPipelineStats(portProfileId: string): Promise<{
   }
 
   return {
-    total: counts.reduce((sum, c) => sum + c._count, 0),
+    total: counts.reduce((sum: number, c: typeof counts[number]) => sum + c._count, 0),
     eligible: stageCounts["eligible"] || 0,
     applied: stageCounts["applied"] || 0,
     underReview: stageCounts["under_review"] || 0,
@@ -391,7 +391,7 @@ export async function batchAddToPipeline(
 ): Promise<number> {
   let added = 0;
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     for (const { grantId, scores } of grants) {
       const existing = await tx.pipelineGrant.findUnique({
         where: {

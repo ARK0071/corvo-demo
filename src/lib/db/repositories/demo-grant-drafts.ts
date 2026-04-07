@@ -7,7 +7,7 @@ function getPortId(): string {
   return getTenantConfig().portId;
 }
 
-// Helper to resolve portProfileId from UUID or slug
+// Helper to resolve portProfileId from UUID or slug - creates profile on demand if needed
 async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string | null> {
   const portId = getPortId();
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,14 +17,37 @@ async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string
   }
 
   // Look up the port profile by portId
-  const portProfile = await prisma.demoPortProfile.findFirst({
+  let portProfile = await prisma.demoPortProfile.findFirst({
     where: { portId },
     select: { id: true },
   });
 
+  // If no port profile exists, create one on demand
   if (!portProfile) {
-    console.error(`[demo-grant-drafts] No port profile found for portId: ${portId}`);
-    return null;
+    console.log(`[demo-grant-drafts] Creating port profile on demand for portId: ${portId}`);
+    try {
+      const tenantConfig = getTenantConfig();
+      portProfile = await prisma.demoPortProfile.create({
+        data: {
+          portId,
+          slug: tenantConfig.portSlug || portId,
+          name: portProfileIdOrSlug || portId, // Use the name passed in or portId as fallback
+          entityType: "port",
+          location: {},
+          characteristics: {},
+          priorities: [],
+          capabilities: [],
+          needs: [],
+          certifications: [],
+          environmentalGoals: [],
+          communityImpact: [],
+        },
+        select: { id: true },
+      });
+    } catch (createError) {
+      console.error(`[demo-grant-drafts] Failed to create port profile:`, createError);
+      return null;
+    }
   }
 
   return portProfile.id;

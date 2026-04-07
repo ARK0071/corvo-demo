@@ -202,7 +202,7 @@ export async function getVendorCountsBySector(): Promise<Record<string, number>>
   });
 
   return results.reduce(
-    (acc, r) => {
+    (acc: Record<string, number>, r: typeof results[number]) => {
       if (r.sector) acc[r.sector] = r._count;
       return acc;
     },

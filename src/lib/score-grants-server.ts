@@ -66,9 +66,7 @@ async function getDBVectorSimilarities(
 
     // Build query for batch similarity computation
     // This query computes cosine similarity between grant embeddings and profile embedding
-    const similarities = await prisma.$queryRawUnsafe<
-      Array<{ grant_id: string; similarity: number }>
-    >(
+    const similarities = await prisma.$queryRawUnsafe(
       `
       SELECT
         g.id as grant_id,
@@ -82,7 +80,7 @@ async function getDBVectorSimilarities(
       `,
       grantIds,
       profileId
-    );
+    ) as Array<{ grant_id: string; similarity: number }>;
 
     for (const row of similarities) {
       // Convert cosine similarity (0-1) to score (0-100)

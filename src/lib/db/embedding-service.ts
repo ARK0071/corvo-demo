@@ -198,12 +198,12 @@ export async function embedAndStoreProfile(profile: PortProfile, profileId: stri
  */
 export async function getGrantsWithoutEmbeddings(limit: number = 100): Promise<string[]> {
   const tableName = tableNames.discoveredGrants;
-  const results = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`
+  const results = await prisma.$queryRawUnsafe(`
     SELECT id FROM ${tableName}
     WHERE grant_embedding IS NULL
     LIMIT ${limit}
-  `);
-  return results.map((r) => r.id);
+  `) as Array<{ id: string }>;
+  return results.map((r: { id: string }) => r.id);
 }
 
 /**
@@ -211,12 +211,12 @@ export async function getGrantsWithoutEmbeddings(limit: number = 100): Promise<s
  */
 export async function getVendorsWithoutEmbeddings(limit: number = 100): Promise<string[]> {
   const tableName = tableNames.portVendors;
-  const results = await prisma.$queryRawUnsafe<Array<{ id: string }>>(`
+  const results = await prisma.$queryRawUnsafe(`
     SELECT id FROM ${tableName}
     WHERE vendor_embedding IS NULL
     LIMIT ${limit}
-  `);
-  return results.map((r) => r.id);
+  `) as Array<{ id: string }>;
+  return results.map((r: { id: string }) => r.id);
 }
 
 /**
@@ -231,14 +231,16 @@ export async function getEmbeddingStats(): Promise<{
   const vendorsTable = tableNames.portVendors;
   const profilesTable = tableNames.portProfiles;
 
+  type CountResult = [{ count: bigint }];
+
   const [grantsTotal, grantsWithEmb, vendorsTotal, vendorsWithEmb, profilesTotal, profilesWithEmb] =
     await Promise.all([
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${grantsTable}`),
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${grantsTable} WHERE grant_embedding IS NOT NULL`),
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${vendorsTable}`),
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${vendorsTable} WHERE vendor_embedding IS NOT NULL`),
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${profilesTable}`),
-      prisma.$queryRawUnsafe<[{ count: bigint }]>(`SELECT COUNT(*) as count FROM ${profilesTable} WHERE profile_embedding IS NOT NULL`),
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${grantsTable}`) as Promise<CountResult>,
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${grantsTable} WHERE grant_embedding IS NOT NULL`) as Promise<CountResult>,
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${vendorsTable}`) as Promise<CountResult>,
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${vendorsTable} WHERE vendor_embedding IS NOT NULL`) as Promise<CountResult>,
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${profilesTable}`) as Promise<CountResult>,
+      prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM ${profilesTable} WHERE profile_embedding IS NOT NULL`) as Promise<CountResult>,
     ]);
 
   return {

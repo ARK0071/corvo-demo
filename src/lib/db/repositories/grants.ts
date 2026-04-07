@@ -234,7 +234,7 @@ export async function getGrantCountsByStatus(): Promise<
   });
 
   return results.reduce(
-    (acc, r) => {
+    (acc: Record<string, number>, r: typeof results[number]) => {
       acc[r.status] = r._count;
       return acc;
     },

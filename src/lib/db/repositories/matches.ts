@@ -122,7 +122,7 @@ export async function batchUpsertMatches(
   let created = 0;
   let updated = 0;
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     for (const match of matches) {
       const existing = await tx.grantVendorMatch.findUnique({
         where: {

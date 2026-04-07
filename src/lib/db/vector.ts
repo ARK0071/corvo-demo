@@ -59,7 +59,7 @@ export async function findSimilarGrants(
     LIMIT ${limit}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: typeof results[number]) => ({
     data: {
       id: r.id,
       title: r.title,
@@ -113,7 +113,7 @@ export async function findSimilarVendors(
     LIMIT ${limit}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: typeof results[number]) => ({
     data: {
       id: r.id,
       name: r.name,
@@ -172,7 +172,7 @@ export async function findGrantsForProfile(
     LIMIT ${limit}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: typeof results[number]) => ({
     data: {
       id: r.id,
       title: r.title,
@@ -229,7 +229,7 @@ export async function findVendorsForGrant(
     LIMIT ${limit}
   `;
 
-  return results.map((r) => ({
+  return results.map((r: typeof results[number]) => ({
     data: {
       id: r.id,
       name: r.name,

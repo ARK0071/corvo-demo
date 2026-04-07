@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
+import { useState, useEffect, useCallback, useMemo, Fragment, useRef } from "react";
 import { useProfile } from "@/components/profile-provider";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 import { FEDERAL_FORMS } from "@/data/federal-forms";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -71,6 +72,8 @@ interface SavedDraft extends DraftResponse {
   id: string;
   grantId: string;
   grantTitle: string;
+  status?: "researching" | "drafting" | "reviewing" | "ready" | "submitted";
+  researchData?: ResearchData;
 }
 
 interface ResearchData {
@@ -184,6 +187,7 @@ function formatDollars(n: number): string {
 
 export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraftViewProps) {
   const { profile } = useProfile();
+  const tenantHeaders = useTenantHeaders();
 
   // Phase state
   const [phase, setPhase] = useState<Phase>("idle");
@@ -200,10 +204,12 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   const [editingSections, setEditingSections] = useState<Map<string, string>>(new Map());
   const [showAttachments, setShowAttachments] = useState(false);
   const [activeView, setActiveView] = useState<"sections" | "preview">("sections");
+  const [draftsLoaded, setDraftsLoaded] = useState(false);
 
   // Current grant context
   const [currentGrantId, setCurrentGrantId] = useState<string | null>(null);
   const [currentGrantTitle, setCurrentGrantTitle] = useState<string | null>(null);
+  const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
 
   // ACFR upload state
   const [acfrLoading, setAcfrLoading] = useState(false);
@@ -216,33 +222,125 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   const [nofoError, setNofoError] = useState<string | null>(null);
   const [nofoUploaded, setNofoUploaded] = useState(false);
 
-  // Load drafts from session storage
+  // Track pending saves to prevent race conditions
+  const pendingSaveRef = useRef<AbortController | null>(null);
+
+  // Load drafts from database on mount
   useEffect(() => {
-    const stored = sessionStorage.getItem("grantDrafts_v2");
-    if (stored) {
-      try { setDrafts(JSON.parse(stored)); } catch {}
+    async function loadDrafts() {
+      try {
+        const res = await fetch("/api/grant-drafts", {
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          // Transform database format to component format
+          const loadedDrafts: SavedDraft[] = (data.drafts || []).map((d: any) => ({
+            id: d.id,
+            grantId: d.grantId,
+            grantTitle: d.grantProgram, // Use grantProgram as title
+            grantProgram: d.grantProgram,
+            applicantName: profile.name,
+            status: d.status, // Include draft status
+            researchData: d.researchData, // Include research data for "researching" drafts
+            sections: (d.sections || []).map((s: any) => ({
+              sectionId: s.id || s.sectionId,
+              title: s.title,
+              content: s.content || "",
+              confidence: s.completeness >= 80 ? "high" : s.completeness >= 50 ? "medium" : "low",
+              confidenceReason: "",
+              gapAnnotations: [],
+              wordCount: (s.content || "").split(/\s+/).filter(Boolean).length,
+              maxWords: 5000,
+              weight: 100 / Math.max((d.sections || []).length, 1),
+            })),
+            overallCompleteness: d.overallCompleteness || 0,
+            attachmentsChecklist: (d.attachmentsChecklist || []).map((a: any) => ({
+              id: a.id,
+              name: a.name,
+              description: "",
+              required: a.required,
+              status: a.uploaded ? "on_file" : "missing",
+              notes: "",
+            })),
+            generatedAt: d.generatedAt || d.createdAt,
+          }));
+          setDrafts(loadedDrafts);
+        }
+      } catch (error) {
+        console.error("Failed to load drafts from database:", error);
+      } finally {
+        setDraftsLoaded(true);
+      }
     }
-  }, []);
+    loadDrafts();
+  }, [tenantHeaders, profile.name]);
 
   // Auto-start research when coming from Draft Grant button
   useEffect(() => {
-    if (initialGrantId && initialGrantTitle && phase === "idle") {
-      // Check if we already have a draft for this grant
-      const stored = sessionStorage.getItem("grantDrafts_v2");
-      if (stored) {
-        try {
-          const existing = JSON.parse(stored) as SavedDraft[];
-          const match = existing.find((d) => d.grantId === initialGrantId);
-          if (match) {
-            setDrafts(existing);
-            setSelectedDraftId(match.id);
-            setExpandedSections(new Set(match.sections.map((s) => s.sectionId)));
-            setPhase("draft");
-            return;
+    if (!draftsLoaded) return; // Wait for drafts to load from DB
+
+    async function initializeFromGrant() {
+      if (!initialGrantId || !initialGrantTitle || phase !== "idle") return;
+
+      // First, check the database for the authoritative draft state
+      try {
+        const res = await fetch(`/api/grant-drafts?grantId=${initialGrantId}`, {
+          headers: tenantHeaders,
+        });
+
+        if (res.ok) {
+          const dbDraft = await res.json();
+
+          // Check the draft's status to determine which phase to show
+          const status = dbDraft.status as string;
+          const hasSections = Array.isArray(dbDraft.sections) && dbDraft.sections.length > 0 &&
+                             dbDraft.sections.some((s: any) => s.content && s.content.trim().length > 0);
+
+          console.log("[GrantDraftView] DB draft loaded:", {
+            id: dbDraft.id,
+            status,
+            hasSections,
+            sectionsLength: dbDraft.sections?.length,
+            hasResearchData: !!dbDraft.researchData,
+          });
+
+          if (status === "researching" || (status === "drafting" && !hasSections)) {
+            // Draft is in research/review phase - show review page
+            console.log("[GrantDraftView] Draft is in research phase, showing review");
+            if (dbDraft.researchData) {
+              setResearchData(dbDraft.researchData);
+              setCurrentGrantId(initialGrantId);
+              setCurrentGrantTitle(initialGrantTitle);
+              setCurrentDraftId(dbDraft.id);
+              sessionStorage.setItem(`research_${initialGrantId}`, JSON.stringify(dbDraft.researchData));
+              setPhase("review");
+              return;
+            } else {
+              console.log("[GrantDraftView] No research data in draft!");
+            }
+          } else if (hasSections) {
+            // Draft has been generated - show draft view
+            console.log("[GrantDraftView] Draft has sections, showing draft view");
+            const localDraft = drafts.find((d) => d.id === dbDraft.id || d.grantId === initialGrantId);
+            if (localDraft && localDraft.sections.length > 0) {
+              setSelectedDraftId(localDraft.id);
+              setExpandedSections(new Set(localDraft.sections.map((s) => s.sectionId)));
+              setPhase("draft");
+              return;
+            }
+          } else {
+            console.log("[GrantDraftView] Draft exists but no matching condition - status:", status, "hasSections:", hasSections);
           }
-        } catch {}
+        } else {
+          console.log("[GrantDraftView] No draft found in DB for grantId:", initialGrantId, "status:", res.status);
+        }
+      } catch (e) {
+        console.error("Failed to check database for existing draft:", e);
       }
-      // Check for cached research
+
+      // Fallback: Check for cached research in sessionStorage (for same tab)
+      console.log("[GrantDraftView] Checking sessionStorage fallback");
       const cachedResearch = sessionStorage.getItem(`research_${initialGrantId}`);
       if (cachedResearch) {
         try {
@@ -253,17 +351,13 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
           return;
         } catch {}
       }
-      // Start fresh research
+
+      // No existing draft or research found - start fresh research
       handleStartResearch(initialGrantId, initialGrantTitle);
     }
-  }, [initialGrantId, initialGrantTitle]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Save drafts
-  useEffect(() => {
-    if (drafts.length > 0) {
-      sessionStorage.setItem("grantDrafts_v2", JSON.stringify(drafts));
-    }
-  }, [drafts]);
+    initializeFromGrant();
+  }, [initialGrantId, initialGrantTitle, draftsLoaded, drafts, tenantHeaders]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectedDraft = useMemo(() => drafts.find((d) => d.id === selectedDraftId), [drafts, selectedDraftId]);
 
@@ -304,8 +398,51 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
         setAcfrFileName("Auto-fetched from web");
       }
 
-      // Cache research
+      // Cache research in sessionStorage (for quick access in same tab)
       sessionStorage.setItem(`research_${grantId}`, JSON.stringify(data));
+
+      // Save research to database for persistence across tabs
+      try {
+        // Check if draft already exists for this grant
+        const existingRes = await fetch(`/api/grant-drafts?grantId=${grantId}`, {
+          headers: tenantHeaders,
+        });
+
+        if (existingRes.ok) {
+          // Update existing draft with research data
+          const existing = await existingRes.json();
+          await fetch("/api/grant-drafts", {
+            method: "PUT",
+            headers: { ...tenantHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: existing.id,
+              action: "updateResearch",
+              researchData: data,
+            }),
+          });
+          setCurrentDraftId(existing.id);
+        } else if (existingRes.status === 404) {
+          // Create new draft in "researching" status
+          const createRes = await fetch("/api/grant-drafts", {
+            method: "POST",
+            headers: { ...tenantHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              portProfileId: profile.name,
+              grantId: grantId,
+              grantProgram: grantTitle,
+              status: "researching",
+              researchData: data,
+            }),
+          });
+          if (createRes.ok) {
+            const created = await createRes.json();
+            setCurrentDraftId(created.id);
+          }
+        }
+      } catch (dbError) {
+        console.error("Failed to save research to database:", dbError);
+        // Continue anyway - sessionStorage will still work for current tab
+      }
 
       setPhase("review");
     } catch (error) {
@@ -371,14 +508,113 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
       const response: DraftResponse = await res.json();
 
+      // Save to database
+      const dbSections = response.sections.map((s) => ({
+        id: s.sectionId,
+        title: s.title,
+        content: s.content,
+        completeness: s.confidence === "high" ? 90 : s.confidence === "medium" ? 60 : 30,
+        aiGenerated: true,
+      }));
+
+      const dbAttachments = response.attachmentsChecklist.map((a) => ({
+        id: a.id,
+        name: a.name,
+        required: a.required,
+        uploaded: a.status === "on_file",
+      }));
+
+      let draftId = currentDraftId || `draft-${Date.now()}`;
+      let savedToDb = false;
+
+      // If we have an existing draft (from research phase), update it; otherwise create new
+      if (currentDraftId) {
+        // Update existing draft with generated sections
+        const updateRes = await fetch("/api/grant-drafts", {
+          method: "PUT",
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: currentDraftId,
+            action: "setSectionsFromAI",
+            sections: dbSections,
+          }),
+        });
+
+        if (updateRes.ok) {
+          savedToDb = true;
+          // Also update status and attachments
+          await fetch("/api/grant-drafts", {
+            method: "PUT",
+            headers: { ...tenantHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: currentDraftId,
+              action: "updateStatus",
+              status: "drafting",
+            }),
+          });
+          await fetch("/api/grant-drafts", {
+            method: "PUT",
+            headers: { ...tenantHeaders, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: currentDraftId,
+              action: "updateAttachments",
+              attachmentsChecklist: dbAttachments,
+            }),
+          });
+        } else {
+          const errorData = await updateRes.json().catch(() => ({}));
+          console.error("Failed to update draft in database:", errorData.error || updateRes.statusText);
+        }
+      } else {
+        // Create new draft
+        const createRes = await fetch("/api/grant-drafts", {
+          method: "POST",
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            portProfileId: profile.name,
+            grantId: currentGrantId,
+            grantProgram: currentGrantTitle,
+            status: "drafting",
+            researchData: researchData,
+            sections: dbSections,
+            overallCompleteness: response.overallCompleteness,
+            attachmentsChecklist: dbAttachments,
+          }),
+        });
+
+        if (createRes.ok) {
+          const created = await createRes.json();
+          draftId = created.id;
+          savedToDb = true;
+        } else {
+          const errorData = await createRes.json().catch(() => ({}));
+          console.error("Failed to save draft to database:", errorData.error || createRes.statusText);
+        }
+      }
+
+      if (!savedToDb) {
+        alert(`Warning: Draft generated but could not be saved to database. Changes may not persist across sessions.`);
+      }
+
       const newDraft: SavedDraft = {
         ...response,
-        id: `draft-${Date.now()}`,
+        id: draftId,
         grantId: currentGrantId,
         grantTitle: currentGrantTitle,
       };
 
-      setDrafts((prev) => [newDraft, ...prev]);
+      // Update or add the draft in the list
+      setDrafts((prev) => {
+        const existingIndex = prev.findIndex((d) => d.id === draftId || d.grantId === currentGrantId);
+        if (existingIndex >= 0) {
+          // Update existing draft
+          const updated = [...prev];
+          updated[existingIndex] = newDraft;
+          return updated;
+        }
+        // Add new draft at the beginning
+        return [newDraft, ...prev];
+      });
       setSelectedDraftId(newDraft.id);
       setExpandedSections(new Set(response.sections.map((s) => s.sectionId)));
       setPhase("draft");
@@ -538,15 +774,26 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
   // ─── Draft management ───
 
-  function handleDeleteDraft(draftId: string) {
+  async function handleDeleteDraft(draftId: string) {
     if (!confirm("Delete this draft?")) return;
+
+    // Delete from database
+    try {
+      await fetch(`/api/grant-drafts?id=${draftId}`, {
+        method: "DELETE",
+        headers: tenantHeaders,
+      });
+    } catch (error) {
+      console.error("Failed to delete draft from database:", error);
+    }
+
+    // Update local state
     const newDrafts = drafts.filter((d) => d.id !== draftId);
     setDrafts(newDrafts);
     if (selectedDraftId === draftId) setSelectedDraftId(null);
-    sessionStorage.setItem("grantDrafts_v2", JSON.stringify(newDrafts));
   }
 
-  function handleSaveSectionEdit(sectionId: string) {
+  async function handleSaveSectionEdit(sectionId: string) {
     const newContent = editingSections.get(sectionId);
     if (!selectedDraft || newContent === undefined) return;
 
@@ -571,12 +818,36 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     const overallCompleteness = Math.round((weighted / totalWeight) * 100);
 
     const updatedDraft = { ...selectedDraft, sections: updatedSections, overallCompleteness };
+
+    // Update local state immediately for responsiveness
     setDrafts((prev) => prev.map((d) => (d.id === updatedDraft.id ? updatedDraft : d)));
     setEditingSections((prev) => {
       const next = new Map(prev);
       next.delete(sectionId);
       return next;
     });
+
+    // Sync to database in background
+    try {
+      const section = updatedSections.find((s) => s.sectionId === sectionId);
+      if (section) {
+        await fetch("/api/grant-drafts", {
+          method: "PUT",
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: selectedDraft.id,
+            action: "updateSection",
+            sectionId: sectionId,
+            updates: {
+              content: section.content,
+              completeness: section.confidence === "high" ? 90 : section.confidence === "medium" ? 60 : 30,
+            },
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to save section to database:", error);
+    }
   }
 
   const toggleSection = useCallback((id: string) => {
@@ -756,28 +1027,53 @@ ${s.content
               </p>
             </div>
           )}
-          {drafts.map((draft) => (
-            <Card
-              key={draft.id}
-              className={`p-3 cursor-pointer transition-colors ${
-                selectedDraftId === draft.id ? "border-primary bg-muted/50" : "hover:bg-muted/30"
-              }`}
-              onClick={() => {
-                setSelectedDraftId(draft.id);
-                setExpandedSections(new Set(draft.sections.map((s) => s.sectionId)));
-                setPhase("draft");
-              }}
-            >
-              <div className="font-medium text-sm line-clamp-2">{draft.grantTitle}</div>
-              <div className="flex items-center gap-2 mt-2">
-                <CompletenessRing value={draft.overallCompleteness} size={24} />
-                <span className="text-xs text-muted-foreground">{draft.overallCompleteness}% complete</span>
-              </div>
-              <div className="text-[10px] text-muted-foreground mt-1">
-                {new Date(draft.generatedAt).toLocaleString()}
-              </div>
-            </Card>
-          ))}
+          {drafts.map((draft) => {
+            const isResearching = draft.status === "researching" ||
+              (draft.sections.length === 0 || !draft.sections.some(s => s.content?.trim()));
+            return (
+              <Card
+                key={draft.id}
+                className={`p-3 cursor-pointer transition-colors ${
+                  selectedDraftId === draft.id || currentDraftId === draft.id ? "border-primary bg-muted/50" : "hover:bg-muted/30"
+                }`}
+                onClick={() => {
+                  if (isResearching && draft.researchData) {
+                    // Draft is in research/review phase - show review page
+                    setResearchData(draft.researchData);
+                    setCurrentGrantId(draft.grantId);
+                    setCurrentGrantTitle(draft.grantTitle);
+                    setCurrentDraftId(draft.id);
+                    setSelectedDraftId(null);
+                    setPhase("review");
+                  } else if (draft.sections.length > 0 && draft.sections.some(s => s.content?.trim())) {
+                    // Draft has been generated - show draft view
+                    setSelectedDraftId(draft.id);
+                    setCurrentDraftId(null);
+                    setExpandedSections(new Set(draft.sections.map((s) => s.sectionId)));
+                    setPhase("draft");
+                  }
+                }}
+              >
+                <div className="font-medium text-sm line-clamp-2">{draft.grantTitle}</div>
+                <div className="flex items-center gap-2 mt-2">
+                  {isResearching ? (
+                    <>
+                      <Search className="h-4 w-4 text-amber-500" />
+                      <span className="text-xs text-amber-600">Ready for review</span>
+                    </>
+                  ) : (
+                    <>
+                      <CompletenessRing value={draft.overallCompleteness} size={24} />
+                      <span className="text-xs text-muted-foreground">{draft.overallCompleteness}% complete</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-1">
+                  {new Date(draft.generatedAt).toLocaleString()}
+                </div>
+              </Card>
+            );
+          })}
         </div>
       </div>
 
