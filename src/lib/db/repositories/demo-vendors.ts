@@ -1,6 +1,12 @@
 import { prisma } from "../client";
 import { DemoPortVendor as PrismaVendor, Prisma } from "@/generated/prisma";
 import type { PortVendor } from "@/data/port-vendors";
+import { getTenantConfig } from "../tenant-config";
+
+// Get current port ID from tenant config
+function getPortId(): string {
+  return getTenantConfig().portId;
+}
 
 // Convert Prisma model to application type
 function toPortVendor(vendor: PrismaVendor): PortVendor {
@@ -23,9 +29,13 @@ function toPortVendor(vendor: PrismaVendor): PortVendor {
 }
 
 // Convert application type to Prisma create input
-function toPrismaCreate(vendor: PortVendor): Prisma.DemoPortVendorCreateInput {
+function toPrismaCreate(
+  vendor: PortVendor,
+  portId: string
+): Prisma.DemoPortVendorCreateInput {
   return {
     id: vendor.id,
+    portId: portId,
     name: vendor.name,
     sector: vendor.sector || null,
     headquarters: vendor.headquarters || null,
@@ -42,18 +52,20 @@ function toPrismaCreate(vendor: PortVendor): Prisma.DemoPortVendorCreateInput {
   };
 }
 
-// Get vendor by ID
+// Get vendor by ID (filtered by current port)
 export async function getVendorById(id: string): Promise<PortVendor | null> {
-  const vendor = await prisma.demoPortVendor.findUnique({
-    where: { id },
+  const portId = getPortId();
+  const vendor = await prisma.demoPortVendor.findFirst({
+    where: { id, portId },
   });
   return vendor ? toPortVendor(vendor) : null;
 }
 
-// Get multiple vendors by IDs
+// Get multiple vendors by IDs (filtered by current port)
 export async function getVendorsByIds(ids: string[]): Promise<PortVendor[]> {
+  const portId = getPortId();
   const vendors = await prisma.demoPortVendor.findMany({
-    where: { id: { in: ids } },
+    where: { id: { in: ids }, portId },
   });
   return vendors.map(toPortVendor);
 }
@@ -74,7 +86,8 @@ export interface VendorSearchParams {
 export async function searchVendors(
   params: VendorSearchParams
 ): Promise<{ vendors: PortVendor[]; total: number }> {
-  const where: Prisma.DemoPortVendorWhereInput = {};
+  const portId = getPortId();
+  const where: Prisma.DemoPortVendorWhereInput = { portId };
 
   if (params.keyword) {
     where.OR = [
@@ -109,16 +122,29 @@ export async function searchVendors(
 
 // Upsert vendor (create or update)
 export async function upsertVendor(vendor: PortVendor): Promise<PortVendor> {
-  const data = toPrismaCreate(vendor);
-  const result = await prisma.demoPortVendor.upsert({
-    where: { id: vendor.id },
-    create: data,
-    update: {
-      ...data,
-      id: undefined,
-      lastSyncedAt: new Date(),
-    },
+  const portId = getPortId();
+  const data = toPrismaCreate(vendor, portId);
+
+  // Check if exists for this port
+  const existing = await prisma.demoPortVendor.findFirst({
+    where: { id: vendor.id, portId },
   });
+
+  let result: PrismaVendor;
+  if (existing) {
+    result = await prisma.demoPortVendor.update({
+      where: { id_portId: { id: vendor.id, portId } },
+      data: {
+        ...data,
+        id: undefined,
+        portId: undefined,
+        lastSyncedAt: new Date(),
+      },
+    });
+  } else {
+    result = await prisma.demoPortVendor.create({ data });
+  }
+
   return toPortVendor(result);
 }
 
@@ -126,23 +152,25 @@ export async function upsertVendor(vendor: PortVendor): Promise<PortVendor> {
 export async function upsertVendors(
   vendors: PortVendor[]
 ): Promise<{ created: number; updated: number }> {
+  const portId = getPortId();
   let created = 0;
   let updated = 0;
 
   for (const vendor of vendors) {
-    const data = toPrismaCreate(vendor);
+    const data = toPrismaCreate(vendor, portId);
 
-    const existing = await prisma.demoPortVendor.findUnique({
-      where: { id: vendor.id },
+    const existing = await prisma.demoPortVendor.findFirst({
+      where: { id: vendor.id, portId },
       select: { id: true },
     });
 
     if (existing) {
       await prisma.demoPortVendor.update({
-        where: { id: vendor.id },
+        where: { id_portId: { id: vendor.id, portId } },
         data: {
           ...data,
           id: undefined,
+          portId: undefined,
           lastSyncedAt: new Date(),
         },
       });
@@ -158,15 +186,18 @@ export async function upsertVendors(
 
 // Delete vendor
 export async function deleteVendor(id: string): Promise<void> {
+  const portId = getPortId();
   await prisma.demoPortVendor.delete({
-    where: { id },
+    where: { id_portId: { id, portId } },
   });
 }
 
-// Get vendor counts by sector
+// Get vendor counts by sector (for current port)
 export async function getVendorCountsBySector(): Promise<Record<string, number>> {
+  const portId = getPortId();
   const results = await prisma.demoPortVendor.groupBy({
     by: ["sector"],
+    where: { portId },
     _count: true,
   });
 
@@ -179,9 +210,11 @@ export async function getVendorCountsBySector(): Promise<Record<string, number>>
   );
 }
 
-// Get last sync time
+// Get last sync time (for current port)
 export async function getLastSyncTime(): Promise<Date | null> {
+  const portId = getPortId();
   const result = await prisma.demoPortVendor.findFirst({
+    where: { portId },
     orderBy: { lastSyncedAt: "desc" },
     select: { lastSyncedAt: true },
   });

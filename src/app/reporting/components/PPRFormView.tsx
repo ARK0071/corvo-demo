@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   ArrowLeft,
   FileText,
@@ -13,41 +13,42 @@ import {
   Circle,
   Clock,
   AlertTriangle,
+  AlertCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  generatePPR,
-  savePPRDraft,
-  getPPRDraft,
-  type PPRFormData,
-  type PPRMilestone,
-  type PPRSection,
-} from "@/data/federal-report-templates";
-import { generateFinancialSummary } from "@/data/reporting";
-import { getAllReports } from "@/data/reporting";
-import { getAwardById } from "@/data/awards";
+import { usePPRFormData, useReportSummary, useDraftPersistence } from "../hooks/useAwardFormData";
+import type { PPRFormData, PPRMilestone, PPRSection } from "@/data/federal-report-templates";
 import { fmtDate } from "./helpers";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 
 interface PPRFormViewProps {
   reportId: string;
+  awardId: string;
+  periodStart: string;
+  periodEnd: string;
+  program: string;
+  awardTitle: string;
   onBack: () => void;
 }
 
-export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
-  const report = useMemo(() => getAllReports().find((r) => r.id === reportId), [reportId]);
-  const award = useMemo(() => (report ? getAwardById(report.awardId) : undefined), [report]);
+export default function PPRFormView({
+  reportId, awardId, periodStart, periodEnd,
+  program, awardTitle, onBack,
+}: PPRFormViewProps) {
+  const tenantHeaders = useTenantHeaders();
+  const { data: apiData, loading, error, refresh } = usePPRFormData(awardId, periodStart, periodEnd);
+  const { data: summaryData } = useReportSummary(awardId, periodStart, periodEnd);
+  const { saveDraft } = useDraftPersistence(reportId);
 
-  const [formData, setFormData] = useState<PPRFormData | null>(() => {
-    if (!report) return null;
-    const draft = getPPRDraft(reportId);
-    if (draft) return draft;
-    return generatePPR(report.awardId, report.periodStart, report.periodEnd);
-  });
-
+  const [formData, setFormData] = useState<PPRFormData | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["accomplishments"]));
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
+
+  if (apiData && !formData) {
+    setFormData(apiData);
+  }
 
   const toggleSection = useCallback((id: string) => {
     setExpandedSections((prev) => {
@@ -60,26 +61,24 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
 
   const handleAIDraft = useCallback(
     async (section: PPRSection) => {
-      if (!report || !award || !formData) return;
+      if (!formData) return;
 
       setLoadingSections((prev) => new Set(prev).add(section.id));
 
       try {
-        const financial = generateFinancialSummary(award.id, report.periodStart, report.periodEnd);
-
         const res = await fetch("/api/report-ppr-narrative", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
           body: JSON.stringify({
             sectionId: section.id,
             sectionTitle: section.title,
             sectionPrompt: section.prompt,
-            awardTitle: award.title,
-            program: award.program,
-            periodStart: report.periodStart,
-            periodEnd: report.periodEnd,
+            awardTitle,
+            program,
+            periodStart,
+            periodEnd,
             milestones: formData.milestones,
-            financialSummary: financial,
+            financialSummary: summaryData?.financialSummary || null,
           }),
         });
 
@@ -92,10 +91,10 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
             ),
           };
           setFormData(updated);
-          savePPRDraft(reportId, updated);
+          saveDraft(updated);
         }
       } catch {
-        // Silently handle — user can retry
+        // Silent — user can retry
       } finally {
         setLoadingSections((prev) => {
           const next = new Set(prev);
@@ -104,7 +103,7 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         });
       }
     },
-    [report, award, formData, reportId]
+    [formData, awardTitle, program, periodStart, periodEnd, summaryData, saveDraft, tenantHeaders]
   );
 
   const handleSectionContent = useCallback(
@@ -117,9 +116,9 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         ),
       };
       setFormData(updated);
-      savePPRDraft(reportId, updated);
+      saveDraft(updated);
     },
-    [formData, reportId]
+    [formData, saveDraft]
   );
 
   const handleMilestoneStatus = useCallback(
@@ -132,9 +131,9 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         ),
       };
       setFormData(updated);
-      savePPRDraft(reportId, updated);
+      saveDraft(updated);
     },
-    [formData, reportId]
+    [formData, saveDraft]
   );
 
   const handleMilestoneNotes = useCallback(
@@ -147,25 +146,44 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         ),
       };
       setFormData(updated);
-      savePPRDraft(reportId, updated);
+      saveDraft(updated);
     },
-    [formData, reportId]
+    [formData, saveDraft]
   );
 
-  if (!report || !formData) {
-    return <p className="p-6 text-muted-foreground">Report not found.</p>;
+  if (loading && !formData) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
   }
+
+  if (error && !formData) {
+    return (
+      <div className="flex-1 p-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+        <Card className="border-red-200">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="h-8 w-8 mx-auto text-red-500 mb-3" />
+            <p className="text-sm text-red-600">{error}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => { setFormData(null); refresh(); }}>Retry</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!formData) return null;
 
   const milestoneStatusIcon = (status: PPRMilestone["status"]) => {
     switch (status) {
-      case "completed":
-        return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
-      case "in_progress":
-        return <Clock className="h-4 w-4 text-[#3d8b8b]" />;
-      case "delayed":
-        return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-      default:
-        return <Circle className="h-4 w-4 text-muted-foreground" />;
+      case "completed": return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
+      case "in_progress": return <Clock className="h-4 w-4 text-[#3d8b8b]" />;
+      case "delayed": return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+      default: return <Circle className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
@@ -216,7 +234,7 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         </CardContent>
       </Card>
 
-      {/* Narrative Sections (Accordion) */}
+      {/* Narrative Sections */}
       <div className="space-y-2">
         {formData.sections.map((section) => {
           const isExpanded = expandedSections.has(section.id);
@@ -230,54 +248,32 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
                 className="w-full flex items-center justify-between p-4 text-left hover:bg-muted/50 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  {isExpanded ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                  )}
+                  {isExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                   <span className="text-sm font-medium">{section.title}</span>
                   {hasContent && (
-                    <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px]">
-                      Draft
-                    </Badge>
+                    <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 text-[10px]">Draft</Badge>
                   )}
                 </div>
               </button>
 
               {isExpanded && (
                 <CardContent className="pt-0 pb-4 px-4">
-                  {/* Guidance prompt */}
                   <div className="rounded-md bg-muted/30 p-3 mb-3">
                     <p className="text-xs text-muted-foreground">{section.prompt}</p>
                   </div>
 
-                  {/* AI Draft button */}
                   <div className="flex items-center gap-2 mb-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleAIDraft(section)}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5 mr-1" />
-                      )}
+                    <Button variant="outline" size="sm" onClick={() => handleAIDraft(section)} disabled={isLoading}>
+                      {isLoading ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
                       AI Draft
                     </Button>
                     {section.aiDraft && !section.userContent && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleSectionContent(section.id, section.aiDraft)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => handleSectionContent(section.id, section.aiDraft)}>
                         Use AI Draft
                       </Button>
                     )}
                   </div>
 
-                  {/* AI Draft preview */}
                   {section.aiDraft && !section.userContent && (
                     <div className="rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/30 dark:bg-purple-950/10 p-3 mb-3">
                       <div className="flex items-center gap-1.5 mb-2">
@@ -285,13 +281,10 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
                         <span className="text-[10px] uppercase tracking-wider font-medium text-purple-600 dark:text-purple-400">AI Draft</span>
                       </div>
                       <p className="text-sm whitespace-pre-wrap">{section.aiDraft}</p>
-                      <p className="text-[10px] text-muted-foreground mt-2">
-                        Click &ldquo;Use AI Draft&rdquo; to adopt, or write your own below.
-                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-2">Click &ldquo;Use AI Draft&rdquo; to adopt, or write your own below.</p>
                     </div>
                   )}
 
-                  {/* User content textarea */}
                   <textarea
                     value={section.userContent}
                     onChange={(e) => handleSectionContent(section.id, e.target.value)}
@@ -395,7 +388,6 @@ export default function PPRFormView({ reportId, onBack }: PPRFormViewProps) {
         </Card>
       )}
 
-      {/* Disclaimer */}
       <p className="text-xs text-muted-foreground text-center pb-4">
         Per 2 CFR 200.329 &mdash; Performance reports must be submitted within 30 days after the reporting period.
       </p>

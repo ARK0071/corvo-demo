@@ -24,17 +24,19 @@ import {
   DollarSign,
   FileText,
   Copy,
+  RefreshCw,
+  Database,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
 import {
-  getAllPipelineGrants,
-  addToPipeline,
-  moveGrantToStage,
-  updateGrantNotes,
-  removeFromPipeline,
-  getStageCount,
-  isInPipeline,
+  getAllPipelineGrants as getInMemoryPipelineGrants,
+  addToPipeline as addToPipelineLocal,
+  moveGrantToStage as moveGrantToStageLocal,
+  updateGrantNotes as updateGrantNotesLocal,
+  removeFromPipeline as removeFromPipelineLocal,
+  getStageCount as getStageCountLocal,
+  isInPipeline as isInPipelineLocal,
 } from "@/data/grant-pipeline";
 import { VendorSearch } from "@/components/vendor-search/vendor-search";
 import {
@@ -44,12 +46,13 @@ import {
 import { buildAgenciesParam, type GrantDiscoveryFilterState } from "@/lib/grants-gov-filters";
 import { getEmbeddingSimilarityForProject, type GrantScore } from "@/data/grant-scoring";
 import { useProfile } from "@/components/profile-provider";
+import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
-  getAllProjects,
-  createProject,
-  updateProject,
-  deleteProject,
+  getAllProjects as getInMemoryProjects,
+  createProject as createProjectLocal,
+  updateProject as updateProjectLocal,
+  deleteProject as deleteProjectLocal,
   initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
@@ -124,6 +127,10 @@ function UnifiedGrantsDashboard() {
   const router = useRouter();
   const { profile: selectedProfile, profileId } = useProfile();
 
+  // Tenant context for DB-first loading
+  const tenant = useTenant();
+  const tenantHeaders = useTenantHeaders();
+
   const tabParam = searchParams.get("tab");
   const activeTab = VALID_TABS.includes(tabParam as any) ? tabParam! : "discover";
 
@@ -161,22 +168,124 @@ function UnifiedGrantsDashboard() {
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
 
-  // Pipeline tab state
-  const [pipelineGrants, setPipelineGrants] = useState<PipelineGrant[]>(getAllPipelineGrants());
+  // Pipeline tab state - DB-first with in-memory fallback
+  const [pipelineGrants, setPipelineGrants] = useState<PipelineGrant[]>([]);
+  const [pipelineLoading, setPipelineLoading] = useState(true);
+  const [pipelineDataSource, setPipelineDataSource] = useState<"db" | "memory">("memory");
   const [expandedPipeline, setExpandedPipeline] = useState<Set<string>>(new Set());
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [notesText, setNotesText] = useState("");
 
   // (Vendor search now handled by VendorSearch component)
 
-  // Projects tab state
-  const [projects, setProjects] = useState<Project[]>(getAllProjects());
+  // Projects tab state - DB-first with in-memory fallback
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [projectsDataSource, setProjectsDataSource] = useState<"db" | "memory">("memory");
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
   const prevProfileIdRef = useRef<string | null>(null);
   const discoveredGrantsRef = useRef<DiscoveredGrant[]>([]);
   discoveredGrantsRef.current = discoveredGrants;
+
+  // Fetch pipeline grants from API
+  const fetchPipelineFromDB = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pipeline", {
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("Failed to fetch pipeline");
+      const data = await res.json();
+      if (data.grants && data.grants.length > 0) {
+        setPipelineGrants(data.grants);
+        setPipelineDataSource("db");
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("[Grants] Pipeline DB fetch error:", error);
+      return false;
+    }
+  }, [tenantHeaders]);
+
+  // Fetch projects from API
+  const fetchProjectsFromDB = useCallback(async () => {
+    try {
+      const res = await fetch("/api/projects", {
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      const data = await res.json();
+      if (data.projects && data.projects.length > 0) {
+        setProjects(data.projects);
+        setProjectsDataSource("db");
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("[Grants] Projects DB fetch error:", error);
+      return false;
+    }
+  }, [tenantHeaders]);
+
+  // Load data on mount and when tenant changes
+  useEffect(() => {
+    if (tenant.isLoading) return;
+
+    const loadData = async () => {
+      setPipelineLoading(true);
+      setProjectsLoading(true);
+
+      // Load pipeline
+      const pipelineSuccess = await fetchPipelineFromDB();
+      if (!pipelineSuccess) {
+        setPipelineGrants(getInMemoryPipelineGrants());
+        setPipelineDataSource("memory");
+      }
+      setPipelineLoading(false);
+
+      // Load projects
+      const projectsSuccess = await fetchProjectsFromDB();
+      if (!projectsSuccess) {
+        initializeProjectsForProfile(profileId);
+        setProjects(getInMemoryProjects());
+        setProjectsDataSource("memory");
+      }
+      setProjectsLoading(false);
+    };
+
+    loadData();
+  }, [tenant.isLoading, tenant.environment, tenant.portId, profileId, fetchPipelineFromDB, fetchProjectsFromDB]);
+
+  // Helper functions that use the appropriate data source
+  const isInPipeline = useCallback((grantId: string) => {
+    if (pipelineDataSource === "db") {
+      return pipelineGrants.some(g => g.id === grantId);
+    }
+    return isInPipelineLocal(grantId);
+  }, [pipelineGrants, pipelineDataSource]);
+
+  const getStageCount = useCallback((stage: PipelineStage) => {
+    if (pipelineDataSource === "db") {
+      return pipelineGrants.filter(g => g.stage === stage).length;
+    }
+    return getStageCountLocal(stage);
+  }, [pipelineGrants, pipelineDataSource]);
+
+  const getAllPipelineGrants = useCallback(() => {
+    if (pipelineDataSource === "db") {
+      return pipelineGrants;
+    }
+    return getInMemoryPipelineGrants();
+  }, [pipelineGrants, pipelineDataSource]);
+
+  const getAllProjects = useCallback(() => {
+    if (projectsDataSource === "db") {
+      return projects;
+    }
+    return getInMemoryProjects();
+  }, [projects, projectsDataSource]);
 
   // Score grants (embedding + rules) for the active Client Profile
   const scoreGrants = useCallback(async (grants: DiscoveredGrant[]) => {
@@ -308,7 +417,7 @@ function UnifiedGrantsDashboard() {
         console.log("[Grant Search] Cache miss, fetching from API...");
         const res = await fetch("/api/grants-search-enhanced", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
           body: JSON.stringify(requestPayload),
         });
 
@@ -392,9 +501,10 @@ function UnifiedGrantsDashboard() {
     }
   }
 
-  // Add grant to pipeline
-  function handleAddToPipeline(grant: DiscoveredGrant) {
-    const pipelineGrant = addToPipeline({
+  // Add grant to pipeline - persists to DB if available, falls back to in-memory
+  async function handleAddToPipeline(grant: DiscoveredGrant) {
+    // Create the pipeline grant object
+    const newPipelineGrant: PipelineGrant = {
       id: grant.id,
       opportunityNumber: grant.opportunityNumber,
       title: grant.title,
@@ -411,14 +521,63 @@ function UnifiedGrantsDashboard() {
       contactName: grant.contactName,
       contactEmail: grant.contactEmail,
       contactPhone: grant.contactPhone,
-    });
+      stage: "eligible",
+      addedAt: new Date().toISOString(),
+      notes: "",
+    };
 
-    setPipelineGrants([...getAllPipelineGrants()]);
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => [...prev, newPipelineGrant]);
+    } else {
+      // Update in-memory store for memory-sourced data
+      addToPipelineLocal(newPipelineGrant);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
     setActiveTab("pipeline");
+
+    // Persist to DB in background (non-blocking)
+    // Include full grant data so it gets stored in DemoDiscoveredGrant
+    try {
+      await fetch("/api/pipeline", {
+        method: "POST",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grantId: grant.id,
+          portProfileId: profileId,
+          stage: "eligible",
+          grant: {
+            opportunityNumber: grant.opportunityNumber,
+            title: grant.title,
+            agency: grant.agency,
+            agencyCode: grant.agencyCode,
+            description: grant.description,
+            awardFloor: grant.awardFloor,
+            awardCeiling: grant.awardCeiling,
+            totalFunding: grant.totalFunding,
+            closeDate: grant.closeDate,
+            postDate: grant.postDate,
+            status: grant.status,
+            applicationUrl: grant.applicationUrl,
+            eligibility: grant.eligibility,
+            fundingCategories: grant.fundingCategories,
+            fundingInstruments: grant.fundingInstruments,
+            costSharing: grant.costSharing,
+            alnNumbers: grant.alnNumbers,
+            contactName: grant.contactName,
+            contactEmail: grant.contactEmail,
+            contactPhone: grant.contactPhone,
+          },
+        }),
+      });
+    } catch (error) {
+      console.error("[Pipeline] Failed to persist to DB:", error);
+    }
   }
 
   // Move grant between pipeline stages
-  function handleMoveStage(grant: PipelineGrant, direction: "forward" | "backward") {
+  async function handleMoveStage(grant: PipelineGrant, direction: "forward" | "backward") {
     const stages: PipelineStage[] = ["eligible", "applied", "under_review", "awarded", "rejected"];
     const currentIndex = stages.indexOf(grant.stage);
 
@@ -431,24 +590,92 @@ function UnifiedGrantsDashboard() {
 
     if (newIndex >= 0 && newIndex < stages.length) {
       const newStage = stages[newIndex];
-      moveGrantToStage(grant.id, newStage);
-      // Force re-render with a new array reference
-      setPipelineGrants([...getAllPipelineGrants()]);
+
+      // Optimistic update - update state immediately based on data source
+      if (pipelineDataSource === "db") {
+        // Update React state directly for DB-sourced data
+        setPipelineGrants(prev => prev.map(g =>
+          g.id === grant.id ? { ...g, stage: newStage } : g
+        ));
+      } else {
+        // Update in-memory store for memory-sourced data
+        moveGrantToStageLocal(grant.id, newStage);
+        setPipelineGrants([...getInMemoryPipelineGrants()]);
+      }
+
+      // Persist to DB in background
+      try {
+        await fetch("/api/pipeline", {
+          method: "PUT",
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            grantId: grant.id,
+            action: "move",
+            stage: newStage,
+          }),
+        });
+      } catch (error) {
+        console.error("[Pipeline] Failed to persist stage move:", error);
+      }
     }
   }
 
   // Save notes for a grant
-  function handleSaveNotes(grantId: string) {
-    updateGrantNotes(grantId, notesText);
-    setPipelineGrants([...getAllPipelineGrants()]);
+  async function handleSaveNotes(grantId: string) {
+    const savedNotes = notesText;
+
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => prev.map(g =>
+        g.id === grantId ? { ...g, notes: savedNotes } : g
+      ));
+    } else {
+      // Update in-memory store for memory-sourced data
+      updateGrantNotesLocal(grantId, savedNotes);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
+
     setEditingNotes(null);
     setNotesText("");
+
+    // Persist to DB in background
+    try {
+      await fetch("/api/pipeline", {
+        method: "PUT",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grantId,
+          action: "notes",
+          notes: savedNotes,
+        }),
+      });
+    } catch (error) {
+      console.error("[Pipeline] Failed to persist notes:", error);
+    }
   }
 
   // Remove grant from pipeline
-  function handleRemoveFromPipeline(grantId: string) {
-    removeFromPipeline(grantId);
-    setPipelineGrants([...getAllPipelineGrants()]);
+  async function handleRemoveFromPipeline(grantId: string) {
+    // Optimistic update - update state immediately based on data source
+    if (pipelineDataSource === "db") {
+      // Update React state directly for DB-sourced data
+      setPipelineGrants(prev => prev.filter(g => g.id !== grantId));
+    } else {
+      // Update in-memory store for memory-sourced data
+      removeFromPipelineLocal(grantId);
+      setPipelineGrants([...getInMemoryPipelineGrants()]);
+    }
+
+    // Persist to DB in background
+    try {
+      await fetch(`/api/pipeline?grantId=${encodeURIComponent(grantId)}`, {
+        method: "DELETE",
+        headers: { ...tenantHeaders },
+      });
+    } catch (error) {
+      console.error("[Pipeline] Failed to persist removal:", error);
+    }
   }
 
   // Draft Grant - navigate to Grant Intelligence page
@@ -1594,11 +1821,22 @@ function UnifiedGrantsDashboard() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive"
-                              onClick={(e) => {
+                              onClick={async (e) => {
                                 e.stopPropagation();
                                 if (confirm(`Delete project "${project.name}"?`)) {
-                                  deleteProject(project.id);
-                                  setProjects([...getAllProjects()]);
+                                  // Update local state immediately (filter from current state)
+                                  deleteProjectLocal(project.id);
+                                  setProjects((prev) => prev.filter((p) => p.id !== project.id));
+
+                                  // Persist to DB in background
+                                  try {
+                                    await fetch(`/api/projects?id=${encodeURIComponent(project.id)}`, {
+                                      method: "DELETE",
+                                      headers: tenantHeaders,
+                                    });
+                                  } catch (error) {
+                                    console.error("[Projects] Failed to persist deletion:", error);
+                                  }
                                 }
                               }}
                             >
@@ -1732,20 +1970,60 @@ function UnifiedGrantsDashboard() {
                 project={editingProject}
                 onSave={async (projectData) => {
                   if (editingProject) {
-                    updateProject(editingProject.id, projectData);
-                  } else {
-                    const created = createProject(projectData);
+                    // Update existing project in local state
+                    updateProjectLocal(editingProject.id, projectData);
+                    setProjects((prev) =>
+                      prev.map((p) =>
+                        p.id === editingProject.id ? { ...p, ...projectData } : p
+                      )
+                    );
+
+                    // Persist to DB in background
                     try {
-                      await fetch("/api/embed-project", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ ...created, profileId }),
+                      await fetch("/api/projects", {
+                        method: "PUT",
+                        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: editingProject.id, ...projectData }),
                       });
-                    } catch {
-                      // Non-blocking: embed failed, scoring will use project without embedding
+                    } catch (error) {
+                      console.error("[Projects] Failed to persist update:", error);
+                    }
+                  } else {
+                    // Create new project
+                    const created = createProjectLocal(projectData);
+
+                    // Add to current projects state (preserving DB-loaded projects)
+                    setProjects((prev) => [...prev, created]);
+
+                    // Persist to DB and generate embedding in background
+                    try {
+                      // First create in DB
+                      const res = await fetch("/api/projects", {
+                        method: "POST",
+                        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+                        body: JSON.stringify({ ...projectData, portProfileId: profileId }),
+                      });
+
+                      if (res.ok) {
+                        const dbProject = await res.json();
+                        // Update local state with DB-assigned ID if different
+                        if (dbProject.id && dbProject.id !== created.id) {
+                          setProjects((prev) =>
+                            prev.map((p) => (p.id === created.id ? { ...p, id: dbProject.id } : p))
+                          );
+                        }
+
+                        // Then generate embedding
+                        await fetch("/api/embed-project", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ ...dbProject, profileId }),
+                        });
+                      }
+                    } catch (error) {
+                      console.error("[Projects] Failed to persist:", error);
                     }
                   }
-                  setProjects([...getAllProjects()]);
                   setShowProjectForm(false);
                   setEditingProject(undefined);
                 }}

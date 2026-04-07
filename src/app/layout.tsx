@@ -4,6 +4,7 @@ import { GeistMono } from "geist/font/mono";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ProfileProvider } from "@/components/profile-provider";
+import { TenantProvider } from "@/contexts/tenant-context";
 import AppLayout from "@/components/app-layout";
 import "./globals.css";
 
@@ -24,11 +25,13 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <ThemeProvider>
-          <ProfileProvider>
-            <TooltipProvider>
-              <AppLayout>{children}</AppLayout>
-            </TooltipProvider>
-          </ProfileProvider>
+          <TenantProvider>
+            <ProfileProvider>
+              <TooltipProvider>
+                <AppLayout>{children}</AppLayout>
+              </TooltipProvider>
+            </ProfileProvider>
+          </TenantProvider>
         </ThemeProvider>
       </body>
     </html>

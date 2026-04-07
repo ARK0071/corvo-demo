@@ -4,11 +4,32 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Settings, Key, Database, Bell, Shield, Building2 } from "lucide-react";
+import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe } from "lucide-react";
 import { useProfile } from "@/components/profile-provider";
+import { useTenant } from "@/contexts/tenant-context";
+import type { Environment } from "@/lib/db/tenant-config";
+
+const ENVIRONMENT_INFO: Record<Environment, { label: string; description: string; color: string }> = {
+  test: {
+    label: "Test",
+    description: "Shared test environment for development. EC2 embeddings (2560 dims).",
+    color: "bg-yellow-500/10 text-yellow-600",
+  },
+  demo: {
+    label: "Demo",
+    description: "Demo environment for client presentations. OpenAI embeddings (1536 dims). Data isolated by port.",
+    color: "bg-blue-500/10 text-blue-600",
+  },
+  production: {
+    label: "Production",
+    description: "Live production environment. EC2 embeddings (2560 dims). Isolated tables per client.",
+    color: "bg-green-500/10 text-green-600",
+  },
+};
 
 export default function SettingsPage() {
   const { profile, profileId, setProfileId, allProfiles } = useProfile();
+  const tenant = useTenant();
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -58,6 +79,80 @@ export default function SettingsPage() {
               ))}
             </div>
           </Card>
+
+          {/* Environment Selector */}
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Server className="h-4 w-4 text-muted-foreground" />
+              <h2 className="text-sm font-semibold">Environment</h2>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              Select the database environment. Demo uses OpenAI embeddings for presentations. Test and production use EC2 Qwen3 embeddings.
+            </p>
+            <div className="space-y-2">
+              {(["test", "demo", "production"] as Environment[]).map((env) => {
+                const info = ENVIRONMENT_INFO[env];
+                return (
+                  <button
+                    key={env}
+                    onClick={() => tenant.setEnvironment(env)}
+                    className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                      env === tenant.environment
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{info.label}</span>
+                        {env === tenant.environment && (
+                          <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{info.description}</span>
+                    </div>
+                    <Badge className={`${info.color} text-[10px]`}>{tenant.embeddingDimensions} dims</Badge>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Port Selector (for Demo environment) */}
+          {tenant.environment === "demo" && (
+            <Card className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Globe className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">Demo Port</h2>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Select the port for this demo session. Data is isolated by port ID in the demo environment.
+              </p>
+              <div className="space-y-2">
+                {tenant.availablePorts.map((port) => (
+                  <button
+                    key={port.id}
+                    onClick={() => tenant.setPort(port.id)}
+                    className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                      port.id === tenant.portId
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{port.name}</span>
+                        {port.id === tenant.portId && (
+                          <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{port.slug}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Active Profile Details */}
           <Card className="p-5">
@@ -138,12 +233,30 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm">Database</span>
-                <span className="text-sm text-muted-foreground">Sample Dataset (in-memory)</span>
+                <span className="text-sm text-muted-foreground">AWS RDS PostgreSQL</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm">Last Sync</span>
-                <span className="text-sm text-muted-foreground">Real-time</span>
+                <span className="text-sm">Environment</span>
+                <Badge className={ENVIRONMENT_INFO[tenant.environment].color + " text-[10px]"}>
+                  {ENVIRONMENT_INFO[tenant.environment].label}
+                </Badge>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Embedding Service</span>
+                <span className="text-sm text-muted-foreground">
+                  {tenant.embeddingService === "openai" ? "OpenAI text-embedding-3-small" : "EC2 Qwen3"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Embedding Dimensions</span>
+                <span className="text-sm text-muted-foreground">{tenant.embeddingDimensions}</span>
+              </div>
+              {tenant.environment === "demo" && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Port ID</span>
+                  <span className="text-sm text-muted-foreground">{tenant.portId}</span>
+                </div>
+              )}
             </div>
           </Card>
 

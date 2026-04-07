@@ -1,14 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { searchGrants, type GrantsSearchParams } from "@/lib/grants-gov";
+import { searchGrants as searchGrantsGov, type GrantsSearchParams } from "@/lib/grants-gov";
 import { enhanceUSDOTGrant } from "@/lib/usdot-grants";
+import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import * as DemoGrants from "@/lib/db/repositories/demo-grants";
 
 /**
  * POST /api/grants-search-enhanced
  *
- * Grant search via Grants.gov search2. `enhanceUSDOTGrant` enriches known DOT program titles when applicable.
+ * DB-first grant search with Grants.gov fallback.
+ * 1. First queries the database for cached grants
+ * 2. If DB has results, returns those
+ * 3. Otherwise falls back to Grants.gov API and persists results
  */
 export async function POST(request: NextRequest) {
   try {
+    // Set tenant config from request headers
+    setTenantConfigFromHeaders(request.headers);
+    const tenantConfig = getTenantConfig();
+
     const body = await request.json();
 
     const params: GrantsSearchParams = {};
@@ -76,6 +85,49 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Try DB-first for demo environment
+    if (tenantConfig.environment === "demo" && process.env.DATABASE_URL) {
+      try {
+        const dbResult = await DemoGrants.searchGrants({
+          keyword: params.keyword,
+          status: params.oppStatuses,
+          agency: params.agency || (params.agencies?.split("|")[0]),
+          limit: params.rows,
+          offset: params.startRecordNum,
+        });
+
+        // If DB has results, return them
+        if (dbResult.grants.length > 0) {
+          console.log(`[grants-search-enhanced] Returning ${dbResult.grants.length} grants from DB`);
+
+          // Enhance grants and sort
+          const grants = dbResult.grants.map((g) => enhanceUSDOTGrant(g));
+          grants.sort((a, b) => {
+            const aIsDOT = a.agencyCode === "DOT";
+            const bIsDOT = b.agencyCode === "DOT";
+            if (aIsDOT && !bIsDOT) return -1;
+            if (!aIsDOT && bIsDOT) return 1;
+            return (b.awardCeiling || 0) - (a.awardCeiling || 0);
+          });
+
+          return NextResponse.json(
+            {
+              grants,
+              totalCount: dbResult.total,
+              sources: {
+                database: true,
+                grants_gov: false,
+              },
+            },
+            { status: 200 }
+          );
+        }
+      } catch (dbError) {
+        console.error("[grants-search-enhanced] DB query failed, falling back to Grants.gov:", dbError);
+      }
+    }
+
+    // Fall back to Grants.gov API
     const hasStructuredFilters = Boolean(
       params.oppNum ||
         params.aln ||
@@ -92,28 +144,43 @@ export async function POST(request: NextRequest) {
         ? undefined
         : "port OR maritime OR transportation OR infrastructure OR seaport");
 
-    const { grants: rawGrants, totalCount } = await searchGrants({
+    const { grants: rawGrants, totalCount } = await searchGrantsGov({
       ...params,
       keyword: keywordForSearch,
     });
 
     const grants = rawGrants.map((g) => enhanceUSDOTGrant(g));
 
-    if (grants.length > 0 && process.env.RDS_HOST) {
-      import("@/lib/db/repositories")
-        .then(async ({ ActiveGrants }) => {
-          const { embedAndStoreGrants } = await import("@/lib/db/embedding-service");
-          const result = await ActiveGrants.upsertGrants(grants);
-          console.log(
-            `[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants`
-          );
-          if (result.created > 0 || result.updated > 0) {
-            await embedAndStoreGrants(grants);
-          }
-        })
-        .catch((err: unknown) => {
-          console.error("Failed to persist grants to database:", err);
-        });
+    // Persist to DB in background (non-blocking)
+    if (grants.length > 0 && process.env.DATABASE_URL) {
+      // Use demo grants for demo environment
+      if (tenantConfig.environment === "demo") {
+        DemoGrants.upsertGrants(grants)
+          .then((result) => {
+            console.log(
+              `[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants to demo DB`
+            );
+          })
+          .catch((err: unknown) => {
+            console.error("Failed to persist grants to demo database:", err);
+          });
+      } else if (process.env.RDS_HOST) {
+        // Use production tables for non-demo environments
+        import("@/lib/db/repositories")
+          .then(async ({ ActiveGrants }) => {
+            const { embedAndStoreGrants } = await import("@/lib/db/embedding-service");
+            const result = await ActiveGrants.upsertGrants(grants);
+            console.log(
+              `[grants-search-enhanced] Persisted ${result.created} new, ${result.updated} updated grants`
+            );
+            if (result.created > 0 || result.updated > 0) {
+              await embedAndStoreGrants(grants);
+            }
+          })
+          .catch((err: unknown) => {
+            console.error("Failed to persist grants to database:", err);
+          });
+      }
     }
 
     grants.sort((a, b) => {
@@ -129,6 +196,7 @@ export async function POST(request: NextRequest) {
         grants,
         totalCount: Math.max(totalCount, grants.length),
         sources: {
+          database: false,
           grants_gov: true,
         },
       },

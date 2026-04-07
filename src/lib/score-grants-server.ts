@@ -1,5 +1,10 @@
 /**
  * Server-side grant scoring. Used by /api/score-grants and grant-intelligence tools.
+ *
+ * Supports hybrid scoring:
+ * - DB-first: Uses pgvector embeddings from database when available
+ * - File-based fallback: Uses pre-computed JSON embeddings
+ * - OpenAI fallback: Generates embeddings on-the-fly
  */
 
 import * as fs from "fs";
@@ -24,6 +29,89 @@ import {
 import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
 import { initializeProjectsForProfile } from "@/data/projects";
 import domainEmbeddingsData from "@/data/embeddings/funding-domain-embeddings.json";
+import { getTenantConfig } from "@/lib/db/tenant-config";
+
+// DB vector similarity cache (grant ID -> profile similarity score)
+const dbVectorSimilarityCache = new Map<string, number>();
+
+/**
+ * Fetch vector similarity scores from database for grants with embeddings.
+ * Uses pgvector cosine similarity between grant embeddings and profile embedding.
+ */
+async function getDBVectorSimilarities(
+  grantIds: string[],
+  profileId: string
+): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+
+  // Check if we have DATABASE_URL configured
+  if (!process.env.DATABASE_URL) {
+    return result;
+  }
+
+  try {
+    // Dynamic import to avoid loading DB client when not needed
+    const { prisma } = await import("@/lib/db/client");
+    const tenantConfig = getTenantConfig();
+
+    // Determine which tables to use based on environment
+    const grantsTable =
+      tenantConfig.environment === "demo"
+        ? "demo_discovered_grants"
+        : "discovered_grants";
+    const profilesTable =
+      tenantConfig.environment === "demo"
+        ? "demo_port_profiles"
+        : "port_profiles";
+
+    // Build query for batch similarity computation
+    // This query computes cosine similarity between grant embeddings and profile embedding
+    const similarities = await prisma.$queryRawUnsafe<
+      Array<{ grant_id: string; similarity: number }>
+    >(
+      `
+      SELECT
+        g.id as grant_id,
+        1 - (g.grant_embedding <=> p.profile_embedding) as similarity
+      FROM ${grantsTable} g
+      CROSS JOIN ${profilesTable} p
+      WHERE g.id = ANY($1::text[])
+        AND g.grant_embedding IS NOT NULL
+        AND p.profile_embedding IS NOT NULL
+        AND p.slug = $2
+      `,
+      grantIds,
+      profileId
+    );
+
+    for (const row of similarities) {
+      // Convert cosine similarity (0-1) to score (0-100)
+      const score = Math.round(((row.similarity + 1) / 2) * 100);
+      result.set(row.grant_id, score);
+      dbVectorSimilarityCache.set(`${row.grant_id}:${profileId}`, score);
+    }
+
+    console.log(
+      `[score-grants] DB vector similarity: found ${result.size}/${grantIds.length} grants with embeddings`
+    );
+  } catch (error) {
+    console.error("[score-grants] DB vector similarity query failed:", error);
+    // Return empty result - will fall back to OpenAI/file-based embeddings
+  }
+
+  return result;
+}
+
+/**
+ * Get cached DB similarity score for a grant-profile pair
+ */
+function getCachedDBSimilarity(
+  grantId: string,
+  profileId: string
+): number | null {
+  const cached = dbVectorSimilarityCache.get(`${grantId}:${profileId}`);
+  return cached !== undefined ? cached : null;
+}
 
 interface ProjectEmbedding {
   name: string;
@@ -116,15 +204,29 @@ export async function scoreGrantsServer(
   const projectCount = Object.values(projectEmbeddings).filter((p) => hasValidVector(p.vector)).length;
   const domainCount = Object.values(domainEmbeddings).filter((d) => hasValidVector(d.vector)).length;
 
+  // Check if DB embeddings are available
+  const hasDatabase = !!process.env.DATABASE_URL;
+
   console.log("[score-grants] Config:", {
     profileId: resolvedProfileId,
     openaiKey: hasOpenAI ? "set" : "NOT SET",
+    database: hasDatabase ? "configured" : "NOT SET",
     profileEmbedding: profileEmbedding ? (profileVecValid ? "valid" : "empty vector") : "missing file",
     projectEmbeddings: `${projectCount}/${Object.keys(projectEmbeddings).length} valid`,
     domainEmbeddings: `${domainCount}/${Object.keys(domainEmbeddings).length} valid`,
   });
 
   const filtered = grants.filter((g) => !isHardNegativeGrant(g));
+
+  // Try DB-first: fetch vector similarities from database if available
+  let dbSimilarities = new Map<string, number>();
+  if (hasDatabase) {
+    dbSimilarities = await getDBVectorSimilarities(
+      filtered.map((g) => g.id),
+      resolvedProfileId
+    );
+  }
+
   const texts = filtered.map((g) => buildGrantEmbeddingText(g));
 
   let grantVectors: number[][] = [];
@@ -168,10 +270,21 @@ export async function scoreGrantsServer(
     const eligibility = scoreEligibility(grant, profile);
     const impactScore = scoreImpact(grant, profile);
 
+    // Profile alignment: DB similarity takes precedence, then file-based, then OpenAI
     let profileAlignmentScore = 0;
-    if (hasValidVector(grantVec) && profileEmbedding && hasValidVector(profileEmbedding.vector)) {
+    let profileAlignmentSource: "db" | "file" | "openai" | "none" = "none";
+
+    // 1. Try DB-stored vector similarity first
+    const dbSimilarity = dbSimilarities.get(grant.id);
+    if (dbSimilarity !== undefined) {
+      profileAlignmentScore = dbSimilarity;
+      profileAlignmentSource = "db";
+    }
+    // 2. Fall back to file-based/OpenAI embeddings
+    else if (hasValidVector(grantVec) && profileEmbedding && hasValidVector(profileEmbedding.vector)) {
       const sim = cosineSimilarity(grantVec, profileEmbedding.vector);
       profileAlignmentScore = similarityToScore(sim);
+      profileAlignmentSource = hasOpenAI ? "openai" : "file";
     }
 
     const topProjectMatches: TopProjectMatch[] = [];
@@ -229,18 +342,21 @@ export async function scoreGrantsServer(
     if (grant.costSharing) keyRequirements.push("Local cost-share required");
     if (grant.closeDate) keyRequirements.push(`Application deadline: ${grant.closeDate}`);
 
+    // Embedding scores are available if we have DB similarity OR valid OpenAI/file-based embeddings
     const embeddingScoresAvailable =
-      hasOpenAI &&
-      hasValidVector(grantVec) &&
-      (hasValidVector(profileEmbedding?.vector ?? []) ||
-        Object.values(projectEmbeddings).some((p) => hasValidVector(p.vector)) ||
-        Object.values(domainEmbeddings).some((d) => hasValidVector(d.vector)));
+      profileAlignmentSource !== "none" ||
+      (hasOpenAI &&
+        hasValidVector(grantVec) &&
+        (hasValidVector(profileEmbedding?.vector ?? []) ||
+          Object.values(projectEmbeddings).some((p) => hasValidVector(p.vector)) ||
+          Object.values(domainEmbeddings).some((d) => hasValidVector(d.vector))));
 
     if (i === 0) {
       console.log("[score-grants] First grant similarity sample:", {
         grantId: grant.id,
         grantTitle: grant.title.length > 50 ? grant.title.slice(0, 50) + "..." : grant.title,
         profileAlignmentScore,
+        profileAlignmentSource,
         projectSimilarityScore,
         topProject: topProjectMatches[0]?.projectName,
         topDomain: topDomainMatches[0]?.domainName,
@@ -272,7 +388,15 @@ export async function scoreGrantsServer(
   scores.sort((a, b) => b.overallScore - a.overallScore);
 
   const withEmbeddings = scores.filter((s) => s.embeddingScoresAvailable).length;
-  console.log("[score-grants] Done:", scores.length, "scored,", withEmbeddings, "with embedding-based similarity");
+  const withDBSimilarity = dbSimilarities.size;
+  console.log(
+    "[score-grants] Done:",
+    scores.length,
+    "scored,",
+    withEmbeddings,
+    "with embedding-based similarity",
+    withDBSimilarity > 0 ? `(${withDBSimilarity} from DB)` : "(all from OpenAI/file)"
+  );
 
   return scores;
 }
