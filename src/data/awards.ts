@@ -102,7 +102,56 @@ export interface Award {
   status: AwardStatus;
   pipelineGrantId?: string;
   projectIds: string[];
+  complianceBrief?: ComplianceBrief;
+  complianceBriefAt?: string;
   createdAt: string;
+}
+
+// ─── Compliance Brief ───
+// AI-generated structured summary of an award's compliance obligations.
+// Generated once at award intake from program metadata; downstream rules
+// (expense scanner, report pre-submission, prior-approval predictor) read
+// from this brief instead of re-deriving terms each time.
+
+export interface ComplianceBrief {
+  // 2 CFR 200 cost principles applicable to this award
+  applicableCostPrinciples: string[]; // e.g. ["2 CFR 200 Subpart E", "2 CFR 200.430 - Compensation"]
+  // Categories of expenses likely to be unallowable for this specific program
+  unallowableCategories: { category: string; rationale: string; cfr: string }[];
+  // Items that need agency prior approval before charging (2 CFR 200.308)
+  priorApprovalTriggers: { trigger: string; cfr: string; threshold?: string }[];
+  // Indirect cost cap if any
+  indirectCostCap?: { rate: number; basis: string; note: string };
+  // Procurement thresholds (2 CFR 200.320)
+  procurementThresholds: {
+    microPurchase: number; // <= micro: no quotes required
+    simplifiedAcquisition: number; // <= SAT: simplified procedures
+    note: string;
+  };
+  // Match / cost share rules
+  matchRules: {
+    required: boolean;
+    percentage: number;
+    allowableSources: string[]; // e.g. ["cash", "third-party in-kind"]
+    documentationRequired: string[];
+  };
+  // Reporting obligations beyond what's already in the scheduled reports
+  reportingObligations: { type: string; cadence: string; cfr: string }[];
+  // Period of performance constraints (e.g., pre-award costs allowed?)
+  periodOfPerformance: {
+    start: string;
+    end: string;
+    preAwardCostsAllowed: boolean;
+    noCostExtensionEligible: boolean;
+    note: string;
+  };
+  // Key program-specific terms the admin should know
+  programSpecificTerms: { term: string; description: string }[];
+  // Free-text caveats — things the AI is uncertain about
+  caveats: string[];
+  // Model + version metadata
+  generatedBy: string;
+  generatedAt: string;
 }
 
 // ─── 2 CFR 200 Unallowable Cost Rules Engine ───
@@ -126,11 +175,55 @@ const UNALLOWABLE_COST_RULES: CostRule[] = [
   { id: "goods_services_personal", pattern: /\b(personal\s*use|personal\s*expense|gift\s*card|employee\s*gift)\b/i, category: "Personal Use", description: "Goods or services for personal use are unallowable under 2 CFR 200.445", severity: "block" },
 ];
 
+/**
+ * Normalize a description for the unallowable-cost regex pass.
+ *
+ * Without this, an attacker can defeat the regex by:
+ *   - Inserting zero-width / formatting characters: "alc<U+200B>ohol"
+ *   - Using fullwidth or Cyrillic homoglyphs: "ａｌｃｏｈｏｌ", "аlcohol"
+ *   - Mixing in soft hyphens: "al\u00ADcohol"
+ *   - Slipping in combining marks: "a\u0301lcohol"
+ *
+ * The original detection in this file would silently let any of those
+ * past while a human reader sees the same word. Normalization steps:
+ *   1. NFKC compatibility decomposition + recomposition collapses
+ *      fullwidth, ligatures, and many lookalike forms into ASCII.
+ *   2. Strip combining marks left over after NFKC.
+ *   3. Strip zero-width / format characters that don't render.
+ *   4. Map a small table of confusable Cyrillic / Greek letters to
+ *      Latin equivalents (NFKC doesn't catch these — they are distinct
+ *      code points with no compatibility decomposition).
+ */
+const ZERO_WIDTH_OR_FORMAT = /[\u00AD\u180E\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u206F\uFEFF]/g;
+const COMBINING_MARKS = /\p{M}/gu;
+const CONFUSABLE_MAP: Record<string, string> = {
+  // Cyrillic → Latin
+  "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c", "\u0445": "x", "\u0443": "y", "\u0456": "i", "\u0458": "j",
+  "\u0410": "A", "\u0415": "E", "\u041e": "O", "\u0420": "P", "\u0421": "C", "\u0425": "X", "\u0423": "Y", "\u0406": "I", "\u0408": "J",
+  // Greek → Latin
+  "\u03bf": "o", "\u03b1": "a", "\u03b9": "i", "\u03c1": "p",
+  "\u039f": "O", "\u0391": "A", "\u0399": "I", "\u03a1": "P",
+};
+
+function normalizeForRuleMatch(input: string): string {
+  let s = input.normalize("NFKC");
+  s = s.replace(ZERO_WIDTH_OR_FORMAT, "");
+  s = s.replace(COMBINING_MARKS, "");
+  s = s.replace(/[\u0400-\u04FF\u0370-\u03FF]/g, (ch) => CONFUSABLE_MAP[ch] ?? ch);
+  return s;
+}
+
 export function checkExpenseAllowability(description: string): { allowed: boolean; violations: { rule: CostRule; match: string }[] } {
   const violations: { rule: CostRule; match: string }[] = [];
 
+  // Run rules against the normalized form so homoglyph / zero-width
+  // tricks cannot bypass the deterministic rule pass. We report the
+  // matched substring from the *normalized* string, since reconstructing
+  // the original-string slice across NFKC boundaries is unreliable.
+  const normalized = normalizeForRuleMatch(description);
+
   for (const rule of UNALLOWABLE_COST_RULES) {
-    const match = description.match(rule.pattern);
+    const match = normalized.match(rule.pattern);
     if (match) {
       violations.push({ rule, match: match[0] });
     }

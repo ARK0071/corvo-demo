@@ -22,6 +22,7 @@ import type {
   DrawdownStatus,
   BudgetModStatus,
   ExpenseStatus,
+  ComplianceBrief,
 } from "@/data/awards";
 
 // Get current port ID from tenant config
@@ -137,6 +138,10 @@ function toAward(award: AwardWithRelations): Award {
   const matchPercentage = award.matchPercentage;
   const required = Number(award.totalAmount) * (matchPercentage / (100 - matchPercentage));
 
+  // complianceBrief column may not exist on older DB clients yet — read defensively
+  const briefRaw = (award as unknown as { complianceBrief?: unknown }).complianceBrief;
+  const briefAt = (award as unknown as { complianceBriefAt?: Date | null }).complianceBriefAt;
+
   return {
     id: award.id,
     fain: award.fain,
@@ -161,6 +166,8 @@ function toAward(award: AwardWithRelations): Award {
     status: award.status as AwardStatus,
     pipelineGrantId: award.pipelineGrantId || undefined,
     projectIds: (award.projectIds as string[]) || [],
+    complianceBrief: briefRaw ? (briefRaw as ComplianceBrief) : undefined,
+    complianceBriefAt: briefAt ? briefAt.toISOString() : undefined,
     createdAt: award.createdAt.toISOString(),
   };
 }
@@ -291,6 +298,51 @@ export async function updateAwardStatus(
   return toAward(award);
 }
 
+// ─── Compliance Brief Operations ───
+
+export async function getComplianceBrief(
+  awardId: string
+): Promise<ComplianceBrief | null> {
+  const portId = getPortId();
+  const award = await prisma.demoAward.findFirst({
+    where: { id: awardId, portId },
+    select: {
+      // Cast through unknown — column may not be in generated client until prisma generate is rerun
+      complianceBrief: true,
+    } as unknown as Record<string, true>,
+  });
+  if (!award) return null;
+  const brief = (award as unknown as { complianceBrief?: unknown }).complianceBrief;
+  return brief ? (brief as ComplianceBrief) : null;
+}
+
+export async function saveComplianceBrief(
+  awardId: string,
+  brief: ComplianceBrief
+): Promise<Award | null> {
+  const portId = getPortId();
+  const existing = await prisma.demoAward.findFirst({
+    where: { id: awardId, portId },
+  });
+  if (!existing) return null;
+
+  await prisma.demoAward.update({
+    where: { id: awardId },
+    // Cast — complianceBrief column added in latest schema; tolerate older client
+    data: {
+      complianceBrief: brief as unknown as Prisma.InputJsonValue,
+      complianceBriefAt: new Date(),
+    } as unknown as Prisma.DemoAwardUpdateInput,
+  });
+
+  // Re-fetch with relations so callers get a complete Award
+  const updated = await prisma.demoAward.findFirst({
+    where: { id: awardId, portId },
+    include: { budgetCategories: true, matchLedger: true },
+  });
+  return updated ? toAward(updated) : null;
+}
+
 // ─── Budget Category Operations ───
 
 export async function addBudgetCategory(
@@ -355,6 +407,37 @@ export async function getAllExpenses(): Promise<Expense[]> {
   return expenses.map(toExpense);
 }
 
+/**
+ * Log a new expense, atomically:
+ *   1. Verify the budget category exists, belongs to the award, and is in
+ *      this tenant.
+ *   2. Create the expense.
+ *   3. If the expense is not flagged, conditionally increment category.spent
+ *      using a single SQL UPDATE that requires `spent + amount <= ceiling`.
+ *      If zero rows are updated, the transaction rolls back with an
+ *      overspend error.
+ *
+ * Why a conditional update instead of read-then-write?
+ * Prisma's interactive `$transaction(async tx => …)` does NOT default to
+ * SERIALIZABLE — it uses Postgres's default isolation (READ COMMITTED). At
+ * READ COMMITTED, two concurrent transactions can each read the same
+ * `spent`, both pass an in-memory ceiling check, and both increment —
+ * letting category.spent climb past the ceiling. The conditional UPDATE
+ * forces the ceiling check into the same atomic statement as the write,
+ * which Postgres serializes per-row regardless of isolation level.
+ *
+ * Throws on validation failure with a message safe to surface to the API
+ * layer (the route handler should map to 400). Error messages avoid
+ * leaking ceiling/spent dollar amounts so unauthorized callers cannot
+ * probe budget state through error responses.
+ */
+export class ExpenseValidationError extends Error {
+  constructor(message: string, public code: "category_not_found" | "overspend" | "amount_invalid") {
+    super(message);
+    this.name = "ExpenseValidationError";
+  }
+}
+
 export async function logExpense(data: {
   awardId: string;
   categoryId: string;
@@ -370,53 +453,194 @@ export async function logExpense(data: {
 }): Promise<Expense> {
   const portId = getPortId();
 
-  const expense = await prisma.demoExpense.create({
-    data: {
-      portId,
-      awardId: data.awardId,
-      categoryId: data.categoryId,
-      date: parseDateRequired(data.date, "expense date"),
-      description: data.description,
-      vendor: data.vendor,
-      amount: data.amount,
-      status: data.status || "logged",
-      attachments: data.attachments || [],
-      flagReason: data.flagReason || null,
-      overrideJustification: data.overrideJustification || null,
-      allocations: data.allocations || null,
-    },
-  });
+  // Basic amount validation — defense in depth (the API should also validate)
+  if (!Number.isFinite(data.amount) || data.amount <= 0) {
+    throw new ExpenseValidationError(
+      "Amount must be a positive number",
+      "amount_invalid"
+    );
+  }
 
-  // Update category spent amount if not flagged
-  if ((data.status || "logged") !== "flagged") {
-    await prisma.demoBudgetCategory.update({
-      where: { id: data.categoryId },
+  const status = data.status || "logged";
+  const willCharge = status !== "flagged";
+
+  const expense = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // 1. Tenant- and award-scoped category lookup. We only need to confirm
+    //    existence here; the ceiling check is enforced atomically below.
+    const category = await tx.demoBudgetCategory.findFirst({
+      where: { id: data.categoryId, awardId: data.awardId, portId },
+      select: { id: true, name: true },
+    });
+    if (!category) {
+      throw new ExpenseValidationError(
+        "Budget category not found on this award",
+        "category_not_found"
+      );
+    }
+
+    // 2. Create the expense row
+    const created = await tx.demoExpense.create({
       data: {
-        spent: {
-          increment: data.amount,
-        },
+        portId,
+        awardId: data.awardId,
+        categoryId: data.categoryId,
+        date: parseDateRequired(data.date, "expense date"),
+        description: data.description,
+        vendor: data.vendor,
+        amount: data.amount,
+        status,
+        attachments: data.attachments || [],
+        flagReason: data.flagReason || null,
+        overrideJustification: data.overrideJustification || null,
+        allocations: data.allocations || null,
       },
     });
-  }
+
+    // 3. Conditionally bump spent. Postgres serializes the row update so
+    //    only one concurrent transaction can take a row from "fits under
+    //    ceiling" to "fits under ceiling minus this amount". A failed
+    //    conditional update aborts the whole transaction (rolling back
+    //    the create above), so we never end up with an expense without
+    //    its budget impact accounted for.
+    if (willCharge) {
+      const updated = await tx.$executeRaw`
+        UPDATE "demo_budget_categories"
+        SET "spent" = "spent" + ${data.amount}::numeric
+        WHERE "id" = ${data.categoryId}::uuid
+          AND "award_id" = ${data.awardId}::uuid
+          AND "port_id" = ${portId}
+          AND "spent" + ${data.amount}::numeric <= "ceiling"
+      `;
+      if (updated === 0) {
+        throw new ExpenseValidationError(
+          `Charging this expense would exceed the "${category.name}" budget category ceiling`,
+          "overspend"
+        );
+      }
+    }
+
+    return created;
+  });
 
   return toExpense(expense);
 }
 
-export async function updateExpenseStatus(
-  expenseId: string,
-  status: ExpenseStatus
-): Promise<Expense | null> {
+// Tenant-scoped single fetch — used by PUT handlers that need the current
+// status without leaking data from other expenses.
+export async function getExpenseById(expenseId: string): Promise<Expense | null> {
   const portId = getPortId();
-  const existing = await prisma.demoExpense.findFirst({
+  const expense = await prisma.demoExpense.findFirst({
     where: { id: expenseId, portId },
   });
-  if (!existing) return null;
+  return expense ? toExpense(expense) : null;
+}
 
-  const expense = await prisma.demoExpense.update({
-    where: { id: expenseId },
-    data: { status },
+/**
+ * Update an expense's status while keeping the parent budget category's
+ * `spent` counter consistent.
+ *
+ * Status semantics:
+ *   - "logged" / "approved" / "drawn"  → counts against category.spent
+ *   - "flagged"                        → does NOT count
+ *
+ * Crossing the flagged ↔ non-flagged boundary therefore has to bump or
+ * unbump the category counter atomically. The previous implementation
+ * just changed `status` and left the counter alone, so a flagged
+ * expense could be approved later without ever charging the budget —
+ * money silently went missing.
+ *
+ * On flagged → non-flagged we use the same conditional UPDATE pattern
+ * as logExpense so the ceiling is enforced atomically and concurrent
+ * status flips can't push the budget over.
+ */
+export class ExpenseStatusUpdateError extends Error {
+  constructor(message: string, public code: "overspend" | "race") {
+    super(message);
+    this.name = "ExpenseStatusUpdateError";
+  }
+}
+
+export async function updateExpenseStatus(
+  expenseId: string,
+  status: ExpenseStatus,
+  opts: { expectedFromStatus?: ExpenseStatus } = {}
+): Promise<Expense | null> {
+  const portId = getPortId();
+
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const existing = await tx.demoExpense.findFirst({
+      where: { id: expenseId, portId },
+      select: { id: true, status: true, amount: true, categoryId: true, awardId: true },
+    });
+    if (!existing) return null;
+
+    // TOCTOU guard: if the caller validated against a snapshot status,
+    // refuse the update unless the row still matches that snapshot.
+    // Without this, a request could be racing with another status flip
+    // and silently apply on top of an unexpected state.
+    if (opts.expectedFromStatus && existing.status !== opts.expectedFromStatus) {
+      throw new ExpenseStatusUpdateError(
+        "Expense status changed concurrently — please refresh and retry",
+        "race"
+      );
+    }
+
+    const wasCharging = existing.status !== "flagged";
+    const willCharge = status !== "flagged";
+    const amount = Number(existing.amount);
+
+    // Status unchanged or both sides charging / both sides not — no
+    // bookkeeping change needed beyond the status field itself.
+    if (wasCharging === willCharge) {
+      const updated = await tx.demoExpense.update({
+        where: { id: expenseId },
+        data: { status },
+      });
+      return updated;
+    }
+
+    if (!wasCharging && willCharge) {
+      // flagged → counted: conditionally bump spent, enforcing ceiling
+      const bumped = await tx.$executeRaw`
+        UPDATE "demo_budget_categories"
+        SET "spent" = "spent" + ${amount}::numeric
+        WHERE "id" = ${existing.categoryId}::uuid
+          AND "award_id" = ${existing.awardId}::uuid
+          AND "port_id" = ${portId}
+          AND "spent" + ${amount}::numeric <= "ceiling"
+      `;
+      if (bumped === 0) {
+        throw new ExpenseStatusUpdateError(
+          "Reclassifying this expense as charged would exceed the budget category ceiling",
+          "overspend"
+        );
+      }
+    } else {
+      // counted → flagged: refund the spent counter
+      const refunded = await tx.$executeRaw`
+        UPDATE "demo_budget_categories"
+        SET "spent" = GREATEST("spent" - ${amount}::numeric, 0)
+        WHERE "id" = ${existing.categoryId}::uuid
+          AND "award_id" = ${existing.awardId}::uuid
+          AND "port_id" = ${portId}
+      `;
+      if (refunded === 0) {
+        // Category vanished out from under us — should not happen
+        throw new ExpenseStatusUpdateError(
+          "Failed to update budget category for status change",
+          "race"
+        );
+      }
+    }
+
+    const updated = await tx.demoExpense.update({
+      where: { id: expenseId },
+      data: { status },
+    });
+    return updated;
   });
-  return toExpense(expense);
+
+  return result ? toExpense(result) : null;
 }
 
 export async function getEligibleExpensesForDrawdown(
@@ -504,6 +728,40 @@ export async function getAllDrawdowns(): Promise<DrawdownRequest[]> {
   return drawdowns.map(toDrawdownRequest);
 }
 
+// Tenant-scoped single fetch — used by PUT handlers that need the
+// current state without leaking other drawdowns or scanning the table.
+export async function getDrawdownById(id: string): Promise<DrawdownRequest | null> {
+  const portId = getPortId();
+  const drawdown = await prisma.demoDrawdownRequest.findFirst({
+    where: { id, portId },
+  });
+  return drawdown ? toDrawdownRequest(drawdown) : null;
+}
+
+export class DrawdownValidationError extends Error {
+  constructor(message: string, public code: "no_expenses" | "wrong_award" | "wrong_status" | "missing_expenses") {
+    super(message);
+    this.name = "DrawdownValidationError";
+  }
+}
+
+/**
+ * Create a draft drawdown bundling a set of expenses.
+ *
+ * Validates:
+ *   - The expense list is non-empty and contains no duplicate IDs.
+ *   - Every expense exists in this tenant.
+ *   - Every expense belongs to the supplied awardId (no cross-award bundling).
+ *   - Every expense is currently in "approved" status (per 2 CFR 200.305,
+ *     only allowable, approved costs may be drawn down).
+ *
+ * The expenses are atomically claimed via a conditional updateMany that
+ * matches `status = "approved"`. If the number of rows updated doesn't
+ * match the expected count, the transaction aborts — this prevents two
+ * concurrent createDrawdown calls from bundling the same expense into
+ * two drawdowns. (READ COMMITTED, the Prisma default, would otherwise
+ * let both reads see the expenses as "approved".)
+ */
 export async function createDrawdown(data: {
   awardId: string;
   expenseIds: string[];
@@ -511,52 +769,158 @@ export async function createDrawdown(data: {
 }): Promise<DrawdownRequest> {
   const portId = getPortId();
 
-  // Calculate total from expenses
-  const expenses = await prisma.demoExpense.findMany({
-    where: { id: { in: data.expenseIds }, portId },
-  });
-  const totalAmount = expenses.reduce((s, e) => s + Number(e.amount), 0);
+  if (!data.expenseIds || data.expenseIds.length === 0) {
+    throw new DrawdownValidationError(
+      "At least one expense is required to create a drawdown",
+      "no_expenses"
+    );
+  }
 
-  const drawdown = await prisma.demoDrawdownRequest.create({
-    data: {
-      portId,
-      awardId: data.awardId,
-      expenseIds: data.expenseIds,
-      totalAmount,
-      status: "draft",
-      notes: data.notes,
-    },
-  });
+  // De-dupe IDs so the count check below isn't tricked by `[id, id]`
+  const uniqueExpenseIds = Array.from(new Set(data.expenseIds));
 
-  // Mark expenses as drawn
-  await prisma.demoExpense.updateMany({
-    where: { id: { in: data.expenseIds } },
-    data: { status: "drawn" },
+  const drawdown = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const expenses = await tx.demoExpense.findMany({
+      where: { id: { in: uniqueExpenseIds }, portId },
+      select: { id: true, awardId: true, status: true, amount: true },
+    });
+    type ExpRow = (typeof expenses)[number];
+
+    // 1. All expenses must exist in this tenant
+    if (expenses.length !== uniqueExpenseIds.length) {
+      const found = new Set(expenses.map((e: ExpRow) => e.id));
+      const missing = uniqueExpenseIds.filter((id) => !found.has(id));
+      throw new DrawdownValidationError(
+        `Expenses not found in this tenant: ${missing.join(", ")}`,
+        "missing_expenses"
+      );
+    }
+
+    // 2. All expenses must belong to the supplied award
+    const wrongAward = expenses.filter((e: ExpRow) => e.awardId !== data.awardId);
+    if (wrongAward.length > 0) {
+      throw new DrawdownValidationError(
+        `${wrongAward.length} expense(s) belong to a different award and cannot be bundled here`,
+        "wrong_award"
+      );
+    }
+
+    // 3. All expenses must currently be in "approved" status (per the
+    //    snapshot we just read). The atomic claim below will catch any
+    //    races where status changes between this read and the update.
+    const notApproved = expenses.filter((e: ExpRow) => e.status !== "approved");
+    if (notApproved.length > 0) {
+      throw new DrawdownValidationError(
+        `${notApproved.length} expense(s) are not in approved status; only approved expenses may be drawn down (2 CFR 200.305)`,
+        "wrong_status"
+      );
+    }
+
+    const totalAmount = expenses.reduce((s: number, e: ExpRow) => s + Number(e.amount), 0);
+
+    // 4. Atomic claim: only flips approved → drawn. If a concurrent
+    //    drawdown beat us to even one of these expenses, the count will
+    //    be short and we abort, rolling back the create below if it had
+    //    already happened. This is the actual race fix — the read above
+    //    is informational only.
+    const claim = await tx.demoExpense.updateMany({
+      where: {
+        id: { in: uniqueExpenseIds },
+        portId,
+        awardId: data.awardId,
+        status: "approved",
+      },
+      data: { status: "drawn" },
+    });
+    if (claim.count !== uniqueExpenseIds.length) {
+      throw new DrawdownValidationError(
+        "One or more expenses were claimed by another drawdown — please refresh and retry",
+        "wrong_status"
+      );
+    }
+
+    // 5. Create the drawdown record now that we own the expenses. If
+    //    this fails, the whole transaction rolls back and the expenses
+    //    return to "approved".
+    const created = await tx.demoDrawdownRequest.create({
+      data: {
+        portId,
+        awardId: data.awardId,
+        expenseIds: uniqueExpenseIds,
+        totalAmount,
+        status: "draft",
+        notes: data.notes,
+      },
+    });
+
+    return created;
   });
 
   return toDrawdownRequest(drawdown);
 }
 
+export class DrawdownStatusUpdateError extends Error {
+  constructor(message: string, public code: "race") {
+    super(message);
+    this.name = "DrawdownStatusUpdateError";
+  }
+}
+
 export async function updateDrawdownStatus(
   id: string,
-  status: DrawdownStatus
+  status: DrawdownStatus,
+  opts: { expectedFromStatus?: DrawdownStatus } = {}
 ): Promise<DrawdownRequest | null> {
   const portId = getPortId();
-  const existing = await prisma.demoDrawdownRequest.findFirst({
-    where: { id, portId },
-  });
-  if (!existing) return null;
 
-  const updateData: Prisma.DemoDrawdownRequestUpdateInput = { status };
-  if (status === "submitted") updateData.submittedDate = new Date();
-  if (status === "approved") updateData.approvedDate = new Date();
-  if (status === "payment_received") updateData.paymentDate = new Date();
+  // Whole transition runs in one transaction so a recall (submitted →
+  // draft) can return the bundled expenses to "approved" atomically with
+  // the drawdown status change. Without this, recalling left the
+  // expenses orphaned in "drawn" — they could not be re-bundled and the
+  // workflow guard rejected any attempt to fix them by hand.
+  const drawdown = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const existing = await tx.demoDrawdownRequest.findFirst({
+      where: { id, portId },
+    });
+    if (!existing) return null;
 
-  const drawdown = await prisma.demoDrawdownRequest.update({
-    where: { id },
-    data: updateData,
+    // TOCTOU guard: if the route handler validated the transition against
+    // a snapshot, abort if the row has moved since.
+    if (opts.expectedFromStatus && existing.status !== opts.expectedFromStatus) {
+      throw new DrawdownStatusUpdateError(
+        "Drawdown status changed concurrently — please refresh and retry",
+        "race"
+      );
+    }
+
+    const updateData: Prisma.DemoDrawdownRequestUpdateInput = { status };
+    if (status === "submitted") updateData.submittedDate = new Date();
+    if (status === "approved") updateData.approvedDate = new Date();
+    if (status === "payment_received") updateData.paymentDate = new Date();
+
+    // Recall: drawdown moving back to draft. Return the bundled
+    // expenses from "drawn" to "approved" so they can be re-bundled or
+    // edited. We only flip rows still in "drawn" — defends against any
+    // expense that was somehow split off into another drawdown
+    // (shouldn't happen, but the conditional is cheap insurance).
+    if (existing.status === "submitted" && status === "draft") {
+      const ids = (existing.expenseIds as string[]) || [];
+      if (ids.length > 0) {
+        await tx.demoExpense.updateMany({
+          where: { id: { in: ids }, portId, status: "drawn" },
+          data: { status: "approved" },
+        });
+      }
+    }
+
+    const updated = await tx.demoDrawdownRequest.update({
+      where: { id },
+      data: updateData,
+    });
+    return updated;
   });
-  return toDrawdownRequest(drawdown);
+
+  return drawdown ? toDrawdownRequest(drawdown) : null;
 }
 
 // ─── Budget Modification Operations ───
@@ -599,33 +963,62 @@ export async function approveBudgetMod(
   id: string
 ): Promise<BudgetModification | null> {
   const portId = getPortId();
-  const existing = await prisma.demoBudgetModification.findFirst({
-    where: { id, portId },
-  });
-  if (!existing) return null;
 
-  // Update the modification status
-  const mod = await prisma.demoBudgetModification.update({
-    where: { id },
-    data: {
-      status: "approved",
-      approvedDate: new Date(),
-    },
-  });
+  // Run the lookup, the category-ownership check, the mod status flip,
+  // and both ceiling updates in a single transaction. The previous
+  // implementation looked up the mod with portId scoping but then
+  // updated the from/to categories with `where: { id }` only — if a
+  // budget mod somehow referenced a category in another tenant
+  // (createBudgetMod doesn't validate that the categories belong to
+  // this tenant), the approve would silently mutate the wrong tenant's
+  // budget. We now require both categories to live in the same tenant
+  // and the same award as the mod, defense in depth.
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const existing = await tx.demoBudgetModification.findFirst({
+      where: { id, portId },
+    });
+    if (!existing) return null;
 
-  // Update category ceilings
-  await prisma.$transaction([
-    prisma.demoBudgetCategory.update({
-      where: { id: existing.fromCategoryId },
+    const [fromCat, toCat] = await Promise.all([
+      tx.demoBudgetCategory.findFirst({
+        where: { id: existing.fromCategoryId, portId, awardId: existing.awardId },
+        select: { id: true },
+      }),
+      tx.demoBudgetCategory.findFirst({
+        where: { id: existing.toCategoryId, portId, awardId: existing.awardId },
+        select: { id: true },
+      }),
+    ]);
+    if (!fromCat || !toCat) {
+      throw new Error("Budget modification references a category outside this award/tenant");
+    }
+
+    const mod = await tx.demoBudgetModification.update({
+      where: { id },
+      data: {
+        status: "approved",
+        approvedDate: new Date(),
+      },
+    });
+
+    // Conditional updates that re-assert tenant + award scoping. If
+    // either fails to match a row, the whole transaction rolls back.
+    const fromUpdate = await tx.demoBudgetCategory.updateMany({
+      where: { id: existing.fromCategoryId, portId, awardId: existing.awardId },
       data: { ceiling: { decrement: Number(existing.amount) } },
-    }),
-    prisma.demoBudgetCategory.update({
-      where: { id: existing.toCategoryId },
+    });
+    const toUpdate = await tx.demoBudgetCategory.updateMany({
+      where: { id: existing.toCategoryId, portId, awardId: existing.awardId },
       data: { ceiling: { increment: Number(existing.amount) } },
-    }),
-  ]);
+    });
+    if (fromUpdate.count !== 1 || toUpdate.count !== 1) {
+      throw new Error("Failed to apply budget modification to categories");
+    }
 
-  return toBudgetModification(mod);
+    return mod;
+  });
+
+  return result ? toBudgetModification(result) : null;
 }
 
 export async function denyBudgetMod(
