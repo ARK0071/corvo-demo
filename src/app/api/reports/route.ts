@@ -5,9 +5,10 @@ import * as Reports from "@/lib/db/repositories/reports";
 import type { ReportStatus } from "@/data/reporting";
 
 // Helper to get the appropriate repository based on environment
+// "test" uses demo tables (same as awards route), "production" uses production tables
 function getReportsRepo() {
   const { environment } = getTenantConfig();
-  return environment === "demo" ? DemoReports : Reports;
+  return environment === "production" ? Reports : DemoReports;
 }
 
 // GET: List all reports or filter by award
@@ -17,10 +18,17 @@ export async function GET(request: NextRequest) {
     const repo = getReportsRepo();
 
     const searchParams = request.nextUrl.searchParams;
+    const reportId = searchParams.get("reportId");
     const awardId = searchParams.get("awardId");
     const upcoming = searchParams.get("upcoming");
     const overdue = searchParams.get("overdue");
     const stats = searchParams.get("stats");
+
+    // Get single report by ID
+    if (reportId) {
+      const report = await repo.getReportById(reportId);
+      return NextResponse.json({ reports: report ? [report] : [] });
+    }
 
     // Return statistics
     if (stats === "true") {
@@ -47,8 +55,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ reports });
     }
 
-    // Get all reports
-    const reports = await repo.getAllReports();
+    // Get all reports — auto-seed if empty (demo environment only)
+    let reports = await repo.getAllReports();
+    if (reports.length === 0 && "autoSeedIfEmpty" in repo) {
+      const seeded = await (repo as typeof DemoReports).autoSeedIfEmpty();
+      if (seeded) reports = await repo.getAllReports();
+    }
     return NextResponse.json({ reports });
   } catch (error) {
     console.error("Reports GET error:", error);

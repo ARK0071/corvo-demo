@@ -7,7 +7,7 @@
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
 import type { SF425FormData, SF270FormData, PPRFormData } from "@/data/federal-report-templates";
 
@@ -220,15 +220,89 @@ export function useDrawdowns(awardId: string | null): FormDataHookResult<Drawdow
   return { data, loading, error, refresh: fetchDrawdowns };
 }
 
+// ─── Debounce helper ───
+
+function useDebouncedCallback<T extends (...args: unknown[]) => void>(fn: T, delayMs: number): T {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  return useCallback((...args: unknown[]) => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => fnRef.current(...args), delayMs);
+  }, [delayMs]) as unknown as T;
+}
+
+// ─── Draft Loader (reads saved generatedContent from report) ───
+
+export interface DraftLoaderResult {
+  draft: unknown | null;
+  narrativeDraft: string | null;
+  loading: boolean;
+}
+
+export function useDraftLoader(reportId: string | null): DraftLoaderResult {
+  const headers = useTenantHeaders();
+  const tenant = useTenant();
+  const [draft, setDraft] = useState<unknown | null>(null);
+  const [narrativeDraft, setNarrativeDraft] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!reportId || tenant.isLoading) { setLoading(false); return; }
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/reports?reportId=${reportId}`, {
+          headers: { ...headers, "Content-Type": "application/json" },
+        });
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          const reports = data.reports || [];
+          const report = Array.isArray(reports)
+            ? reports.find((r: { id: string }) => r.id === reportId)
+            : null;
+          if (report?.generatedContent && Object.keys(report.generatedContent).length > 0) {
+            setDraft(report.generatedContent);
+          }
+          if (report?.narrativeDraft) {
+            setNarrativeDraft(report.narrativeDraft);
+          }
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [reportId, tenant.isLoading, tenant.portId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { draft, narrativeDraft, loading };
+}
+
 // ─── Draft Persistence (saves to ScheduledReport.generatedContent) ───
 
-export function useDraftPersistence(reportId: string | null) {
-  const headers = useTenantHeaders();
+export interface DraftPersistenceResult {
+  saveDraft: (content: unknown, narrativeDraft?: string) => void;
+  saveDraftImmediate: (content: unknown, narrativeDraft?: string) => Promise<boolean>;
+  lastSaved: Date | null;
+  saving: boolean;
+  saveError: string | null;
+}
 
-  const saveDraft = useCallback(async (content: unknown, narrativeDraft?: string) => {
-    if (!reportId) return;
+export function useDraftPersistence(reportId: string | null, debounceMs = 800): DraftPersistenceResult {
+  const headers = useTenantHeaders();
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const doSave = useCallback(async (content: unknown, narrativeDraft?: string): Promise<boolean> => {
+    if (!reportId) return false;
+    setSaving(true);
+    setSaveError(null);
     try {
-      await fetch("/api/reports", {
+      const res = await fetch("/api/reports", {
         method: "PUT",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -238,10 +312,24 @@ export function useDraftPersistence(reportId: string | null) {
           narrativeDraft,
         }),
       });
+      if (!res.ok) {
+        setSaveError("Failed to save draft");
+        return false;
+      }
+      setLastSaved(new Date());
+      return true;
     } catch {
-      // Silent fail for draft saves — user can retry
+      setSaveError("Failed to save draft");
+      return false;
+    } finally {
+      setSaving(false);
     }
   }, [reportId, headers]);
 
-  return { saveDraft };
+  const saveDraft = useDebouncedCallback(
+    (content: unknown, narrativeDraft?: string) => { doSave(content, narrativeDraft); },
+    debounceMs
+  );
+
+  return { saveDraft, saveDraftImmediate: doSave, lastSaved, saving, saveError };
 }

@@ -29,6 +29,7 @@ export interface ScheduledReport {
   submittedDate?: string;
   notes: string;
   generatedContent?: ReportContent;
+  narrativeDraft?: string;
 }
 
 export interface ReportContent {

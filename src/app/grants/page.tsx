@@ -26,6 +26,8 @@ import {
   Copy,
   RefreshCw,
   Database,
+  MapPin,
+  ExternalLink,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
@@ -141,6 +143,9 @@ function UnifiedGrantsDashboard() {
     [router]
   );
 
+  // Federal / State-Local sub-tab within Discover
+  const [discoverSource, setDiscoverSource] = useState<"federal" | "state-local">("federal");
+
   // Discover tab state (Grants.gov search2 + sidebar filters)
   const [discoveryFilters, setDiscoveryFilters] = useState<GrantDiscoveryFilterState>(() =>
     getDefaultGrantDiscoveryFilters()
@@ -188,6 +193,17 @@ function UnifiedGrantsDashboard() {
   const prevProfileIdRef = useRef<string | null>(null);
   const discoveredGrantsRef = useRef<DiscoveredGrant[]>([]);
   discoveredGrantsRef.current = discoveredGrants;
+
+  // State/Local discover state
+  const [slGrants, setSlGrants] = useState<DiscoveredGrant[]>([]);
+  const [slScores, setSlScores] = useState<Map<string, GrantScore>>(new Map());
+  const [slLoading, setSlLoading] = useState(false);
+  const [slScoring, setSlScoring] = useState(false);
+  const [slError, setSlError] = useState<string | null>(null);
+  const [slMissingFile, setSlMissingFile] = useState(false);
+  const [slExpectedPath, setSlExpectedPath] = useState<string | null>(null);
+  const [slSortBy, setSlSortBy] = useState<"score" | "deadline">("score");
+  const [slLoaded, setSlLoaded] = useState(false);
 
   // Fetch pipeline grants from API
   const fetchPipelineFromDB = useCallback(async () => {
@@ -312,6 +328,61 @@ function UnifiedGrantsDashboard() {
       setScanning(false);
     }
   }, [profileId]);
+
+  // State/Local: score and load helpers
+  const scoreSlGrants = useCallback(async (toScore: DiscoveredGrant[]) => {
+    if (toScore.length === 0) { setSlScores(new Map()); return; }
+    setSlScoring(true);
+    try {
+      const res = await fetch("/api/score-grants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grants: toScore, profileId }),
+      });
+      if (!res.ok) throw new Error("Scoring failed");
+      const { scores } = await res.json();
+      const map = new Map<string, GrantScore>();
+      for (const s of scores) map.set(s.grantId, s);
+      setSlScores(map);
+    } catch { setSlScores(new Map()); }
+    finally { setSlScoring(false); }
+  }, [profileId]);
+
+  const loadSlGrants = useCallback(async () => {
+    setSlLoading(true);
+    setSlError(null);
+    setSlMissingFile(false);
+    try {
+      const res = await fetch(`/api/state-local-grants?profileId=${encodeURIComponent(profileId)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load");
+      setSlGrants(data.grants ?? []);
+      setSlMissingFile(Boolean(data.missingFile));
+      if (typeof data.expectedPath === "string") setSlExpectedPath(data.expectedPath);
+      if ((data.grants ?? []).length > 0) await scoreSlGrants(data.grants);
+      else setSlScores(new Map());
+    } catch (e) {
+      setSlError(e instanceof Error ? e.message : "Failed to load");
+      setSlGrants([]);
+    } finally {
+      setSlLoading(false);
+      setSlLoaded(true);
+    }
+  }, [profileId, scoreSlGrants]);
+
+  useEffect(() => {
+    if (discoverSource === "state-local" && !slLoaded) {
+      void loadSlGrants();
+    }
+  }, [discoverSource, slLoaded, loadSlGrants]);
+
+  const sortedSlGrants = useMemo(() => {
+    const withScores = slGrants.filter(g => slScores.has(g.id));
+    return [...withScores].sort((a, b) => {
+      if (slSortBy === "deadline") return (a.closeDate || "9999").localeCompare(b.closeDate || "9999");
+      return (slScores.get(b.id)?.overallScore ?? 0) - (slScores.get(a.id)?.overallScore ?? 0);
+    });
+  }, [slGrants, slScores, slSortBy]);
 
   // Initialize projects for the active profile; on profile switch, clear scores and re-score current results
   useEffect(() => {
@@ -708,7 +779,7 @@ function UnifiedGrantsDashboard() {
                 {activeTab === "outreach" && "Vendor Outreach"}
               </h1>
               <p className="text-sm text-muted-foreground">
-                {activeTab === "discover" && "Search and discover federal grant opportunities"}
+                {activeTab === "discover" && "Search and discover grant opportunities"}
                 {activeTab === "pipeline" && "Track your grant applications through each stage"}
                 {activeTab === "projects" && "Manage port projects and match them to grants"}
                 {activeTab === "outreach" && "Search qualified federal contractors with Subchapter N compliance intelligence"}
@@ -720,7 +791,34 @@ function UnifiedGrantsDashboard() {
         {/* Tab content - tab selection driven by URL ?tab= param, sidebar provides navigation */}
         <div className="w-full">
           {activeTab === "discover" && (
-            <div className="mt-2 flex gap-4 items-start">
+            <div className="mt-2 space-y-4">
+              {/* Federal / State & Local sub-tabs */}
+              <div className="flex items-center gap-1 border-b">
+                <button
+                  onClick={() => setDiscoverSource("federal")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    discoverSource === "federal"
+                      ? "border-[#3d8b8b] text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Federal (Grants.gov)
+                </button>
+                <button
+                  onClick={() => setDiscoverSource("state-local")}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${
+                    discoverSource === "state-local"
+                      ? "border-[#3d8b8b] text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <MapPin className="h-3.5 w-3.5" />
+                  State & Local (CSV)
+                </button>
+              </div>
+
+              {discoverSource === "federal" && (
+              <div className="flex gap-4 items-start">
               {showDiscoverFilters && (
                 <div className="w-80 shrink-0 sticky top-4 space-y-3">
                   <Button
@@ -1494,6 +1592,110 @@ function UnifiedGrantsDashboard() {
               </div>
             )}
               </div>
+            </div>
+              )}
+
+              {discoverSource === "state-local" && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Grants from CSV for <span className="font-medium text-foreground">{selectedProfile.name}</span>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex rounded-md border bg-muted/40 p-0.5">
+                        <Button variant={slSortBy === "score" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("score")}>Score</Button>
+                        <Button variant={slSortBy === "deadline" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("deadline")}>Deadline</Button>
+                      </div>
+                      <Button variant="outline" size="sm" className="h-7" disabled={slLoading || slScoring} onClick={() => { setSlLoaded(false); void loadSlGrants(); }}>
+                        {slLoading || slScoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {slError && (
+                    <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2">
+                      <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                      <p className="text-sm text-destructive">{slError}</p>
+                    </div>
+                  )}
+
+                  {slLoading && (
+                    <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
+                      <Loader2 className="h-5 w-5 animate-spin" /> Loading CSV…
+                    </div>
+                  )}
+
+                  {!slLoading && slMissingFile && (
+                    <Card className="p-6">
+                      <h2 className="text-sm font-medium mb-2">No CSV for this profile</h2>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Add a file named <code className="text-xs bg-muted px-1 py-0.5 rounded">{profileId}.csv</code> under{" "}
+                        <code className="text-xs bg-muted px-1 py-0.5 rounded">data/state-local-grants/</code>, then reload.
+                      </p>
+                      {slExpectedPath && <p className="text-xs font-mono text-muted-foreground break-all border rounded p-2 bg-muted/30">{slExpectedPath}</p>}
+                    </Card>
+                  )}
+
+                  {!slLoading && !slMissingFile && slGrants.length === 0 && slLoaded && (
+                    <Card className="p-6 text-center text-sm text-muted-foreground">
+                      The CSV loaded but contained no valid rows (each row needs a title).
+                    </Card>
+                  )}
+
+                  {slScoring && slGrants.length > 0 && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Ranking with embeddings…
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    {sortedSlGrants.map((grant) => {
+                      const score = slScores.get(grant.id);
+                      return (
+                        <Card key={grant.id} className="overflow-hidden">
+                          <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-sm font-medium leading-snug">{grant.title}</h2>
+                                <Badge variant="outline" className={`text-[10px] ${statusColors[grant.status] ?? ""}`}>{grant.status}</Badge>
+                                {grant.source && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{grant.source}</Badge>}
+                              </div>
+                              <p className="text-xs text-muted-foreground">{grant.agency}</p>
+                              {score && (
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge variant="outline" className={`text-[10px] ${grantRecColors[score.recommendation] ?? ""}`}>
+                                    {score.overallScore}/100 — {score.recommendation.replace(/_/g, " ")}
+                                  </Badge>
+                                  <Badge variant="outline" className={`text-[10px] ${eligibilityColors[score.eligibilityStatus] ?? ""}`}>
+                                    {score.eligibilityStatus.replace(/_/g, " ")}
+                                  </Badge>
+                                </div>
+                              )}
+                              {grant.description && <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">{grant.description}</p>}
+                              {grant.applicationUrl && (
+                                <a href={grant.applicationUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                                  Source link <ExternalLink className="h-3 w-3" />
+                                </a>
+                              )}
+                            </div>
+                            <div className="text-left sm:text-right shrink-0 space-y-1">
+                              {score && <div className="text-2xl font-bold text-primary">{score.overallScore}</div>}
+                              <p className="text-sm font-mono font-medium">
+                                {grant.awardCeiling > 0 || grant.awardFloor > 0
+                                  ? grant.awardFloor > 0 && grant.awardCeiling > 0
+                                    ? `${formatCurrency(grant.awardFloor)} – ${formatCurrency(grant.awardCeiling)}`
+                                    : grant.awardCeiling > 0 ? `Up to ${formatCurrency(grant.awardCeiling)}` : `From ${formatCurrency(grant.awardFloor)}`
+                                  : "Amount TBD"}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">{grant.closeDate ? `Deadline: ${grant.closeDate}` : "No deadline"}</p>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

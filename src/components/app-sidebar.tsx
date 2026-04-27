@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, MapPin } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText } from "lucide-react";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import {
   Sidebar,
@@ -36,7 +36,6 @@ import {
 const grantMatchItems = [
   { title: "Dashboard", url: "/porter-dashboard", icon: LayoutDashboard },
   { title: "Discover", url: "/grants?tab=discover", icon: Search },
-  { title: "Discover (State/Local)", url: "/grants/state-local", icon: MapPin },
   { title: "Pipeline", url: "/grants?tab=pipeline", icon: Layers },
   { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },
   { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },

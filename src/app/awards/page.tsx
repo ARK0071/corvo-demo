@@ -27,6 +27,7 @@ import {
   RefreshCw,
   Loader2,
   Database,
+  Upload,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -241,7 +242,32 @@ export default function AwardsPage() {
     };
   }, [awards]);
 
-  const attentionItems = useMemo(() => getInMemoryAttentionItems(), []);
+  const attentionItems = useMemo(() => {
+    if (awards.length === 0) return getInMemoryAttentionItems();
+    const items: AttentionItem[] = [];
+    for (const award of awards) {
+      for (const cat of award.budgetCategories) {
+        if (cat.ceiling <= 0) continue;
+        const pct = (cat.spent / cat.ceiling) * 100;
+        if (pct >= 95) {
+          items.push({ id: `${award.id}-${cat.id}-crit`, awardId: award.id, type: "budget", severity: "critical", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, message: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
+        } else if (pct >= 80) {
+          items.push({ id: `${award.id}-${cat.id}-warn`, awardId: award.id, type: "budget", severity: "warning", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, message: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
+        }
+        if (cat.spent > cat.ceiling) {
+          items.push({ id: `${award.id}-${cat.id}-over`, awardId: award.id, type: "budget", severity: "critical", title: `${cat.name} over budget`, message: `${cat.name} exceeded ceiling by $${(cat.spent - cat.ceiling).toLocaleString()}.` });
+        }
+      }
+    }
+    return items;
+  }, [awards]);
+
+  const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
+  const filteredAwards = useMemo(() => {
+    if (!showFlaggedOnly) return awards;
+    const flaggedIds = new Set(attentionItems.map((a) => a.awardId));
+    return awards.filter((a) => flaggedIds.has(a.id));
+  }, [awards, attentionItems, showFlaggedOnly]);
 
   if (showIntake) {
     return (
@@ -401,9 +427,23 @@ export default function AwardsPage() {
         </CardContent>
       </Card>
 
-      {/* Awards Grid — 2 columns, each card is a rich summary */}
+      {/* Filter + Awards Grid */}
+      {attentionItems.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showFlaggedOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowFlaggedOnly(!showFlaggedOnly)}
+            className="text-xs"
+          >
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            {showFlaggedOnly ? "Show All Awards" : `Show Flagged Only (${new Set(attentionItems.map(a => a.awardId)).size})`}
+          </Button>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {awards.map((award, i) => {
+        {filteredAwards.map((award, i) => {
           const totalSpent = award.budgetCategories.reduce((s, c) => s + c.spent, 0);
           const spentPct = pctOf(totalSpent, award.totalAmount);
           const matchStatus = getMatchStatus(award.id);
@@ -454,6 +494,36 @@ export default function AwardsPage() {
                     })}
                   </div>
                 </div>
+
+                {/* Per-category budget flags */}
+                {(() => {
+                  const flagged = award.budgetCategories
+                    .filter((c) => c.ceiling > 0 && (c.spent / c.ceiling) >= 0.8)
+                    .map((c) => ({ name: c.name, pct: Math.round((c.spent / c.ceiling) * 100), over: c.spent > c.ceiling }))
+                    .sort((a, b) => b.pct - a.pct);
+                  if (flagged.length === 0) return null;
+                  const shown = flagged.slice(0, 3);
+                  const extra = flagged.length - shown.length;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                      {shown.map((f) => (
+                        <span
+                          key={f.name}
+                          className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                            f.over ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : f.pct >= 95 ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                          }`}
+                        >
+                          {f.name} {f.over ? "OVER" : `${f.pct}%`}
+                        </span>
+                      ))}
+                      {extra > 0 && (
+                        <span className="text-[10px] text-muted-foreground">+{extra} more</span>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Bottom metrics row */}
                 <div className="flex items-center justify-between text-xs">
@@ -527,13 +597,17 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
         setAward(data.award || null);
         if (data.award) {
           const ms = data.award.matchRequirement;
+          const perfStart = new Date(data.award.performancePeriod.start).getTime();
+          const perfEnd = new Date(data.award.performancePeriod.end).getTime();
+          const periodProgress = Math.min(100, Math.max(0, ((Date.now() - perfStart) / (perfEnd - perfStart)) * 100));
+          const pct = ms.required > 0 ? (ms.committed / ms.required) * 100 : 100;
           setMatchStatus({
             required: ms.required,
             committed: ms.committed,
-            percentage: ms.required > 0 ? Math.round((ms.committed / ms.required) * 100) : 100,
-            target: ms.required,
-            status: (ms.required > 0 ? (ms.committed / ms.required >= 0.8 ? "on_track" : ms.committed / ms.required >= 0.5 ? "at_risk" : "shortfall") : "on_track") as "on_track" | "at_risk" | "shortfall",
-            periodProgress: 50, // Default mid-period
+            percentage: pct,
+            target: ms.percentage,
+            status: (ms.required > 0 ? (pct >= periodProgress * 0.8 ? "on_track" : pct >= periodProgress * 0.5 ? "at_risk" : "shortfall") : "on_track") as "on_track" | "at_risk" | "shortfall",
+            periodProgress,
           });
         }
       }
@@ -1106,6 +1180,8 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
   const [vendor, setVendor] = useState("");
   const [amount, setAmount] = useState("");
   const [attachmentName, setAttachmentName] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
   const [overrideJustification, setOverrideJustification] = useState("");
   const [validation, setValidation] = useState<ExpenseValidationResult | null>(null);
 
@@ -1119,6 +1195,42 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
     setValidation(result);
     return result;
   }, [award.id, categoryId, amount, date, description]);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    setExtracting(true);
+    setExtractError(null);
+    setAttachmentName(file.name);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("categories", JSON.stringify(award.budgetCategories.map(c => ({ id: c.id, name: c.name }))));
+      const res = await fetch("/api/awards/expenses/extract", {
+        method: "POST",
+        headers: Object.fromEntries(Object.entries(headers).filter(([k]) => k.startsWith("x-"))),
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Extraction failed");
+      }
+      const { extracted } = await res.json();
+      if (extracted.vendor) setVendor(extracted.vendor);
+      if (extracted.amount) setAmount(String(extracted.amount));
+      if (extracted.date) setDate(extracted.date);
+      if (extracted.description) setDescription(extracted.description);
+      if (extracted.categoryHint) {
+        const match = award.budgetCategories.find(c =>
+          c.name.toLowerCase().includes(extracted.categoryHint.toLowerCase()) ||
+          extracted.categoryHint.toLowerCase().includes(c.name.toLowerCase())
+        );
+        if (match) setCategoryId(match.id);
+      }
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Failed to extract details");
+    } finally {
+      setExtracting(false);
+    }
+  }, [award.budgetCategories, headers]);
 
   const handleSubmit = useCallback(async () => {
     const result = handleValidate();
@@ -1198,13 +1310,30 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
           </div>
 
           <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Attachment</label>
-            <div className="mt-1 flex items-center gap-2">
-              <Input value={attachmentName} onChange={(e) => setAttachmentName(e.target.value)} placeholder="invoice-filename.pdf (simulated)" className="flex-1" />
-              <Button variant="outline" size="sm" onClick={() => setAttachmentName(`invoice-${Date.now()}.pdf`)}>
-                <Paperclip className="h-3.5 w-3.5 mr-1" /> Attach
-              </Button>
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Upload Receipt/Invoice (PDF)</label>
+            <div className="mt-1 flex items-center gap-3">
+              <label className="cursor-pointer inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+                <Upload className="h-4 w-4" />
+                {extracting ? "Extracting..." : "Choose PDF"}
+                <input
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleFileUpload(f);
+                  }}
+                  disabled={extracting}
+                />
+              </label>
+              {extracting && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+              {attachmentName && !extracting && (
+                <span className="text-xs text-muted-foreground truncate max-w-[200px]">{attachmentName}</span>
+              )}
             </div>
+            {extractError && (
+              <p className="text-xs text-red-500 mt-1">{extractError}</p>
+            )}
           </div>
 
           {validation && !validation.valid && (

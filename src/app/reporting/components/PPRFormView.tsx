@@ -14,11 +14,13 @@ import {
   Clock,
   AlertTriangle,
   AlertCircle,
+  Save,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { usePPRFormData, useReportSummary, useDraftPersistence } from "../hooks/useAwardFormData";
+import { usePPRFormData, useReportSummary, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
 import type { PPRFormData, PPRMilestone, PPRSection } from "@/data/federal-report-templates";
 import { fmtDate } from "./helpers";
 import { useTenantHeaders } from "@/contexts/tenant-context";
@@ -40,14 +42,35 @@ export default function PPRFormView({
   const tenantHeaders = useTenantHeaders();
   const { data: apiData, loading, error, refresh } = usePPRFormData(awardId, periodStart, periodEnd);
   const { data: summaryData } = useReportSummary(awardId, periodStart, periodEnd);
-  const { saveDraft } = useDraftPersistence(reportId);
+  const { saveDraft, saveDraftImmediate, lastSaved, saving, saveError } = useDraftPersistence(reportId);
+  const { draft: savedDraft, loading: draftLoading } = useDraftLoader(reportId);
 
   const [formData, setFormData] = useState<PPRFormData | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(["accomplishments"]));
   const [loadingSections, setLoadingSections] = useState<Set<string>>(new Set());
+  const [aiErrors, setAiErrors] = useState<Map<string, string>>(new Map());
+  const [draftRestored, setDraftRestored] = useState(false);
 
-  if (apiData && !formData) {
-    setFormData(apiData);
+  if (apiData && !formData && !draftLoading) {
+    if (savedDraft && !draftRestored) {
+      const draft = savedDraft as Partial<PPRFormData>;
+      const merged: PPRFormData = {
+        ...apiData,
+        ...draft,
+        sections: apiData.sections.map((s) => {
+          const saved = draft.sections?.find((ds) => ds.id === s.id);
+          return saved ? { ...s, ...saved } : s;
+        }),
+        milestones: apiData.milestones.map((m) => {
+          const saved = draft.milestones?.find((dm) => dm.id === m.id);
+          return saved ? { ...m, ...saved } : m;
+        }),
+      };
+      setFormData(merged);
+      setDraftRestored(true);
+    } else {
+      setFormData(apiData);
+    }
   }
 
   const toggleSection = useCallback((id: string) => {
@@ -91,10 +114,14 @@ export default function PPRFormView({
             ),
           };
           setFormData(updated);
-          saveDraft(updated);
+          saveDraftImmediate(updated);
+          setAiErrors((prev) => { const next = new Map(prev); next.delete(section.id); return next; });
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setAiErrors((prev) => new Map(prev).set(section.id, data.error || "AI generation failed"));
         }
       } catch {
-        // Silent — user can retry
+        setAiErrors((prev) => new Map(prev).set(section.id, "Network error — check your connection"));
       } finally {
         setLoadingSections((prev) => {
           const next = new Set(prev);
@@ -151,7 +178,14 @@ export default function PPRFormView({
     [formData, saveDraft]
   );
 
-  if (loading && !formData) {
+  const handleDiscardDraft = useCallback(async () => {
+    await saveDraftImmediate({});
+    setFormData(null);
+    setDraftRestored(false);
+    refresh();
+  }, [saveDraftImmediate, refresh]);
+
+  if ((loading || draftLoading) && !formData) {
     return (
       <div className="flex-1 flex items-center justify-center p-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -208,9 +242,26 @@ export default function PPRFormView({
               Period: {fmtDate(formData.reportingPeriod.start)} - {fmtDate(formData.reportingPeriod.end)}
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => window.print()}>
-            <Printer className="h-3.5 w-3.5 mr-1" /> Print
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="text-right mr-2">
+              {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              {!saving && !saveError && lastSaved && (
+                <span className="text-xs text-muted-foreground">
+                  Saved {lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => formData && saveDraftImmediate(formData)}>
+              <Save className="h-3.5 w-3.5 mr-1" /> Save Draft
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDiscardDraft}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" /> Discard
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()}>
+              <Printer className="h-3.5 w-3.5 mr-1" /> Print
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -240,6 +291,7 @@ export default function PPRFormView({
           const isExpanded = expandedSections.has(section.id);
           const isLoading = loadingSections.has(section.id);
           const hasContent = section.userContent || section.aiDraft;
+          const sectionError = aiErrors.get(section.id);
 
           return (
             <Card key={section.id}>
@@ -265,7 +317,7 @@ export default function PPRFormView({
                   <div className="flex items-center gap-2 mb-3">
                     <Button variant="outline" size="sm" onClick={() => handleAIDraft(section)} disabled={isLoading}>
                       {isLoading ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-                      AI Draft
+                      {sectionError ? "Retry AI Draft" : "AI Draft"}
                     </Button>
                     {section.aiDraft && !section.userContent && (
                       <Button variant="ghost" size="sm" onClick={() => handleSectionContent(section.id, section.aiDraft)}>
@@ -273,6 +325,16 @@ export default function PPRFormView({
                       </Button>
                     )}
                   </div>
+
+                  {sectionError && (
+                    <div className="flex items-start gap-2 p-3 mb-3 rounded-md bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+                      <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm text-red-700 dark:text-red-400">{sectionError}</p>
+                        <p className="text-xs text-red-500 mt-1">Ensure ANTHROPIC_API_KEY is configured in your environment.</p>
+                      </div>
+                    </div>
+                  )}
 
                   {section.aiDraft && !section.userContent && (
                     <div className="rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/30 dark:bg-purple-950/10 p-3 mb-3">

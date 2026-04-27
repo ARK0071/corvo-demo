@@ -13,6 +13,7 @@ import {
   Loader2,
   Newspaper,
   FileText,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,12 +23,11 @@ import {
 } from "@/data/grant-pipeline";
 import {
   getAllProjects,
-  getProjectStats,
   initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
-import { getAwardStats } from "@/data/awards";
-import { getReportingStats } from "@/data/reporting";
+import { getAwardStats as getInMemoryAwardStats } from "@/data/awards";
+import { getReportingStats as getInMemoryReportingStats } from "@/data/reporting";
 import { useProfile } from "@/components/profile-provider";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 
@@ -68,11 +68,12 @@ export default function PorterDashboardPage() {
   const [pipeline, setPipeline] = useState<PipelineGrant[]>([]);
   const [pipelineLoading, setPipelineLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectStats, setProjectStats] = useState<ReturnType<typeof getProjectStats> | null>(null);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
-  const [awardStats, setAwardStats] = useState<ReturnType<typeof getAwardStats> | null>(null);
-  const [reportingStats, setReportingStats] = useState<ReturnType<typeof getReportingStats> | null>(null);
+  const [awardStats, setAwardStats] = useState<ReturnType<typeof getInMemoryAwardStats> | null>(null);
+  const [reportingStats, setReportingStats] = useState<ReturnType<typeof getInMemoryReportingStats> | null>(null);
+  const [dbAwards, setDbAwards] = useState<{ id: string; title: string; program: string; totalAmount: number; budgetCategories: { name: string; ceiling: number; spent: number }[]; status: string }[]>([]);
+  const [upcomingReports, setUpcomingReports] = useState<{ id: string; awardTitle: string; program: string; type: string; dueDate: string; status: string }[]>([]);
 
   // Fetch pipeline from database
   const fetchPipelineFromDB = useCallback(async () => {
@@ -108,9 +109,30 @@ export default function PorterDashboardPage() {
       // Load other data
       initializeProjectsForProfile(profileId);
       setProjects(getAllProjects());
-      setProjectStats(getProjectStats());
-      setAwardStats(getAwardStats());
-      setReportingStats(getReportingStats());
+
+      // Fetch award stats from DB, fallback to in-memory
+      fetch("/api/awards/stats", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setAwardStats(data))
+        .catch(() => setAwardStats(getInMemoryAwardStats()));
+
+      // Fetch reporting stats from DB, fallback to in-memory
+      fetch("/api/reports?stats=true", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setReportingStats(data))
+        .catch(() => setReportingStats(getInMemoryReportingStats()));
+
+      // Fetch awards list for mini-table
+      fetch("/api/awards", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setDbAwards((data.awards || []).slice(0, 5)))
+        .catch(() => setDbAwards([]));
+
+      // Fetch upcoming reports for mini-table
+      fetch("/api/reports?upcoming=true&days=30", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setUpcomingReports((data.reports || []).slice(0, 5)))
+        .catch(() => setUpcomingReports([]));
 
       // Load news
       fetch("/api/newsroom", { headers: tenantHeaders })
@@ -288,6 +310,119 @@ export default function PorterDashboardPage() {
                         }`}
                       >
                         {days !== null ? `${days}d` : "-"}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Awards Summary */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Award className="h-4 w-4" /> Awards
+              </span>
+              <Link
+                href="/awards"
+                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
+              >
+                View all <ArrowRight className="h-3 w-3" />
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {dbAwards.length === 0 ? (
+              <EmptyHint
+                text="No awards tracked yet."
+                linkLabel="Manage Awards"
+                href="/awards"
+              />
+            ) : (
+              <div className="space-y-2">
+                {dbAwards.map((a) => {
+                  const totalSpent = a.budgetCategories?.reduce((s, c) => s + (c.spent || 0), 0) ?? 0;
+                  const burnPct = a.totalAmount > 0 ? Math.round((totalSpent / a.totalAmount) * 100) : 0;
+                  const flagged = (a.budgetCategories || []).filter(c => c.ceiling > 0 && (c.spent / c.ceiling) >= 0.8);
+                  return (
+                    <div key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px] shrink-0">{a.program}</Badge>
+                          <p className="font-medium truncate">{a.title}</p>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${burnPct >= 90 ? "bg-red-500" : burnPct >= 70 ? "bg-amber-500" : "bg-[#3d8b8b]"}`}
+                              style={{ width: `${Math.min(burnPct, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] tabular-nums text-muted-foreground shrink-0">{burnPct}%</span>
+                          {flagged.length > 0 && <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />}
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold tabular-nums text-[#3d8b8b] shrink-0">
+                        {fmt(a.totalAmount)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Upcoming Reports */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <FileText className="h-4 w-4" /> Upcoming Reports
+              </span>
+              <Link
+                href="/reporting/forms"
+                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
+              >
+                View all <ArrowRight className="h-3 w-3" />
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {upcomingReports.length === 0 ? (
+              <EmptyHint
+                text="No reports due in the next 30 days."
+                linkLabel="View Reports"
+                href="/reporting/forms"
+              />
+            ) : (
+              <div className="space-y-3">
+                {upcomingReports.map((r) => {
+                  const days = daysUntil(r.dueDate);
+                  const typeLabel: Record<string, string> = { sf425: "SF-425", sf270: "SF-270", progress: "PPR", closeout: "Closeout" };
+                  return (
+                    <div key={r.id} className="flex items-start justify-between gap-3 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 text-[10px] shrink-0">
+                            {typeLabel[r.type] || r.type}
+                          </Badge>
+                          <p className="font-medium truncate">{r.program}</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{r.awardTitle}</p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={`shrink-0 tabular-nums ${
+                          days !== null && days <= 7 ? "border-red-500/50 text-red-600 dark:text-red-400"
+                          : days !== null && days < 0 ? "border-red-500 text-red-600 dark:text-red-400 font-bold"
+                          : ""
+                        }`}
+                      >
+                        {days !== null ? (days < 0 ? `${Math.abs(days)}d overdue` : `${days}d`) : "-"}
                       </Badge>
                     </div>
                   );

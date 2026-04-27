@@ -12,11 +12,13 @@ import {
   Lock,
   Unlock,
   Loader2,
+  Save,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useSF425FormData, useDraftPersistence } from "../hooks/useAwardFormData";
+import { useSF425FormData, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
 import { getAgencyTemplate } from "@/data/agency-templates";
 import type { SF425FormData, SF425LineItem } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull } from "./helpers";
@@ -38,17 +40,26 @@ export default function SF425FormView({
   program, awardTitle, dueDate, awardingAgency, onBack,
 }: SF425FormViewProps) {
   const { data: apiData, loading, error, refresh } = useSF425FormData(awardId, periodStart, periodEnd);
-  const { saveDraft } = useDraftPersistence(reportId);
+  const { saveDraft, saveDraftImmediate, lastSaved, saving, saveError } = useDraftPersistence(reportId);
+  const { draft: savedDraft, loading: draftLoading } = useDraftLoader(reportId);
   const agencyTemplate = awardingAgency ? getAgencyTemplate(awardingAgency) : null;
 
   const [formData, setFormData] = useState<SF425FormData | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [remarks, setRemarks] = useState("");
+  const [draftRestored, setDraftRestored] = useState(false);
 
-  // Sync API data into local state on first load
-  if (apiData && !formData) {
-    setFormData(apiData);
-    setRemarks(apiData.remarks || "");
+  // Sync API data into local state, merging saved draft if available
+  if (apiData && !formData && !draftLoading) {
+    if (savedDraft && !draftRestored) {
+      const merged = { ...apiData, ...(savedDraft as Partial<SF425FormData>) };
+      setFormData(merged);
+      setRemarks(merged.remarks || "");
+      setDraftRestored(true);
+    } else {
+      setFormData(apiData);
+      setRemarks(apiData.remarks || "");
+    }
   }
 
   const handleOverride = useCallback(
@@ -78,7 +89,14 @@ export default function SF425FormView({
     refresh();
   }, [refresh]);
 
-  if (loading && !formData) {
+  const handleDiscardDraft = useCallback(async () => {
+    await saveDraftImmediate({});
+    setFormData(null);
+    setDraftRestored(false);
+    refresh();
+  }, [saveDraftImmediate, refresh]);
+
+  if ((loading || draftLoading) && !formData) {
     return (
       <div className="flex-1 flex items-center justify-center p-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -130,7 +148,21 @@ export default function SF425FormView({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={handleRefresh}>Refresh</Button>
+            <div className="text-right mr-2">
+              {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              {!saving && !saveError && lastSaved && (
+                <span className="text-xs text-muted-foreground">
+                  Saved {lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => formData && saveDraftImmediate(formData)}>
+              <Save className="h-3.5 w-3.5 mr-1" /> Save Draft
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDiscardDraft}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" /> Discard
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setEditMode(!editMode)}>
               {editMode ? <Lock className="h-3.5 w-3.5 mr-1" /> : <Unlock className="h-3.5 w-3.5 mr-1" />}
               {editMode ? "Lock" : "Edit"}

@@ -28,6 +28,7 @@ function toScheduledReport(report: PrismaScheduledReport & { award: { title: str
     submittedDate: report.submittedDate?.toISOString().split("T")[0],
     notes: report.notes,
     generatedContent: (report.generatedContent as unknown) as ReportContent | undefined,
+    narrativeDraft: report.narrativeDraft ?? undefined,
   };
 }
 

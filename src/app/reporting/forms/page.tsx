@@ -8,6 +8,8 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
+  Users,
+  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
@@ -30,6 +32,17 @@ interface Report {
   periodEnd: string;
   status: string;
   awardingAgency?: string;
+}
+
+interface SubrecipientReport {
+  id: string;
+  subrecipientName: string;
+  awardTitle: string;
+  program: string;
+  reportType: string;
+  title: string;
+  dueDate: string;
+  status: string;
 }
 
 // ─── Helpers ───
@@ -71,6 +84,7 @@ export default function FormsPage() {
   const headers = useTenantHeaders();
   const tenant = useTenant();
   const [reports, setReports] = useState<Report[]>([]);
+  const [subReports, setSubReports] = useState<SubrecipientReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<DetailView | null>(null);
 
@@ -78,10 +92,18 @@ export default function FormsPage() {
     if (tenant.isLoading) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/reports", { headers: { ...headers, "Content-Type": "application/json" } });
-      if (res.ok) {
-        const data = await res.json();
+      const hdrs = { ...headers, "Content-Type": "application/json" };
+      const [reportsRes, subRes] = await Promise.all([
+        fetch("/api/reports", { headers: hdrs }),
+        fetch("/api/subrecipients/reports", { headers: hdrs }),
+      ]);
+      if (reportsRes.ok) {
+        const data = await reportsRes.json();
         setReports(data.reports || []);
+      }
+      if (subRes.ok) {
+        const data = await subRes.json();
+        setSubReports(data.reports || []);
       }
     } catch { /* */ }
     setLoading(false);
@@ -222,6 +244,12 @@ export default function FormsPage() {
           onSelect={handleSelectReport}
         />
       )}
+
+      <SubrecipientSection
+        reports={subReports}
+        headers={headers}
+        onRefresh={fetchReports}
+      />
     </div>
   );
 }
@@ -269,6 +297,97 @@ function FormSection({ icon, title, reports, onSelect, labelOverride }: {
                   </div>
                 </div>
               </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── Subrecipient Section ───
+
+function SubrecipientSection({ reports, headers, onRefresh }: {
+  reports: SubrecipientReport[];
+  headers: Record<string, string>;
+  onRefresh: () => void;
+}) {
+  const [marking, setMarking] = useState<string | null>(null);
+
+  const handleMarkReceived = async (reportId: string) => {
+    setMarking(reportId);
+    try {
+      await fetch("/api/subrecipients", {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "markReceived", reportId }),
+      });
+      onRefresh();
+    } catch { /* */ }
+    setMarking(null);
+  };
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold mb-3 flex items-center gap-2">
+        <Users className="h-4 w-4 text-amber-500" />
+        Subrecipient Monitoring Reports
+      </h2>
+      {reports.length === 0 ? (
+        <p className="text-sm text-muted-foreground italic">No pending subrecipient reports</p>
+      ) : (
+        <div className="space-y-2">
+          {reports.map((sr) => {
+            const isOverdue = sr.status === "overdue";
+            return (
+              <div
+                key={sr.id}
+                className={`w-full flex items-center justify-between p-3 rounded-lg border transition-all ${
+                  isOverdue
+                    ? "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20"
+                    : "border-border"
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Badge
+                    className={`text-[10px] shrink-0 ${
+                      isOverdue
+                        ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                        : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                    }`}
+                  >
+                    {sr.status}
+                  </Badge>
+                  <Badge className="text-[10px] shrink-0 bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                    {sr.reportType}
+                  </Badge>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {sr.subrecipientName} &mdash; {sr.title}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {sr.program} &bull; {sr.awardTitle}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <p className="text-xs tabular-nums font-medium">
+                    Due {fmtShortDate(sr.dueDate)}
+                  </p>
+                  <button
+                    onClick={() => handleMarkReceived(sr.id)}
+                    disabled={marking === sr.id}
+                    className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md border border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30 transition-colors disabled:opacity-50"
+                  >
+                    {marking === sr.id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Check className="h-3 w-3" />
+                    )}
+                    Mark Received
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>

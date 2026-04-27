@@ -8,11 +8,13 @@ import {
   Printer,
   Info,
   Loader2,
+  Save,
+  RotateCcw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useSF270FormData, useDrawdowns, useDraftPersistence } from "../hooks/useAwardFormData";
+import { useSF270FormData, useDrawdowns, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
 import { getAgencyTemplate } from "@/data/agency-templates";
 import type { SF270FormData } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull, fmt } from "./helpers";
@@ -34,13 +36,20 @@ export default function SF270FormView({
 }: SF270FormViewProps) {
   const { data: apiData, loading, error, refresh } = useSF270FormData(awardId, periodStart, periodEnd);
   const { data: drawdowns } = useDrawdowns(awardId);
-  const { saveDraft } = useDraftPersistence(reportId);
+  const { saveDraft, saveDraftImmediate, lastSaved, saving, saveError } = useDraftPersistence(reportId);
+  const { draft: savedDraft, loading: draftLoading } = useDraftLoader(reportId);
   const agencyTemplate = awardingAgency ? getAgencyTemplate(awardingAgency) : null;
 
   const [formData, setFormData] = useState<SF270FormData | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
 
-  if (apiData && !formData) {
-    setFormData(apiData);
+  if (apiData && !formData && !draftLoading) {
+    if (savedDraft && !draftRestored) {
+      setFormData({ ...apiData, ...(savedDraft as Partial<SF270FormData>) });
+      setDraftRestored(true);
+    } else {
+      setFormData(apiData);
+    }
   }
 
   const handleRegenerate = useCallback(() => {
@@ -48,7 +57,14 @@ export default function SF270FormView({
     refresh();
   }, [refresh]);
 
-  if (loading && !formData) {
+  const handleDiscardDraft = useCallback(async () => {
+    await saveDraftImmediate({});
+    setFormData(null);
+    setDraftRestored(false);
+    refresh();
+  }, [saveDraftImmediate, refresh]);
+
+  if ((loading || draftLoading) && !formData) {
     return (
       <div className="flex-1 flex items-center justify-center p-12">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -98,6 +114,21 @@ export default function SF270FormView({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <div className="text-right mr-2">
+              {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
+              {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              {!saving && !saveError && lastSaved && (
+                <span className="text-xs text-muted-foreground">
+                  Saved {lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => formData && saveDraftImmediate(formData)}>
+              <Save className="h-3.5 w-3.5 mr-1" /> Save Draft
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleDiscardDraft}>
+              <RotateCcw className="h-3.5 w-3.5 mr-1" /> Discard
+            </Button>
             <Button variant="outline" size="sm" onClick={handleRegenerate}>Regenerate</Button>
             <Button variant="outline" size="sm" onClick={() => window.print()}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print

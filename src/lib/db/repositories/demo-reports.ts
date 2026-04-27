@@ -16,6 +16,135 @@ function getPortId(): string {
   return getTenantConfig().portId;
 }
 
+// ─── Report Schedule Generator ───
+
+function generateQuarterlyDates(start: Date, end: Date): { periodStart: string; periodEnd: string; dueDate: string }[] {
+  const dates: { periodStart: string; periodEnd: string; dueDate: string }[] = [];
+  const quarterEnds = [
+    { month: 2, day: 31 },  // Q1: Jan-Mar
+    { month: 5, day: 30 },  // Q2: Apr-Jun
+    { month: 8, day: 30 },  // Q3: Jul-Sep
+    { month: 11, day: 31 }, // Q4: Oct-Dec
+  ];
+
+  for (let year = start.getFullYear(); year <= end.getFullYear(); year++) {
+    for (const q of quarterEnds) {
+      const pEnd = new Date(year, q.month, q.day);
+      const pStart = new Date(year, q.month - 2, 1);
+      const due = new Date(year, q.month + 1, 30);
+      if (pEnd < start || pStart > end) continue;
+      dates.push({
+        periodStart: pStart.toISOString().split("T")[0],
+        periodEnd: pEnd.toISOString().split("T")[0],
+        dueDate: due.toISOString().split("T")[0],
+      });
+    }
+  }
+  return dates;
+}
+
+/**
+ * Auto-seeds scheduled reports for a port when the table is empty.
+ * Generates SF-425, progress, and closeout reports from existing awards.
+ */
+export async function autoSeedIfEmpty(): Promise<boolean> {
+  const portId = getPortId();
+  const count = await prisma.demoScheduledReport.count({ where: { portId } });
+  if (count > 0) return false;
+
+  const awards = await prisma.demoAward.findMany({
+    where: { portId: { equals: portId, mode: "insensitive" } },
+    select: {
+      id: true,
+      cfda: true,
+      program: true,
+      title: true,
+      status: true,
+      performancePeriodStart: true,
+      performancePeriodEnd: true,
+    },
+  });
+
+  if (awards.length === 0) return false;
+
+  const today = new Date().toISOString().split("T")[0];
+  let seeded = 0;
+
+  for (const award of awards) {
+    const perfStart = award.performancePeriodStart;
+    const perfEnd = award.performancePeriodEnd;
+
+    // SF-425 — quarterly for federal awards (CFDA starting with 20.)
+    if (award.cfda.startsWith("20.")) {
+      const quarters = generateQuarterlyDates(perfStart, perfEnd);
+      for (const q of quarters) {
+        const isPast = q.dueDate < today;
+        await prisma.demoScheduledReport.create({
+          data: {
+            portId,
+            awardId: award.id,
+            type: "sf425",
+            title: "SF-425 Federal Financial Report",
+            dueDate: new Date(q.dueDate),
+            periodStart: new Date(q.periodStart),
+            periodEnd: new Date(q.periodEnd),
+            status: isPast ? "submitted" : "upcoming",
+            submittedDate: isPast ? new Date(q.dueDate) : null,
+            notes: "",
+          },
+        });
+        seeded++;
+      }
+    }
+
+    // Progress reports — quarterly for PIDP, semi-annual otherwise
+    const isQuarterly = award.program === "PIDP";
+    const progressDates = generateQuarterlyDates(perfStart, perfEnd);
+    const filtered = isQuarterly ? progressDates : progressDates.filter((_, i) => i % 2 === 1);
+
+    for (const pd of filtered) {
+      const isPast = pd.dueDate < today;
+      await prisma.demoScheduledReport.create({
+        data: {
+          portId,
+          awardId: award.id,
+          type: "progress",
+          title: `${isQuarterly ? "Quarterly" : "Semi-Annual"} Progress Report`,
+          dueDate: new Date(pd.dueDate),
+          periodStart: new Date(pd.periodStart),
+          periodEnd: new Date(pd.periodEnd),
+          status: isPast ? "submitted" : "upcoming",
+          submittedDate: isPast ? new Date(pd.dueDate) : null,
+          notes: "",
+        },
+      });
+      seeded++;
+    }
+
+    // Closeout report — 120 days after performance end, only for closing/closed awards
+    if (award.status === "closeout_pending" || award.status === "closed") {
+      const closeoutDue = new Date(perfEnd.getTime() + 120 * 24 * 60 * 60 * 1000);
+      await prisma.demoScheduledReport.create({
+        data: {
+          portId,
+          awardId: award.id,
+          type: "closeout",
+          title: "Final Closeout Report",
+          dueDate: closeoutDue,
+          periodStart: perfStart,
+          periodEnd: perfEnd,
+          status: award.status === "closed" ? "submitted" : "in_progress",
+          notes: "Complete all closeout checklist items before submission.",
+        },
+      });
+      seeded++;
+    }
+  }
+
+  console.log(`[auto-seed] Created ${seeded} scheduled reports for port "${portId}" from ${awards.length} awards`);
+  return true;
+}
+
 // ─── Scheduled Reports ───
 
 // Convert Prisma model to application type
@@ -34,6 +163,7 @@ function toScheduledReport(report: DemoScheduledReport & { award: { title: strin
     submittedDate: report.submittedDate?.toISOString().split("T")[0],
     notes: report.notes,
     generatedContent: (report.generatedContent as unknown) as ReportContent | undefined,
+    narrativeDraft: report.narrativeDraft ?? undefined,
   };
 }
 
