@@ -152,7 +152,10 @@ function computeSF425(
     { lineNumber: "10i", label: "Total Recipient Share Required", value: matchRequired, source: "Match requirement from award terms", editable: false },
     { lineNumber: "10j", label: "Total Recipient Share of Expenditures", value: matchCommitted, source: "Sum of match ledger entries", editable: false },
     { lineNumber: "10k", label: "Remaining Recipient Share to Be Provided (10i - 10j)", value: recipientShareRemaining, source: "Computed: Line 10i minus Line 10j", editable: false },
-    { lineNumber: "10l", label: "Total Federal Program Income Earned", value: 0, source: "No program income generated", editable: true },
+    { lineNumber: "10l", label: "Total Federal Program Income Earned", value: 0, source: "Program income per 2 CFR 200.307", editable: true },
+    { lineNumber: "10m", label: "Program Income Expended (Deduction Alternative)", value: 0, source: "Income applied as deduction from outlays", editable: true },
+    { lineNumber: "10n", label: "Program Income Expended (Addition Alternative)", value: 0, source: "Income applied as addition to outlays", editable: true },
+    { lineNumber: "10o", label: "Unexpended Program Income (10l - 10m - 10n)", value: 0, source: "Computed: 10l minus 10m minus 10n", editable: false },
     { lineNumber: "11a", label: "Type of Rate (Provisional/Final/Fixed/Predetermined)", value: "De Minimis", source: "10% de minimis rate per 2 CFR 200.414(f)", editable: true },
     { lineNumber: "11b", label: "Rate", value: "10%", source: "De minimis indirect cost rate", editable: true },
     { lineNumber: "11c", label: "Period (From-To)", value: `${periodStart} to ${periodEnd}`, source: "Reporting period", editable: false },
@@ -246,6 +249,9 @@ function validateSF425(lineItems: { lineNumber: string; value: number | string }
   }
   if (Math.abs(getVal("10k") - Math.max(0, getVal("10i") - getVal("10j"))) > 0.01) {
     errors.push({ lineNumber: "10k", message: `Line 10k should equal 10i - 10j` });
+  }
+  if (Math.abs(getVal("10o") - (getVal("10l") - getVal("10m") - getVal("10n"))) > 0.01) {
+    errors.push({ lineNumber: "10o", message: `Line 10o should equal 10l - 10m - 10n` });
   }
   if (getVal("10c") < 0) {
     warnings.push({ lineNumber: "10c", message: "Cash on hand is negative — disbursements exceed receipts" });

@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 // Tabs UI removed - sidebar drives navigation via ?tab= param
 import {
   Award,
@@ -203,6 +204,7 @@ function UnifiedGrantsDashboard() {
   const [slMissingFile, setSlMissingFile] = useState(false);
   const [slExpectedPath, setSlExpectedPath] = useState<string | null>(null);
   const [slSortBy, setSlSortBy] = useState<"score" | "deadline">("score");
+  const [slSearch, setSlSearch] = useState("");
   const [slLoaded, setSlLoaded] = useState(false);
 
   // Fetch pipeline grants from API
@@ -378,11 +380,21 @@ function UnifiedGrantsDashboard() {
 
   const sortedSlGrants = useMemo(() => {
     const withScores = slGrants.filter(g => slScores.has(g.id));
-    return [...withScores].sort((a, b) => {
+    const q = slSearch.trim().toLowerCase();
+    const filtered = q
+      ? withScores.filter(g =>
+          g.title.toLowerCase().includes(q) ||
+          g.agency.toLowerCase().includes(q) ||
+          g.description.toLowerCase().includes(q) ||
+          g.fundingCategories.some(c => c.toLowerCase().includes(q)) ||
+          g.eligibility.some(e => e.toLowerCase().includes(q))
+        )
+      : withScores;
+    return [...filtered].sort((a, b) => {
       if (slSortBy === "deadline") return (a.closeDate || "9999").localeCompare(b.closeDate || "9999");
       return (slScores.get(b.id)?.overallScore ?? 0) - (slScores.get(a.id)?.overallScore ?? 0);
     });
-  }, [slGrants, slScores, slSortBy]);
+  }, [slGrants, slScores, slSortBy, slSearch]);
 
   // Initialize projects for the active profile; on profile switch, clear scores and re-score current results
   useEffect(() => {
@@ -802,7 +814,7 @@ function UnifiedGrantsDashboard() {
                       : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  Federal (Grants.gov)
+                  Federal
                 </button>
                 <button
                   onClick={() => setDiscoverSource("state-local")}
@@ -813,7 +825,7 @@ function UnifiedGrantsDashboard() {
                   }`}
                 >
                   <MapPin className="h-3.5 w-3.5" />
-                  State & Local (CSV)
+                  State & Local
                 </button>
               </div>
 
@@ -1599,7 +1611,8 @@ function UnifiedGrantsDashboard() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <p className="text-xs text-muted-foreground">
-                      Grants from CSV for <span className="font-medium text-foreground">{selectedProfile.name}</span>
+                      State & local grants for <span className="font-medium text-foreground">{selectedProfile.name}</span>
+                      {slLoaded && !slLoading && ` · ${sortedSlGrants.length} result${sortedSlGrants.length !== 1 ? "s" : ""}`}
                     </p>
                     <div className="flex items-center gap-2">
                       <div className="flex rounded-md border bg-muted/40 p-0.5">
@@ -1612,6 +1625,16 @@ function UnifiedGrantsDashboard() {
                     </div>
                   </div>
 
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search grants by keyword..."
+                      value={slSearch}
+                      onChange={(e) => setSlSearch(e.target.value)}
+                      className="h-8 pl-9 text-sm"
+                    />
+                  </div>
+
                   {slError && (
                     <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2">
                       <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
@@ -1621,24 +1644,22 @@ function UnifiedGrantsDashboard() {
 
                   {slLoading && (
                     <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
-                      <Loader2 className="h-5 w-5 animate-spin" /> Loading CSV…
+                      <Loader2 className="h-5 w-5 animate-spin" /> Loading grants…
                     </div>
                   )}
 
                   {!slLoading && slMissingFile && (
                     <Card className="p-6">
-                      <h2 className="text-sm font-medium mb-2">No CSV for this profile</h2>
+                      <h2 className="text-sm font-medium mb-2">No state & local grants available for this profile</h2>
                       <p className="text-sm text-muted-foreground mb-3">
-                        Add a file named <code className="text-xs bg-muted px-1 py-0.5 rounded">{profileId}.csv</code> under{" "}
-                        <code className="text-xs bg-muted px-1 py-0.5 rounded">data/state-local-grants/</code>, then reload.
+                        State and local grant data has not been configured for this profile yet.
                       </p>
-                      {slExpectedPath && <p className="text-xs font-mono text-muted-foreground break-all border rounded p-2 bg-muted/30">{slExpectedPath}</p>}
                     </Card>
                   )}
 
                   {!slLoading && !slMissingFile && slGrants.length === 0 && slLoaded && (
                     <Card className="p-6 text-center text-sm text-muted-foreground">
-                      The CSV loaded but contained no valid rows (each row needs a title).
+                      No grants found for this profile.
                     </Card>
                   )}
 

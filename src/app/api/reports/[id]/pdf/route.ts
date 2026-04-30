@@ -3,15 +3,17 @@ import { prisma } from "@/lib/db/client";
 import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
 import { renderSF425 } from "@/lib/pdf/render";
 import type { SF425Values } from "@/lib/pdf/render";
+import { computeIndirectCost } from "@/lib/reports/indirect-cost";
 
 function fmtMoney(n: number): string {
-  return (
-    "$" +
-    n.toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function fmtDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 export async function GET(
@@ -54,24 +56,12 @@ export async function GET(
       });
     }
 
-    // Compute financial values
-    const expenses: { status: string; amount: unknown; date: Date }[] = award.expenses;
+    const expenses: { status: string; amount: unknown; date: Date; categoryId?: string }[] = award.expenses;
     const drawdowns: { status: string; totalAmount: unknown }[] = award.drawdownRequests;
     const matchLedger: { amount: unknown }[] = award.matchLedger;
 
     const totalExpenses = expenses
       .filter((e) => e.status !== "flagged")
-      .reduce((s, e) => s + Number(e.amount), 0);
-
-    const periodExpenses = expenses
-      .filter((e) => {
-        const d = e.date.toISOString().slice(0, 10);
-        return (
-          d >= report.periodStart.toISOString().slice(0, 10) &&
-          d <= report.periodEnd.toISOString().slice(0, 10) &&
-          e.status !== "flagged"
-        );
-      })
       .reduce((s, e) => s + Number(e.amount), 0);
 
     const totalDrawn = drawdowns
@@ -92,29 +82,63 @@ export async function GET(
     );
     const matchRemaining = Math.max(0, matchRequired - matchCommitted);
 
-    const icRate = award.indirectCostRate
-      ? Number(award.indirectCostRate)
-      : 0;
-    const icType = award.indirectCostType || "";
-    let icBaseAmount = 0;
-    if (icRate > 0) {
-      icBaseAmount = totalExpenses;
-    }
-    const icAmount = icBaseAmount * (icRate / 100);
+    const periodStart = fmtDate(report.periodStart);
+    const periodEnd = fmtDate(report.periodEnd);
 
-    const periodStart = report.periodStart.toISOString().slice(0, 10);
-    const periodEnd = report.periodEnd.toISOString().slice(0, 10);
+    // Build category name lookup for MTDC-aware indirect cost computation
+    const categoryNameById: Record<string, string> = {};
+    for (const cat of award.budgetCategories) {
+      categoryNameById[(cat as { id: string }).id] = (cat as { name: string }).name;
+    }
+    const expensesForIC = expenses.map((e: { date: Date; amount: unknown; status: string; categoryId?: string }) => ({
+      date: fmtDate(e.date),
+      amount: Number(e.amount),
+      status: e.status,
+      categoryName: e.categoryId ? categoryNameById[e.categoryId] : undefined,
+    }));
+
+    const indirectCost = computeIndirectCost(
+      {
+        indirectCostRate: award.indirectCostRate ? Number(award.indirectCostRate) : null,
+        indirectCostBase: award.indirectCostBase,
+        indirectCostType: award.indirectCostType,
+        indirectCostPeriodStart: award.indirectCostPeriodStart,
+        indirectCostPeriodEnd: award.indirectCostPeriodEnd,
+      },
+      expensesForIC,
+      periodStart,
+      periodEnd,
+    );
+
+    // Fall back to 10% de minimis if no NICRA-based indirect cost
+    const icType = indirectCost?.type || "De Minimis";
+    const icRate = indirectCost ? indirectCost.rate * 100 : 10;
+    const icBase = indirectCost?.base ?? totalExpenses;
+    const icAmount = indirectCost?.federalShare ?? Math.round(totalExpenses * 0.1);
+    const icPeriodFrom = indirectCost?.periodStart || periodStart;
+    const icPeriodTo = indirectCost?.periodEnd || periodEnd;
+
+    // Build address from port profile location data
+    const loc = (profile?.locationData ?? profile?.location ?? {}) as Record<string, string>;
+    const street = loc.street || loc.address || "";
+    const cityState = [loc.city, loc.state, loc.zip].filter(Boolean).join(", ");
 
     const values: SF425Values = {
       federalAgency: award.awardingAgency,
-      recipientOrg: profile?.name || "Port Organization",
-      recipientUei: profile?.uei || "",
       fain: award.fain,
+      recipientOrg: profile?.name || "Port Organization",
+      recipientStreet1: street,
+      recipientCityState: cityState,
+      recipientUei: profile?.uei || "",
       recipientEin: profile?.ein || "",
-      reportPeriodStart: periodStart,
-      reportPeriodEnd: periodEnd,
+
       reportType: "Quarterly",
       basis: "Cash",
+
+      projectPeriodFrom: fmtDate(award.performancePeriodStart),
+      projectPeriodTo: fmtDate(award.performancePeriodEnd),
+      reportPeriodStart: periodStart,
+      reportPeriodEnd: periodEnd,
 
       line10a: fmtMoney(totalDrawn),
       line10b: fmtMoney(totalExpenses),
@@ -127,16 +151,22 @@ export async function GET(
       line10i: fmtMoney(matchRequired),
       line10j: fmtMoney(matchCommitted),
       line10k: fmtMoney(matchRemaining),
+      line10l: fmtMoney(0),
+      line10m: fmtMoney(0),
+      line10n: fmtMoney(0),
+      line10o: fmtMoney(0),
 
-      line11a_rate: icRate > 0 ? `${icRate}%` : "",
-      line11a_base: icRate > 0 ? fmtMoney(icBaseAmount) : "",
-      line11a_amount: icRate > 0 ? fmtMoney(icAmount) : "",
       line11a_type: icType,
-      line11a_period:
-        award.indirectCostPeriodStart && award.indirectCostPeriodEnd
-          ? `${award.indirectCostPeriodStart.toISOString().slice(0, 10)} to ${award.indirectCostPeriodEnd.toISOString().slice(0, 10)}`
-          : "",
-      line11_total: icRate > 0 ? fmtMoney(icAmount) : "$0.00",
+      line11a_rate: `${icRate}%`,
+      line11a_periodFrom: icPeriodFrom,
+      line11a_periodTo: icPeriodTo,
+      line11a_period: "",
+      line11a_base: fmtMoney(icBase),
+      line11a_amount: fmtMoney(icAmount),
+      line11a_fedShare: fmtMoney(icAmount),
+      line11_total: fmtMoney(icAmount),
+      line11_totalBase: fmtMoney(icBase),
+      line11_totalFedShare: fmtMoney(icAmount),
 
       line12: "",
 
@@ -144,11 +174,7 @@ export async function GET(
       certifierTitle: cert?.certifierTitle || "",
       certifierPhone: cert?.certifierPhone || "",
       certifierEmail: cert?.certifierEmail || "",
-      certifiedDate: cert?.certifiedAt.toISOString().slice(0, 10) || "",
-
-      certificationFooter: cert
-        ? `Certified by ${cert.certifierName}, ${cert.certifierTitle}, on ${cert.certifiedAt.toISOString().slice(0, 10)} · Hash ${cert.contentHash.slice(0, 8)}`
-        : undefined,
+      certifiedDate: cert ? fmtDate(cert.certifiedAt) : "",
     };
 
     const pdfBytes = await renderSF425(values);
