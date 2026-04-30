@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import type { AuditLog, User } from "@/generated/prisma";
 
 export async function GET(
   request: Request,
@@ -17,13 +18,13 @@ export async function GET(
       take: 100,
     });
 
-    const userIds = [...new Set(entries.filter((e: any) => e.userId).map((e: any) => e.userId!))];
-    const users = userIds.length > 0
+    const userIds = [...new Set(entries.filter((e: AuditLog) => e.userId).map((e: AuditLog) => e.userId!))];
+    const users: User[] = userIds.length > 0
       ? await prisma.user.findMany({ where: { id: { in: userIds } } })
       : [];
-    const userMap = new Map(users.map((u: any) => [u.id, u]));
+    const userMap = new Map(users.map((u) => [u.id, u] as const));
 
-    const enriched = entries.map((e: any) => ({
+    const enriched = entries.map((e: AuditLog) => ({
       id: e.id,
       action: e.action,
       userId: e.userId,

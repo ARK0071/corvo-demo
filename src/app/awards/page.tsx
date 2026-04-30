@@ -250,12 +250,12 @@ export default function AwardsPage() {
         if (cat.ceiling <= 0) continue;
         const pct = (cat.spent / cat.ceiling) * 100;
         if (pct >= 95) {
-          items.push({ id: `${award.id}-${cat.id}-crit`, awardId: award.id, type: "budget", severity: "critical", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, message: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
+          items.push({ id: `${award.id}-${cat.id}-crit`, awardId: award.id, awardTitle: award.title, type: "budget", severity: "critical", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, description: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
         } else if (pct >= 80) {
-          items.push({ id: `${award.id}-${cat.id}-warn`, awardId: award.id, type: "budget", severity: "warning", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, message: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
+          items.push({ id: `${award.id}-${cat.id}-warn`, awardId: award.id, awardTitle: award.title, type: "budget", severity: "warning", title: `${cat.name} at ${Math.round(pct)}% of ceiling`, description: `${cat.name} has spent $${cat.spent.toLocaleString()} of $${cat.ceiling.toLocaleString()} ceiling.` });
         }
         if (cat.spent > cat.ceiling) {
-          items.push({ id: `${award.id}-${cat.id}-over`, awardId: award.id, type: "budget", severity: "critical", title: `${cat.name} over budget`, message: `${cat.name} exceeded ceiling by $${(cat.spent - cat.ceiling).toLocaleString()}.` });
+          items.push({ id: `${award.id}-${cat.id}-over`, awardId: award.id, awardTitle: award.title, type: "budget", severity: "critical", title: `${cat.name} over budget`, description: `${cat.name} exceeded ceiling by $${(cat.spent - cat.ceiling).toLocaleString()}.` });
         }
       }
     }

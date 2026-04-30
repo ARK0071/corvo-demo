@@ -33,5 +33,5 @@ export async function audit(
       userAgent: ua,
       metadata: entry.metadata as Prisma.InputJsonValue ?? undefined,
     },
-  }).catch(err => console.error("[audit] write failed", err));
+  }).catch((err: unknown) => console.error("[audit] write failed", err));
 }

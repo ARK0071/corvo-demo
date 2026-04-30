@@ -55,11 +55,15 @@ export async function GET(
     }
 
     // Compute financial values
-    const totalExpenses = award.expenses
+    const expenses: { status: string; amount: unknown; date: Date }[] = award.expenses;
+    const drawdowns: { status: string; totalAmount: unknown }[] = award.drawdownRequests;
+    const matchLedger: { amount: unknown }[] = award.matchLedger;
+
+    const totalExpenses = expenses
       .filter((e) => e.status !== "flagged")
       .reduce((s, e) => s + Number(e.amount), 0);
 
-    const periodExpenses = award.expenses
+    const periodExpenses = expenses
       .filter((e) => {
         const d = e.date.toISOString().slice(0, 10);
         return (
@@ -70,7 +74,7 @@ export async function GET(
       })
       .reduce((s, e) => s + Number(e.amount), 0);
 
-    const totalDrawn = award.drawdownRequests
+    const totalDrawn = drawdowns
       .filter((d) => d.status === "approved" || d.status === "submitted")
       .reduce((s, d) => s + Number(d.totalAmount), 0);
 
@@ -82,7 +86,7 @@ export async function GET(
     const matchPct = award.matchPercentage;
     const matchRequired =
       matchPct > 0 ? totalAuthorized * (matchPct / (100 - matchPct)) : 0;
-    const matchCommitted = award.matchLedger.reduce(
+    const matchCommitted = matchLedger.reduce(
       (s, e) => s + Number(e.amount),
       0,
     );
@@ -151,7 +155,7 @@ export async function GET(
 
     const filename = `SF-425_${award.fain}_${periodStart}_${periodEnd}.pdf`;
 
-    return new NextResponse(pdfBytes, {
+    return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",

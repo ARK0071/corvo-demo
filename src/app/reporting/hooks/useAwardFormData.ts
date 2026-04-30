@@ -222,7 +222,8 @@ export function useDrawdowns(awardId: string | null): FormDataHookResult<Drawdow
 
 // ─── Debounce helper ───
 
-function useDebouncedCallback<T extends (...args: unknown[]) => void>(fn: T, delayMs: number): T {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function useDebouncedCallback<T extends (...args: any[]) => void>(fn: T, delayMs: number): T {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fnRef = useRef(fn);
   fnRef.current = fn;
