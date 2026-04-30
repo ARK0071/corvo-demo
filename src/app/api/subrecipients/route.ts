@@ -197,3 +197,24 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to update" }, { status: 500 });
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    setTenantConfigFromHeaders(request.headers);
+    const portId = getPortId();
+    const { id } = await request.json();
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    const existing = await prisma.demoSubrecipient.findFirst({ where: { id, portId } });
+    if (!existing) {
+      return NextResponse.json({ error: "Subrecipient not found" }, { status: 404 });
+    }
+    await prisma.demoSubrecipientReport.deleteMany({ where: { subrecipientId: id } });
+    await prisma.demoSubrecipient.delete({ where: { id } });
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Subrecipients DELETE error:", error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to delete" }, { status: 500 });
+  }
+}

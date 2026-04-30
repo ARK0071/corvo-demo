@@ -18,6 +18,7 @@ import { useSF270FormData, useDrawdowns, useDraftPersistence, useDraftLoader } f
 import { getAgencyTemplate } from "@/data/agency-templates";
 import type { SF270FormData } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull, fmt } from "./helpers";
+import { STATUS_LABELS, STATUS_COLORS } from "@/lib/reports/state-transitions";
 
 interface SF270FormViewProps {
   reportId: string;
@@ -28,11 +29,13 @@ interface SF270FormViewProps {
   awardTitle: string;
   awardingAgency?: string;
   onBack: () => void;
+  reportStatus?: string;
+  onStatusChange?: () => void;
 }
 
 export default function SF270FormView({
   reportId, awardId, periodStart, periodEnd,
-  program, awardTitle, awardingAgency, onBack,
+  program, awardTitle, awardingAgency, onBack, reportStatus,
 }: SF270FormViewProps) {
   const { data: apiData, loading, error, refresh } = useSF270FormData(awardId, periodStart, periodEnd);
   const { data: drawdowns } = useDrawdowns(awardId);
@@ -104,6 +107,11 @@ export default function SF270FormView({
             <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
               <Banknote className="h-5 w-5 text-[#3d8b8b]" />
               SF-270 Request for Advance or Reimbursement
+              {reportStatus && (
+                <Badge className={`ml-2 text-[10px] ${STATUS_COLORS[reportStatus] || ""}`}>
+                  {STATUS_LABELS[reportStatus] || reportStatus}
+                </Badge>
+              )}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {program} &mdash; {awardTitle}

@@ -10,6 +10,66 @@ datasource db {
 }
 
 // =============================================================================
+// SHARED TABLES - Users, Audit Log, Report Certifications
+// =============================================================================
+
+model User {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId    String   @map("port_id") @db.VarChar(100)
+  email     String   @unique
+  name      String
+  title     String
+  phone     String?
+  role      String   @default("drafter")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@index([portId])
+  @@map("users")
+}
+
+model ReportCertification {
+  id              String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId          String   @map("port_id") @db.VarChar(100)
+  reportId        String   @map("report_id") @db.Uuid
+  certifierUserId String?  @map("certifier_user_id") @db.Uuid
+  certifierName   String   @map("certifier_name")
+  certifierTitle  String   @map("certifier_title")
+  certifierEmail  String   @map("certifier_email")
+  certifierPhone  String?  @map("certifier_phone")
+  contentHash     String   @map("content_hash") @db.VarChar(64)
+  attestationText String   @map("attestation_text")
+  certifiedAt     DateTime @default(now()) @map("certified_at")
+  ipAddress       String?  @map("ip_address") @db.VarChar(45)
+  @@index([portId])
+  @@index([reportId])
+  @@map("report_certifications")
+}
+
+model AuditLog {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId       String   @map("port_id") @db.VarChar(100)
+  userId       String?  @map("user_id") @db.Uuid
+  reportId     String?  @map("report_id") @db.Uuid
+  awardId      String?  @map("award_id") @db.Uuid
+  action       String   @db.VarChar(100)
+  fieldChanged String?  @map("field_changed") @db.VarChar(100)
+  oldValue     Json?    @map("old_value")
+  newValue     Json?    @map("new_value")
+  ipAddress    String?  @map("ip_address") @db.VarChar(45)
+  userAgent    String?  @map("user_agent")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  @@index([portId])
+  @@index([reportId])
+  @@index([awardId])
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_log")
+}
+
+// =============================================================================
 // PRODUCTION TABLES - Using EC2 Qwen3 embeddings (2560 dimensions)
 // Per-port production tables will be created via SQL as needed.
 // =============================================================================
@@ -247,6 +307,12 @@ model Award {
   status                 String               @default("active") @db.VarChar(50)
   pipelineGrantId        String?              @map("pipeline_grant_id") @db.Uuid
   projectIds             Json                 @default("[]") @map("project_ids")
+  indirectCostRate         Decimal? @map("indirect_cost_rate") @db.Decimal(7,4)
+  indirectCostBase         String?  @map("indirect_cost_base") @db.VarChar(20)
+  indirectCostType         String?  @map("indirect_cost_type") @db.VarChar(20)
+  indirectCostPeriodStart  DateTime? @map("indirect_cost_period_start") @db.Date
+  indirectCostPeriodEnd    DateTime? @map("indirect_cost_period_end") @db.Date
+  nicraDocumentUrl         String?  @map("nicra_document_url")
   createdAt              DateTime             @default(now()) @map("created_at")
   updatedAt              DateTime             @updatedAt @map("updated_at")
   portProfile            PortProfile          @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
@@ -428,6 +494,12 @@ model ScheduledReport {
   notes            String    @default("")
   generatedContent Json?     @map("generated_content")
   narrativeDraft   String?   @map("narrative_draft")
+  drafterUserId    String?   @map("drafter_user_id") @db.Uuid
+  reviewerUserId   String?   @map("reviewer_user_id") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at")
+  reviewNotes      String?   @map("review_notes")
+  certificationId  String?   @map("certification_id") @db.Uuid
+  contentLockedAt  DateTime? @map("content_locked_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   award            Award     @relation(fields: [awardId], references: [id], onDelete: Cascade)
@@ -874,6 +946,12 @@ model DemoAward {
   status                 String                    @default("active") @db.VarChar(50)
   pipelineGrantId        String?                   @map("pipeline_grant_id") @db.Uuid
   projectIds             Json                      @default("[]") @map("project_ids")
+  indirectCostRate         Decimal? @map("indirect_cost_rate") @db.Decimal(7,4)
+  indirectCostBase         String?  @map("indirect_cost_base") @db.VarChar(20)
+  indirectCostType         String?  @map("indirect_cost_type") @db.VarChar(20)
+  indirectCostPeriodStart  DateTime? @map("indirect_cost_period_start") @db.Date
+  indirectCostPeriodEnd    DateTime? @map("indirect_cost_period_end") @db.Date
+  nicraDocumentUrl         String?  @map("nicra_document_url")
   createdAt              DateTime                  @default(now()) @map("created_at")
   updatedAt              DateTime                  @updatedAt @map("updated_at")
   portProfile            DemoPortProfile           @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
@@ -1036,6 +1114,12 @@ model DemoScheduledReport {
   notes            String    @default("")
   generatedContent Json?     @map("generated_content")
   narrativeDraft   String?   @map("narrative_draft")
+  drafterUserId    String?   @map("drafter_user_id") @db.Uuid
+  reviewerUserId   String?   @map("reviewer_user_id") @db.Uuid
+  reviewedAt       DateTime? @map("reviewed_at")
+  reviewNotes      String?   @map("review_notes")
+  certificationId  String?   @map("certification_id") @db.Uuid
+  contentLockedAt  DateTime? @map("content_locked_at")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
   award            DemoAward @relation(fields: [awardId], references: [id], onDelete: Cascade)

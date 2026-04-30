@@ -24,6 +24,7 @@ import { usePPRFormData, useReportSummary, useDraftPersistence, useDraftLoader }
 import type { PPRFormData, PPRMilestone, PPRSection } from "@/data/federal-report-templates";
 import { fmtDate } from "./helpers";
 import { useTenantHeaders } from "@/contexts/tenant-context";
+import { STATUS_LABELS, STATUS_COLORS } from "@/lib/reports/state-transitions";
 
 interface PPRFormViewProps {
   reportId: string;
@@ -33,11 +34,13 @@ interface PPRFormViewProps {
   program: string;
   awardTitle: string;
   onBack: () => void;
+  reportStatus?: string;
+  onStatusChange?: () => void;
 }
 
 export default function PPRFormView({
   reportId, awardId, periodStart, periodEnd,
-  program, awardTitle, onBack,
+  program, awardTitle, onBack, reportStatus,
 }: PPRFormViewProps) {
   const tenantHeaders = useTenantHeaders();
   const { data: apiData, loading, error, refresh } = usePPRFormData(awardId, periodStart, periodEnd);
@@ -234,6 +237,11 @@ export default function PPRFormView({
             <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
               <FileText className="h-5 w-5 text-[#3d8b8b]" />
               Performance Progress Report (SF-PPR)
+              {reportStatus && (
+                <Badge className={`ml-2 text-[10px] ${STATUS_COLORS[reportStatus] || ""}`}>
+                  {STATUS_LABELS[reportStatus] || reportStatus}
+                </Badge>
+              )}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               {formData.program} &mdash; {formData.awardTitle}

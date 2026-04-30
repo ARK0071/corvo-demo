@@ -12,6 +12,8 @@ import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
 import * as DemoAwards from "@/lib/db/repositories/demo-awards";
 import * as DemoReports from "@/lib/db/repositories/demo-reports";
 import type { Award, Expense, DrawdownRequest, MatchLedgerEntry, BudgetCategory } from "@/data/awards";
+import { computeIndirectCost } from "@/lib/reports/indirect-cost";
+import { computeMatchForPeriod } from "@/lib/reports/match-summary";
 
 // Static recipient info — in production this would come from PortProfile
 const RECIPIENT_INFO = {
@@ -161,6 +163,47 @@ function computeSF425(
 
   const validation = validateSF425(lineItems);
 
+  // Build category name lookup for indirect cost computation
+  const categoryNameById: Record<string, string> = {};
+  for (const cat of award.budgetCategories) {
+    categoryNameById[cat.id] = cat.name;
+  }
+
+  const expensesWithCategory = expenses.map(e => ({
+    date: e.date,
+    amount: e.amount,
+    status: e.status,
+    categoryName: categoryNameById[e.categoryId] ?? undefined,
+  }));
+
+  const indirectCost = computeIndirectCost(award, expensesWithCategory, periodStart, periodEnd);
+
+  const matchSummary = computeMatchForPeriod(
+    {
+      totalAmount: award.totalAmount,
+      matchPercentage: award.matchRequirement.percentage,
+      performancePeriodStart: award.performancePeriod.start,
+      performancePeriodEnd: award.performancePeriod.end,
+    },
+    matchLedger,
+    periodStart,
+    periodEnd,
+  );
+
+  // If we have real indirect cost data, update lines 11a-11f
+  if (indirectCost) {
+    const update = (ln: string, value: number | string) => {
+      const item = lineItems.find(l => l.lineNumber === ln);
+      if (item) item.value = value;
+    };
+    update("11a", indirectCost.type);
+    update("11b", `${(indirectCost.rate * 100).toFixed(1)}%`);
+    update("11c", `${indirectCost.periodStart} to ${indirectCost.periodEnd}`);
+    update("11d", indirectCost.base);
+    update("11e", Math.round(indirectCost.federalShare));
+    update("11f", Math.round(indirectCost.federalShare));
+  }
+
   return {
     federalAgency: award.awardingAgency,
     federalGrantNumber: award.fain,
@@ -178,6 +221,8 @@ function computeSF425(
     certifyingPhone: RECIPIENT_INFO.contactPhone,
     certifyingDate: new Date().toISOString().split("T")[0],
     validation,
+    indirectCost,
+    matchSummary,
   };
 }
 

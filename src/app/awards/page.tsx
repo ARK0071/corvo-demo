@@ -1048,12 +1048,24 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
 
   const canApprove = expense.status === "logged";
   const canFlag = expense.status === "logged" || expense.status === "approved";
+  const canDelete = expense.status !== "drawn";
 
   const handleStatusChange = async (status: string) => {
     await fetch("/api/awards/expenses", {
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ expenseId: expense.id, status }),
+    });
+    onRefresh();
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("Delete this expense?")) return;
+    await fetch("/api/awards/expenses", {
+      method: "DELETE",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: expense.id }),
     });
     onRefresh();
   };
@@ -1073,6 +1085,11 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
           <p className="text-xs text-muted-foreground">{expense.vendor} | {cat?.name || "Unknown category"}</p>
         </div>
         <span className="text-sm font-bold tabular-nums shrink-0">{fmtFull(expense.amount)}</span>
+        {canDelete && (
+          <span onClick={handleDelete} className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-muted-foreground hover:text-red-600 transition-colors" title="Delete expense">
+            <X className="h-3.5 w-3.5" />
+          </span>
+        )}
         {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
       </button>
 
@@ -1139,6 +1156,16 @@ function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; 
     onStatusChange();
   };
 
+  const handleDelete = async () => {
+    if (!confirm("Delete this drawdown?")) return;
+    await fetch("/api/awards/drawdowns", {
+      method: "DELETE",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: drawdown.id }),
+    });
+    onStatusChange();
+  };
+
   return (
     <Card>
       <CardContent className="pt-4 pb-4">
@@ -1163,6 +1190,9 @@ function DrawdownRow({ drawdown, onStatusChange }: { drawdown: DrawdownRequest; 
                 Mark {nextStatus.replace("_", " ")}
               </Button>
             )}
+            <span onClick={handleDelete} className="p-1 rounded cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 text-muted-foreground hover:text-red-600 transition-colors" title="Delete drawdown">
+              <X className="h-3.5 w-3.5" />
+            </span>
           </div>
         </div>
       </CardContent>

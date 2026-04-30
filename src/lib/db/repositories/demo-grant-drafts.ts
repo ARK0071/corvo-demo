@@ -62,6 +62,7 @@ export interface DraftSection {
   title: string;
   content: string;
   completeness: number; // 0-100
+  weight?: number; // percentage of total score
   lastEditedAt?: string;
   aiGenerated?: boolean;
   notes?: string;

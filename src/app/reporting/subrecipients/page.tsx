@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
   ChevronRight,
+  X,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -219,6 +220,7 @@ export default function SubrecipientsPage() {
                     <th className="text-right py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">Subaward</th>
                     <th className="text-right py-2 pr-4 text-xs font-medium text-muted-foreground uppercase">Spend</th>
                     <th className="text-left py-2 text-xs font-medium text-muted-foreground uppercase">Reports</th>
+                    <th className="py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -267,6 +269,23 @@ export default function SubrecipientsPage() {
                               )}
                             </div>
                           )}
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <span
+                            onClick={async () => {
+                              if (!confirm(`Delete ${sub.entityName}?`)) return;
+                              await fetch("/api/subrecipients", {
+                                method: "DELETE",
+                                headers: { ...headers, "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: sub.id }),
+                              });
+                              fetchData();
+                            }}
+                            className="inline-flex p-1 rounded cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 text-muted-foreground hover:text-red-600 transition-colors"
+                            title="Delete subrecipient"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </span>
                         </td>
                       </tr>
                     );

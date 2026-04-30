@@ -102,6 +102,12 @@ export interface Award {
   status: AwardStatus;
   pipelineGrantId?: string;
   projectIds: string[];
+  indirectCostRate?: number | null;
+  indirectCostBase?: string | null;
+  indirectCostType?: string | null;
+  indirectCostPeriodStart?: string | null;
+  indirectCostPeriodEnd?: string | null;
+  nicraDocumentUrl?: string | null;
   createdAt: string;
 }
 
@@ -624,6 +630,12 @@ function initializeSeedData() {
     ],
     status: "active",
     projectIds: ["proj-velasco-expansion"],
+    indirectCostRate: 42.5,
+    indirectCostBase: "MTDC",
+    indirectCostType: "provisional",
+    indirectCostPeriodStart: "2023-01-01",
+    indirectCostPeriodEnd: "2025-12-31",
+    nicraDocumentUrl: null,
     createdAt: "2023-03-01T00:00:00.000Z",
   });
 

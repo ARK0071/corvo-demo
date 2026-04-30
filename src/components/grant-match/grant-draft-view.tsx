@@ -252,7 +252,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
               gapAnnotations: [],
               wordCount: (s.content || "").split(/\s+/).filter(Boolean).length,
               maxWords: 5000,
-              weight: 100 / Math.max((d.sections || []).length, 1),
+              weight: s.weight || Math.round(100 / Math.max((d.sections || []).length, 1)),
             })),
             overallCompleteness: d.overallCompleteness || 0,
             attachmentsChecklist: (d.attachmentsChecklist || []).map((a: any) => ({
@@ -514,6 +514,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
         title: s.title,
         content: s.content,
         completeness: s.confidence === "high" ? 90 : s.confidence === "medium" ? 60 : 30,
+        weight: s.weight,
         aiGenerated: true,
       }));
 

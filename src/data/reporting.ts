@@ -12,7 +12,7 @@ import { getAllAwards, getAwardById, getExpensesForAward, getDrawdownsForAward, 
 // ─── Types ───
 
 export type ReportType = "sf425" | "progress" | "sefa" | "single_audit" | "closeout" | "custom";
-export type ReportStatus = "upcoming" | "in_progress" | "draft_ready" | "submitted" | "overdue";
+export type ReportStatus = "upcoming" | "in_progress" | "draft_ready" | "submitted" | "overdue" | "drafting" | "pending_review" | "ready_to_certify" | "certified";
 export type ReportFrequency = "quarterly" | "semi_annual" | "annual";
 
 export interface ScheduledReport {
@@ -30,6 +30,12 @@ export interface ScheduledReport {
   notes: string;
   generatedContent?: ReportContent;
   narrativeDraft?: string;
+  drafterUserId?: string | null;
+  reviewerUserId?: string | null;
+  reviewedAt?: string | null;
+  reviewNotes?: string | null;
+  certificationId?: string | null;
+  contentLockedAt?: string | null;
 }
 
 export interface ReportContent {
@@ -406,7 +412,7 @@ export function generateSEFA(fiscalYearEnd: string): { entries: SEFAEntry[]; tot
   return {
     entries,
     totalExpenditures,
-    meetsAuditThreshold: totalExpenditures >= 750_000,
+    meetsAuditThreshold: totalExpenditures >= 1_000_000,
   };
 }
 

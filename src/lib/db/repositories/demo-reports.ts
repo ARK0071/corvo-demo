@@ -164,6 +164,12 @@ function toScheduledReport(report: DemoScheduledReport & { award: { title: strin
     notes: report.notes,
     generatedContent: (report.generatedContent as unknown) as ReportContent | undefined,
     narrativeDraft: report.narrativeDraft ?? undefined,
+    drafterUserId: report.drafterUserId ?? null,
+    reviewerUserId: report.reviewerUserId ?? null,
+    reviewedAt: report.reviewedAt?.toISOString() ?? null,
+    reviewNotes: report.reviewNotes ?? null,
+    certificationId: report.certificationId ?? null,
+    contentLockedAt: report.contentLockedAt?.toISOString() ?? null,
   };
 }
 

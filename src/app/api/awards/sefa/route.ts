@@ -2,7 +2,7 @@
  * API Route: /api/awards/sefa
  *
  * Generates Schedule of Expenditures of Federal Awards (SEFA) from DB records.
- * Compliance: 2 CFR 200 Subpart F (Single Audit threshold = $750,000)
+ * Compliance: 2 CFR 200 Subpart F (Single Audit threshold = $1,000,000)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       entries,
       totalExpenditures,
-      meetsAuditThreshold: totalExpenditures >= 750_000,
+      meetsAuditThreshold: totalExpenditures >= 1_000_000,
     });
   } catch (error) {
     console.error("SEFA GET error:", error);

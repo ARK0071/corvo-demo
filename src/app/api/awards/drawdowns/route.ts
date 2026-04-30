@@ -87,3 +87,24 @@ export async function PUT(request: NextRequest) {
     );
   }
 }
+
+export async function DELETE(request: NextRequest) {
+  try {
+    setTenantConfigFromHeaders(request.headers);
+    const { id } = await request.json();
+    if (!id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    const deleted = await DemoAwards.deleteDrawdown(id);
+    if (!deleted) {
+      return NextResponse.json({ error: "Drawdown not found" }, { status: 404 });
+    }
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Drawdowns DELETE error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete drawdown" },
+      { status: 500 }
+    );
+  }
+}

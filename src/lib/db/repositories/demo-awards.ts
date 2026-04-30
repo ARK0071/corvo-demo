@@ -161,6 +161,16 @@ function toAward(award: AwardWithRelations): Award {
     status: award.status as AwardStatus,
     pipelineGrantId: award.pipelineGrantId || undefined,
     projectIds: (award.projectIds as string[]) || [],
+    indirectCostRate: award.indirectCostRate ? Number(award.indirectCostRate) : null,
+    indirectCostBase: award.indirectCostBase ?? null,
+    indirectCostType: award.indirectCostType ?? null,
+    indirectCostPeriodStart: award.indirectCostPeriodStart
+      ? award.indirectCostPeriodStart.toISOString().split("T")[0]
+      : null,
+    indirectCostPeriodEnd: award.indirectCostPeriodEnd
+      ? award.indirectCostPeriodEnd.toISOString().split("T")[0]
+      : null,
+    nicraDocumentUrl: award.nicraDocumentUrl ?? null,
     createdAt: award.createdAt.toISOString(),
   };
 }
@@ -221,6 +231,12 @@ export async function createAward(
     pipelineGrantId?: string;
     projectIds?: string[];
     budgetCategories?: { name: string; ceiling: number }[];
+    indirectCostRate?: number;
+    indirectCostBase?: string;
+    indirectCostType?: string;
+    indirectCostPeriodStart?: string;
+    indirectCostPeriodEnd?: string;
+    nicraDocumentUrl?: string;
   },
   portProfileIdOrSlug: string
 ): Promise<Award> {
@@ -252,6 +268,16 @@ export async function createAward(
       status: data.status || "active",
       pipelineGrantId: data.pipelineGrantId || null,
       projectIds: data.projectIds || [],
+      indirectCostRate: data.indirectCostRate ?? null,
+      indirectCostBase: data.indirectCostBase ?? null,
+      indirectCostType: data.indirectCostType ?? null,
+      indirectCostPeriodStart: data.indirectCostPeriodStart
+        ? parseDateRequired(data.indirectCostPeriodStart, "indirectCostPeriodStart")
+        : null,
+      indirectCostPeriodEnd: data.indirectCostPeriodEnd
+        ? parseDateRequired(data.indirectCostPeriodEnd, "indirectCostPeriodEnd")
+        : null,
+      nicraDocumentUrl: data.nicraDocumentUrl ?? null,
       budgetCategories: {
         create: (data.budgetCategories || []).map((c) => ({
           portId,
@@ -699,6 +725,20 @@ export async function deleteAward(id: string): Promise<boolean> {
   if (!existing) return false;
 
   await prisma.demoAward.delete({ where: { id } });
+  return true;
+}
+
+export async function deleteExpense(id: string): Promise<boolean> {
+  const existing = await prisma.demoExpense.findUnique({ where: { id } });
+  if (!existing) return false;
+  await prisma.demoExpense.delete({ where: { id } });
+  return true;
+}
+
+export async function deleteDrawdown(id: string): Promise<boolean> {
+  const existing = await prisma.demoDrawdownRequest.findUnique({ where: { id } });
+  if (!existing) return false;
+  await prisma.demoDrawdownRequest.delete({ where: { id } });
   return true;
 }
 
