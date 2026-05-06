@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withAuth } from "@/lib/auth/api-guard";
 import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
 import * as DemoAwards from "@/lib/db/repositories/demo-awards";
 import type { AwardStatus } from "@/data/awards";
 
 // GET: List all awards or get by ID
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async (request) => {
   try {
     setTenantConfigFromHeaders(request.headers);
 
@@ -12,7 +13,6 @@ export async function GET(request: NextRequest) {
     const id = searchParams.get("id");
     const status = searchParams.get("status") as AwardStatus | null;
 
-    // If ID provided, return single award
     if (id) {
       const award = await DemoAwards.getAwardById(id);
       if (!award) {
@@ -21,13 +21,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(award);
     }
 
-    // If status filter provided
     if (status) {
       const awards = await DemoAwards.getAwardsByStatus(status);
       return NextResponse.json({ awards, total: awards.length });
     }
 
-    // Otherwise return all awards
     const awards = await DemoAwards.getAllAwards();
     return NextResponse.json({ awards, total: awards.length });
   } catch (error) {
@@ -37,10 +35,10 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // POST: Create a new award
-export async function POST(request: NextRequest) {
+export const POST = withAuth(async (request) => {
   try {
     setTenantConfigFromHeaders(request.headers);
     const body = await request.json();
@@ -63,10 +61,10 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // PUT: Update award status
-export async function PUT(request: NextRequest) {
+export const PUT = withAuth(async (request) => {
   try {
     setTenantConfigFromHeaders(request.headers);
     const body = await request.json();
@@ -93,10 +91,10 @@ export async function PUT(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});
 
 // DELETE: Delete an award
-export async function DELETE(request: NextRequest) {
+export const DELETE = withAuth(async (request) => {
   try {
     setTenantConfigFromHeaders(request.headers);
     const searchParams = request.nextUrl.searchParams;
@@ -119,4 +117,4 @@ export async function DELETE(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+});

@@ -1,4 +1,5 @@
 import { prisma } from "../db/client";
+import { getAuthUserId, getAuthPortId } from "../db/tenant-config.server";
 import { getPortIdFromRequest, getUserIdFromRequest } from "../db/tenant-config.server";
 import type { Prisma } from "@/generated/prisma";
 
@@ -14,8 +15,19 @@ export async function audit(
     metadata?: Record<string, unknown>;
   },
 ): Promise<void> {
-  const portId = getPortIdFromRequest(request.headers);
-  const userId = getUserIdFromRequest(request.headers);
+  // Prefer session-based identity; fall back to headers during migration
+  let portId: string;
+  let userId: string | null;
+
+  try {
+    portId = await getAuthPortId();
+    userId = await getAuthUserId();
+  } catch {
+    // Fallback for routes not yet migrated
+    portId = getPortIdFromRequest(request.headers);
+    userId = getUserIdFromRequest(request.headers);
+  }
+
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0] ?? null;
   const ua = request.headers.get("user-agent") ?? null;
 

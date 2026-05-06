@@ -22,7 +22,7 @@ import { useSF425FormData, useDraftPersistence, useDraftLoader } from "../hooks/
 import { getAgencyTemplate } from "@/data/agency-templates";
 import type { SF425FormData, SF425LineItem } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull } from "./helpers";
-import { useCurrentUser, useUserHeaders } from "@/contexts/user-context";
+import { useCurrentUser } from "@/contexts/user-context";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/reports/state-transitions";
 import ActivityTimeline from "./ActivityTimeline";
 import { Shield, Send, FileDown, MessageSquare, Clock } from "lucide-react";
@@ -59,8 +59,7 @@ export default function SF425FormView({
   const [remarks, setRemarks] = useState("");
   const [draftRestored, setDraftRestored] = useState(false);
 
-  const { currentUser } = useCurrentUser();
-  const userHeaders = useUserHeaders();
+  const { user: currentUser } = useCurrentUser();
   const [showCertifyModal, setShowCertifyModal] = useState(false);
   const [certifying, setCertifying] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -126,7 +125,7 @@ export default function SF425FormView({
     try {
       const res = await fetch(`/api/reports/${reportId}/submit-for-review`, {
         method: "POST",
-        headers: { ...userHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
       });
       if (!res.ok) {
         const data = await res.json();
@@ -137,7 +136,7 @@ export default function SF425FormView({
       setActionError(e instanceof Error ? e.message : "Failed");
     }
     setActionLoading(false);
-  }, [reportId, userHeaders, onStatusChange]);
+  }, [reportId, onStatusChange]);
 
   const handleApproveReview = useCallback(async () => {
     setActionLoading(true);
@@ -145,7 +144,7 @@ export default function SF425FormView({
     try {
       const res = await fetch(`/api/reports/${reportId}/approve-review`, {
         method: "POST",
-        headers: { ...userHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
       });
       if (!res.ok) {
         const data = await res.json();
@@ -156,7 +155,7 @@ export default function SF425FormView({
       setActionError(e instanceof Error ? e.message : "Failed");
     }
     setActionLoading(false);
-  }, [reportId, userHeaders, onStatusChange]);
+  }, [reportId, onStatusChange]);
 
   const handleRequestChanges = useCallback(async () => {
     setActionLoading(true);
@@ -164,7 +163,7 @@ export default function SF425FormView({
     try {
       const res = await fetch(`/api/reports/${reportId}/request-changes`, {
         method: "POST",
-        headers: { ...userHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: changeNotes }),
       });
       if (!res.ok) {
@@ -178,7 +177,7 @@ export default function SF425FormView({
       setActionError(e instanceof Error ? e.message : "Failed");
     }
     setActionLoading(false);
-  }, [reportId, userHeaders, changeNotes, onStatusChange]);
+  }, [reportId, changeNotes, onStatusChange]);
 
   const handleCertify = useCallback(async () => {
     setCertifying(true);
@@ -187,7 +186,7 @@ export default function SF425FormView({
       const attestation = "By signing this report, I certify to the best of my knowledge and belief that the report is true, complete, and accurate, and the expenditures, disbursements and cash receipts are for the purposes and intent set forth in the award documents. I am aware that any false, fictitious, or fraudulent information may subject me to criminal, civil, or administrative penalties. (U.S. Code, Title 18, Section 1001 and Title 31, Sections 3729-3730 and 3801-3812.)";
       const res = await fetch(`/api/reports/${reportId}/certify`, {
         method: "POST",
-        headers: { ...userHeaders, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ attestationText: attestation, phone: currentUser?.phone }),
       });
       if (!res.ok) {
@@ -207,7 +206,7 @@ export default function SF425FormView({
       setActionError(e instanceof Error ? e.message : "Failed");
     }
     setCertifying(false);
-  }, [reportId, userHeaders, currentUser, onStatusChange]);
+  }, [reportId, currentUser, onStatusChange]);
 
   const handleDownloadPDF = useCallback(() => {
     window.open(`/api/reports/${reportId}/pdf?form=sf425`, "_blank");

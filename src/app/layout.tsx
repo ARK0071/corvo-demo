@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
+import { SessionProvider } from "next-auth/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ProfileProvider } from "@/components/profile-provider";
@@ -24,15 +25,17 @@ export default function RootLayout({
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        <ThemeProvider>
-          <TenantProvider>
-            <ProfileProvider>
-              <TooltipProvider>
-                <AppLayout>{children}</AppLayout>
-              </TooltipProvider>
-            </ProfileProvider>
-          </TenantProvider>
-        </ThemeProvider>
+        <SessionProvider>
+          <ThemeProvider>
+            <TenantProvider>
+              <ProfileProvider>
+                <TooltipProvider>
+                  <AppLayout>{children}</AppLayout>
+                </TooltipProvider>
+              </ProfileProvider>
+            </TenantProvider>
+          </ThemeProvider>
+        </SessionProvider>
       </body>
     </html>
   );
