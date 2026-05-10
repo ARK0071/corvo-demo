@@ -11,8 +11,8 @@ export function validateOrigin(request: Request): boolean {
 
   const origin = request.headers.get("origin");
   const allowedOrigins = [
-    process.env.NEXTAUTH_URL,
-    process.env.AUTH0_BASE_URL, // backward compat
+    process.env.AUTH_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
     "http://localhost:3000",
   ].filter(Boolean);
 

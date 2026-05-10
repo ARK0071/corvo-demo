@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["pg", "@prisma/client", "pdf-parse"],
   outputFileTracingIncludes: {
     "/api/reports/\\[id\\]/pdf": ["./src/lib/pdf/SF-425_template.pdf"],
   },

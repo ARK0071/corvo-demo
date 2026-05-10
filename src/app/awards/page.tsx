@@ -700,7 +700,7 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
               { label: "Awarded", value: fmt(award.totalAmount), sub: "100%", color: "" },
               { label: "Spent", value: fmt(totalSpent), sub: `${pctOf(totalSpent, award.totalAmount)}%`, color: "" },
               { label: "Drawn Down", value: fmt(totalDrawn), sub: `${pctOf(totalDrawn, award.totalAmount)}%`, color: "text-emerald-600 dark:text-emerald-400" },
-              { label: "Remaining", value: fmt(award.totalAmount - totalDrawn), sub: `${pctOf(award.totalAmount - totalDrawn, award.totalAmount)}%`, color: "" },
+              { label: "Remaining", value: fmt(award.totalAmount - totalSpent), sub: `${pctOf(award.totalAmount - totalSpent, award.totalAmount)}%`, color: "" },
               { label: "Match", value: `${Math.round(matchStatus.percentage)}%`, sub: `${matchStatus.target}% req`, color: matchStatus.status === "on_track" ? "text-emerald-600 dark:text-emerald-400" : matchStatus.status === "at_risk" ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400" },
             ].map((item, i) => (
               <div key={i} className={`text-center ${i > 0 ? "border-l border-border" : ""} px-2`}>

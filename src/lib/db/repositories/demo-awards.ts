@@ -442,6 +442,24 @@ export async function updateExpenseStatus(
     where: { id: expenseId },
     data: { status },
   });
+
+  // Adjust category.spent based on whether this expense is now counted or not.
+  // Non-flagged statuses (logged, approved, drawn) are counted; flagged is not.
+  const wasCountedBefore = existing.status !== "flagged";
+  const isCountedAfter = status !== "flagged";
+
+  if (wasCountedBefore && !isCountedAfter) {
+    await prisma.demoBudgetCategory.update({
+      where: { id: existing.categoryId },
+      data: { spent: { decrement: Number(existing.amount) } },
+    });
+  } else if (!wasCountedBefore && isCountedAfter) {
+    await prisma.demoBudgetCategory.update({
+      where: { id: existing.categoryId },
+      data: { spent: { increment: Number(existing.amount) } },
+    });
+  }
+
   return toExpense(expense);
 }
 
@@ -708,7 +726,7 @@ export async function getAwardStats(): Promise<{
     totalAwarded,
     totalSpent,
     totalDrawn,
-    totalRemaining: totalAwarded - totalDrawn,
+    totalRemaining: totalAwarded - totalSpent,
     activeCount,
     closeoutCount,
     totalAwards: awards.length,
@@ -731,6 +749,15 @@ export async function deleteAward(id: string): Promise<boolean> {
 export async function deleteExpense(id: string): Promise<boolean> {
   const existing = await prisma.demoExpense.findUnique({ where: { id } });
   if (!existing) return false;
+
+  // Decrement category spent if this expense was being counted (not flagged)
+  if (existing.status !== "flagged") {
+    await prisma.demoBudgetCategory.update({
+      where: { id: existing.categoryId },
+      data: { spent: { decrement: Number(existing.amount) } },
+    });
+  }
+
   await prisma.demoExpense.delete({ where: { id } });
   return true;
 }
