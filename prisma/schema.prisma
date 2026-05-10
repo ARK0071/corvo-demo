@@ -14,18 +14,88 @@ datasource db {
 // =============================================================================
 
 model User {
-  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  portId    String   @map("port_id") @db.VarChar(100)
-  email     String   @unique
-  name      String
-  title     String
-  phone     String?
-  role      String   @default("drafter")
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId        String    @map("port_id") @db.VarChar(100)
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  name          String
+  title         String    @default("")
+  phone         String?
+  image         String?
+  role          String    @default("drafter")
+  active        Boolean   @default(true)
+  lastLoginAt   DateTime? @map("last_login_at")
+  loginCount    Int       @default(0) @map("login_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  accounts      Account[]
+  sessions      Session[]
+  apiKeys       ApiKey[]
+
   @@index([portId])
   @@map("users")
+}
+
+model Account {
+  id                String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model ApiKey {
+  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  name       String    @db.VarChar(255)
+  keyHash    String    @unique @map("key_hash") @db.VarChar(64)
+  keyPrefix  String    @map("key_prefix") @db.VarChar(10)
+  scopes     Json      @default("[]")
+  expiresAt  DateTime? @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
 }
 
 model ReportCertification {

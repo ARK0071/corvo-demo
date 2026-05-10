@@ -3,7 +3,8 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield } from "lucide-react";
+import { useCurrentUser } from "@/contexts/user-context";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import {
   Sidebar,
@@ -62,6 +63,21 @@ export default function AppSidebar() {
     <Suspense>
       <AppSidebarInner />
     </Suspense>
+  );
+}
+
+function AdminNavItem({ collapsed, isActive }: { collapsed: boolean; isActive: boolean }) {
+  const { isAdmin } = useCurrentUser();
+  if (!isAdmin) return null;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild>
+        <Link href="/admin" className={`flex items-center w-full ${isActive ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>
+          <Shield className="mr-2 h-4 w-4 shrink-0" />
+          {!collapsed && <span>Admin</span>}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 }
 
@@ -126,6 +142,7 @@ function AppSidebarInner() {
       </SidebarContent>
       <SidebarFooter className="border-t">
         <SidebarMenu>
+          <AdminNavItem collapsed={collapsed} isActive={checkIsActive("/admin")} />
           <SidebarMenuItem>
             <SidebarMenuButton asChild>
               <Link href="/settings" className={`flex items-center w-full ${checkIsActive("/settings") ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}>

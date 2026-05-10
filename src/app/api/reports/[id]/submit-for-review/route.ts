@@ -1,22 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { withAuth } from "@/lib/auth/api-guard";
 import { prisma } from "@/lib/db/client";
 import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
-import { getCurrentUser } from "@/lib/db/tenant-config.server";
 import { assertTransition } from "@/lib/reports/state-transitions";
 import { audit } from "@/lib/audit/log";
 
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const { id: reportId } = await params;
+export const POST = withAuth(async (request, { user, params }) => {
+  const reportId = params?.id;
+  if (!reportId) {
+    return NextResponse.json({ error: "Missing report ID" }, { status: 400 });
+  }
+
   setTenantConfigFromHeaders(request.headers);
   const { portId } = getTenantConfig();
-  const user = await getCurrentUser(request.headers);
-
-  if (!user) {
-    return NextResponse.json({ error: "User required" }, { status: 401 });
-  }
 
   try {
     const report = await prisma.demoScheduledReport.findFirst({
@@ -26,7 +22,6 @@ export async function POST(
       return NextResponse.json({ error: "Report not found" }, { status: 404 });
     }
 
-    // Allow transition from "upcoming" too (auto-starts drafting)
     const fromStatus = report.status === "upcoming" ? "drafting" : report.status;
     try {
       assertTransition(fromStatus, "pending_review");
@@ -56,4 +51,4 @@ export async function POST(
     console.error("[submit-for-review] Error:", error);
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
-}
+});

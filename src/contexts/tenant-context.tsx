@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import { useSession } from "next-auth/react";
 import type { Environment } from "@/lib/db/tenant-config";
 import { AVAILABLE_PORTS, EMBEDDING_DIMENSIONS, EMBEDDING_SERVICE } from "@/lib/db/tenant-config";
 
@@ -28,16 +29,20 @@ interface StoredConfig {
 }
 
 const DEFAULT_CONFIG: StoredConfig = {
-  environment: "test",
+  environment: "demo",
   portId: "freeport",
   portSlug: "port-freeport",
 };
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession();
   const [config, setConfig] = useState<StoredConfig>(DEFAULT_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Load config from localStorage on mount
+  const isAdmin = session?.user?.role === "admin";
+  const userPortId = session?.user?.portId;
+
+  // Load config from localStorage on mount (for admin env preference)
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
@@ -55,6 +60,20 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
   }, []);
 
+  // Non-admin users: force port from session assignment
+  useEffect(() => {
+    if (userPortId && !isAdmin) {
+      const port = AVAILABLE_PORTS.find((p) => p.id === userPortId);
+      if (port) {
+        setConfig((prev) => ({
+          ...prev,
+          portId: port.id,
+          portSlug: port.slug,
+        }));
+      }
+    }
+  }, [userPortId, isAdmin]);
+
   // Save config to localStorage when it changes
   useEffect(() => {
     if (!isLoading) {
@@ -63,10 +82,12 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   }, [config, isLoading]);
 
   const setEnvironment = useCallback((env: Environment) => {
+    if (!isAdmin) return; // Only admins can change environment
     setConfig((prev) => ({ ...prev, environment: env }));
-  }, []);
+  }, [isAdmin]);
 
   const setPort = useCallback((portId: string) => {
+    if (!isAdmin) return; // Only admins can switch ports
     const port = AVAILABLE_PORTS.find((p) => p.id === portId);
     if (port) {
       setConfig((prev) => ({
@@ -75,11 +96,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         portSlug: port.slug,
       }));
     }
-  }, []);
+  }, [isAdmin]);
 
   const portInfo = AVAILABLE_PORTS.find((p) => p.id === config.portId) || AVAILABLE_PORTS[0];
 
-  const value: TenantContextValue = {
+  const value: TenantContextValue = useMemo(() => ({
     environment: config.environment,
     portId: config.portId,
     portSlug: config.portSlug,
@@ -90,7 +111,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     setPort,
     availablePorts: AVAILABLE_PORTS,
     isLoading,
-  };
+  }), [config, portInfo, setEnvironment, setPort, isLoading]);
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }
@@ -104,8 +125,8 @@ export function useTenant(): TenantContextValue {
 }
 
 /**
- * Hook to get headers for API requests with tenant info
- * Memoized to prevent infinite re-renders when used in useEffect/useCallback dependencies
+ * Hook to get headers for API requests with tenant info.
+ * Auth is now handled via session cookies automatically.
  */
 export function useTenantHeaders(): Record<string, string> {
   const tenant = useTenant();
