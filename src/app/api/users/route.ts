@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 
 export async function GET(request: Request) {
-  setTenantConfigFromHeaders(request.headers);
-  const { portId } = getTenantConfig();
+  const { portId } = await resolveSecureTenant(request.headers);
 
   try {
     let users = await prisma.user.findMany({

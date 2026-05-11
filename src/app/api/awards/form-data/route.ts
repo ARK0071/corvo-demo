@@ -8,31 +8,68 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
-import * as DemoReports from "@/lib/db/repositories/demo-reports";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import { getTenantConfig } from "@/lib/db/tenant-config";
+import { prisma } from "@/lib/db/client";
+import * as Awards from "@/lib/db/repositories/awards";
 import type { Award, Expense, DrawdownRequest, MatchLedgerEntry, BudgetCategory } from "@/data/awards";
 import { computeIndirectCost } from "@/lib/reports/indirect-cost";
 import { computeMatchForPeriod } from "@/lib/reports/match-summary";
 
-// Static recipient info — in production this would come from PortProfile
-const RECIPIENT_INFO = {
-  name: "Port Freeport",
-  address: "1100 Cherry Street, Freeport, TX 77541",
-  uei: "NM6LJHKFGCK5",
-  ein: "74-6079025",
-  congressionalDistrict: "TX-14",
-  contactName: "Phyllis Saathoff",
-  contactTitle: "Executive Director/CEO",
-  contactPhone: "(979) 233-2667",
-  contactEmail: "psaathoff@portfreeport.com",
+interface RecipientInfo {
+  name: string;
+  address: string;
+  uei: string;
+  ein: string;
+  congressionalDistrict: string;
+  contactName: string;
+  contactTitle: string;
+  contactPhone: string;
+  contactEmail: string;
+}
+
+const FALLBACK_RECIPIENT: RecipientInfo = {
+  name: "",
+  address: "",
+  uei: "",
+  ein: "",
+  congressionalDistrict: "",
+  contactName: "",
+  contactTitle: "",
+  contactPhone: "",
+  contactEmail: "",
 };
+
+async function getRecipientInfo(): Promise<RecipientInfo> {
+  const portId = getTenantConfig().portId;
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { name: true, legalName: true, uei: true, ein: true, locationData: true, leadership: true },
+  });
+  if (!profile) return FALLBACK_RECIPIENT;
+
+  const loc = (profile.locationData as any) || {};
+  const leader = (profile.leadership as any) || {};
+  const address = [loc.address, loc.city, loc.stateCode, loc.zip].filter(Boolean).join(", ");
+
+  return {
+    name: profile.legalName || profile.name,
+    address: address || "",
+    uei: profile.uei || "",
+    ein: profile.ein || "",
+    congressionalDistrict: loc.congressionalDistrict || "",
+    contactName: leader.name || "",
+    contactTitle: leader.title || "",
+    contactPhone: leader.phone || "",
+    contactEmail: leader.email || "",
+  };
+}
 
 // ─── GET: Compute form data from DB ───
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const params = request.nextUrl.searchParams;
     const awardId = params.get("awardId");
@@ -46,10 +83,10 @@ export async function GET(request: NextRequest) {
 
     // Fetch all award data in parallel
     const [award, allExpenses, drawdowns, matchLedger] = await Promise.all([
-      DemoAwards.getAwardById(awardId),
-      DemoAwards.getExpensesForAward(awardId),
-      DemoAwards.getDrawdownsForAward(awardId),
-      DemoAwards.getMatchLedgerForAward(awardId),
+      Awards.getAwardById(awardId),
+      Awards.getExpensesForAward(awardId),
+      Awards.getDrawdownsForAward(awardId),
+      Awards.getMatchLedgerForAward(awardId),
     ]);
 
     if (!award) {
@@ -77,16 +114,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "periodStart and periodEnd are required for form generation" }, { status: 400 });
     }
 
+    const recipientInfo = await getRecipientInfo();
+
     if (formType === "sf425") {
-      return NextResponse.json(computeSF425(award, nonFlaggedExpenses, drawdowns, matchLedger, periodStart, periodEnd));
+      return NextResponse.json(computeSF425(award, nonFlaggedExpenses, drawdowns, matchLedger, periodStart, periodEnd, recipientInfo));
     }
 
     if (formType === "sf270") {
-      return NextResponse.json(computeSF270(award, nonFlaggedExpenses, drawdowns, matchLedger, periodStart, periodEnd));
+      return NextResponse.json(computeSF270(award, nonFlaggedExpenses, drawdowns, matchLedger, periodStart, periodEnd, recipientInfo));
     }
 
     if (formType === "ppr") {
-      return NextResponse.json(computePPR(award, nonFlaggedExpenses, drawdowns, periodStart, periodEnd));
+      return NextResponse.json(computePPR(award, nonFlaggedExpenses, drawdowns, periodStart, periodEnd, recipientInfo));
     }
 
     return NextResponse.json({ error: "Invalid formType. Use: sf425, sf270, ppr, summary, raw" }, { status: 400 });
@@ -107,7 +146,8 @@ function computeSF425(
   drawdowns: DrawdownRequest[],
   matchLedger: MatchLedgerEntry[],
   periodStart: string,
-  periodEnd: string
+  periodEnd: string,
+  recipientInfo: RecipientInfo
 ) {
   // Cash calculations
   const cashReceipts = drawdowns
@@ -210,18 +250,18 @@ function computeSF425(
   return {
     federalAgency: award.awardingAgency,
     federalGrantNumber: award.fain,
-    recipientName: RECIPIENT_INFO.name,
-    recipientAddress: RECIPIENT_INFO.address,
-    uei: RECIPIENT_INFO.uei,
-    ein: RECIPIENT_INFO.ein,
+    recipientName: recipientInfo.name,
+    recipientAddress: recipientInfo.address,
+    uei: recipientInfo.uei,
+    ein: recipientInfo.ein,
     reportingPeriodEnd: periodEnd,
     reportType,
     basisOfAccounting: "accrual",
     lineItems,
     remarks: "",
-    certifyingOfficial: RECIPIENT_INFO.contactName,
-    certifyingTitle: RECIPIENT_INFO.contactTitle,
-    certifyingPhone: RECIPIENT_INFO.contactPhone,
+    certifyingOfficial: recipientInfo.contactName,
+    certifyingTitle: recipientInfo.contactTitle,
+    certifyingPhone: recipientInfo.contactPhone,
     certifyingDate: new Date().toISOString().split("T")[0],
     validation,
     indirectCost,
@@ -274,7 +314,8 @@ function computeSF270(
   drawdowns: DrawdownRequest[],
   matchLedger: MatchLedgerEntry[],
   periodStart: string,
-  periodEnd: string
+  periodEnd: string,
+  recipientInfo: RecipientInfo
 ) {
   const periodExpenses = expenses.filter((e) => e.date >= periodStart && e.date <= periodEnd);
   const totalProgramOutlays = periodExpenses.reduce((s, e) => s + e.amount, 0);
@@ -313,8 +354,8 @@ function computeSF270(
   return {
     federalSponsoringAgency: award.awardingAgency,
     grantNumber: award.fain,
-    recipientName: RECIPIENT_INFO.name,
-    recipientAddress: RECIPIENT_INFO.address,
+    recipientName: recipientInfo.name,
+    recipientAddress: recipientInfo.address,
     requestType: "reimbursement",
     computationPeriod: { start: periodStart, end: periodEnd },
     requestNumber,
@@ -324,8 +365,8 @@ function computeSF270(
     federalShareOfOutlays,
     federalPaymentsReceived,
     federalShareNowRequested,
-    certifyingOfficial: RECIPIENT_INFO.contactName,
-    certifyingTitle: RECIPIENT_INFO.contactTitle,
+    certifyingOfficial: recipientInfo.contactName,
+    certifyingTitle: recipientInfo.contactTitle,
     certifyingDate: new Date().toISOString().split("T")[0],
     validation,
   };
@@ -338,7 +379,8 @@ function computePPR(
   expenses: Expense[],
   drawdowns: DrawdownRequest[],
   periodStart: string,
-  periodEnd: string
+  periodEnd: string,
+  recipientInfo: RecipientInfo
 ) {
   const totalExpended = expenses.reduce((s, e) => s + e.amount, 0);
   const pctSpent = award.totalAmount > 0 ? Math.round((totalExpended / award.totalAmount) * 100) : 0;
@@ -395,7 +437,7 @@ function computePPR(
     awardTitle: award.title,
     program: award.program,
     reportingPeriod: { start: periodStart, end: periodEnd },
-    recipientName: RECIPIENT_INFO.name,
+    recipientName: recipientInfo.name,
     sections,
     milestones,
     objectives,

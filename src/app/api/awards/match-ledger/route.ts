@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 import type { MatchType } from "@/data/awards";
 
 // GET: Get match ledger for an award
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const awardId = searchParams.get("awardId");
@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "awardId is required" }, { status: 400 });
     }
 
-    const entries = await DemoAwards.getMatchLedgerForAward(awardId);
+    const entries = await Awards.getMatchLedgerForAward(awardId);
     return NextResponse.json({ entries, total: entries.length });
   } catch (error) {
     console.error("Match ledger GET error:", error);
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
 // POST: Add a match entry
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { awardId, date, description, amount, type, documentation } = body;
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const entry = await DemoAwards.addMatchEntry({
+    const entry = await Awards.addMatchEntry({
       awardId,
       date,
       description,

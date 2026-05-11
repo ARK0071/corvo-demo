@@ -393,6 +393,9 @@ model Award {
   budgetModifications    BudgetModification[]
   scheduledReports       ScheduledReport[]
   closeoutChecklist      CloseoutChecklist?
+  subrecipients          Subrecipient[]
+  complianceChecklists   ComplianceChecklist[]
+  auditFindings          AuditFinding[]
 
   @@index([portProfileId])
   @@index([status])
@@ -590,6 +593,136 @@ model CloseoutChecklist {
   award     Award    @relation(fields: [awardId], references: [id], onDelete: Cascade)
 
   @@map("closeout_checklists")
+}
+
+// =============================================================================
+// SUBRECIPIENTS - Subaward tracking and monitoring
+// =============================================================================
+
+model Subrecipient {
+  id                    String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId               String              @map("award_id") @db.Uuid
+  entityName            String              @map("entity_name") @db.VarChar(255)
+  uei                   String?             @db.VarChar(20)
+  classification        String              @db.VarChar(20)
+  classificationAnswers Json                @default("[]") @map("classification_answers")
+  riskLevel             String              @default("standard") @map("risk_level") @db.VarChar(20)
+  riskFactors           Json                @default("[]") @map("risk_factors")
+  monitoringIntensity   String              @default("standard") @map("monitoring_intensity") @db.VarChar(20)
+  subawardAmount        Decimal             @map("subaward_amount") @db.Decimal(15, 2)
+  cumulativeSpend       Decimal             @default(0) @map("cumulative_spend") @db.Decimal(15, 2)
+  singleAuditRequired   Boolean             @default(false) @map("single_audit_required")
+  status                String              @default("active") @db.VarChar(20)
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+  award                 Award               @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  reports               SubrecipientReport[]
+
+  @@index([awardId])
+  @@map("subrecipients")
+}
+
+model SubrecipientReport {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  subrecipientId  String       @map("subrecipient_id") @db.Uuid
+  reportType      String       @map("report_type") @db.VarChar(50)
+  title           String       @db.VarChar(255)
+  dueDate         DateTime     @map("due_date") @db.Date
+  status          String       @default("pending") @db.VarChar(20)
+  receivedDate    DateTime?    @map("received_date") @db.Date
+  notes           String       @default("")
+  attachments     Json         @default("[]")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  subrecipient    Subrecipient @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+
+  @@index([subrecipientId])
+  @@index([dueDate])
+  @@map("subrecipient_reports")
+}
+
+// =============================================================================
+// COMPLIANCE CHECKLISTS - Buy America, Davis-Bacon, NEPA, Title VI/DBE
+// =============================================================================
+
+model ComplianceChecklist {
+  id             String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId        String                 @map("award_id") @db.Uuid
+  template       String                 @db.VarChar(50)
+  title          String                 @db.VarChar(255)
+  status         String                 @default("in_progress") @db.VarChar(20)
+  completedItems Int                    @default(0) @map("completed_items")
+  totalItems     Int                    @map("total_items")
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  award          Award                  @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  items          ComplianceChecklistItem[]
+
+  @@unique([awardId, template])
+  @@index([awardId])
+  @@map("compliance_checklists")
+}
+
+model ComplianceChecklistItem {
+  id            String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  checklistId   String              @map("checklist_id") @db.Uuid
+  section       String              @db.VarChar(100)
+  requirement   String
+  cfrReference  String?             @map("cfr_reference") @db.VarChar(50)
+  isCompleted   Boolean             @default(false) @map("is_completed")
+  completedAt   DateTime?           @map("completed_at")
+  completedBy   String?             @map("completed_by") @db.VarChar(255)
+  notes         String              @default("")
+  attachments   Json                @default("[]")
+  sortOrder     Int                 @default(0) @map("sort_order")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+  checklist     ComplianceChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId])
+  @@map("compliance_checklist_items")
+}
+
+// =============================================================================
+// AUDIT READINESS - Findings, Corrective Actions
+// =============================================================================
+
+model AuditFinding {
+  id                String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId           String?               @map("award_id") @db.Uuid
+  auditYear         Int                   @map("audit_year")
+  findingNumber     String                @map("finding_number") @db.VarChar(50)
+  title             String                @db.VarChar(255)
+  description       String
+  complianceArea    String                @map("compliance_area") @db.VarChar(100)
+  severity          String                @db.VarChar(30)
+  status            String                @default("open") @db.VarChar(20)
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  award             Award?                @relation(fields: [awardId], references: [id])
+  correctiveActions CorrectiveActionPlan[]
+
+  @@index([awardId])
+  @@index([status])
+  @@map("audit_findings")
+}
+
+model CorrectiveActionPlan {
+  id          String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  findingId   String       @map("finding_id") @db.Uuid
+  action      String
+  responsible String       @db.VarChar(255)
+  targetDate  DateTime     @map("target_date") @db.Date
+  status      String       @default("pending") @db.VarChar(20)
+  evidence    Json         @default("[]")
+  completedAt DateTime?    @map("completed_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  finding     AuditFinding @relation(fields: [findingId], references: [id], onDelete: Cascade)
+
+  @@index([findingId])
+  @@index([status])
+  @@map("corrective_action_plans")
 }
 
 // =============================================================================

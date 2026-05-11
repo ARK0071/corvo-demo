@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: reportId } = await params;
-  setTenantConfigFromHeaders(request.headers);
-  const { portId } = getTenantConfig();
+  const { portId } = await resolveSecureTenant(request.headers);
 
   try {
-    const report = await prisma.demoScheduledReport.findFirst({
+    const report = await prisma.scheduledReport.findFirst({
       where: { id: reportId, portId },
     });
     if (!report) {

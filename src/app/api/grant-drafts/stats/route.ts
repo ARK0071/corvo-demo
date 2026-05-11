@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoGrantDrafts from "@/lib/db/repositories/demo-grant-drafts";
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const stats = await DemoGrantDrafts.getDraftStats();
     return NextResponse.json(stats);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import { renderSF425 } from "@/lib/pdf/render";
 import type { SF425Values } from "@/lib/pdf/render";
 import { computeIndirectCost } from "@/lib/reports/indirect-cost";
@@ -21,11 +21,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: reportId } = await params;
-  setTenantConfigFromHeaders(request.headers);
-  const { portId } = getTenantConfig();
+  const { portId } = await resolveSecureTenant(request.headers);
 
   try {
-    const report = await prisma.demoScheduledReport.findFirst({
+    const report = await prisma.scheduledReport.findFirst({
       where: { id: reportId, portId },
       include: {
         award: {
@@ -45,7 +44,7 @@ export async function GET(
 
     const award = report.award;
 
-    const profile = await prisma.demoPortProfile.findFirst({
+    const profile = await prisma.portProfile.findFirst({
       where: { portId },
     });
 

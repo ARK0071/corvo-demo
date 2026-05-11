@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
-    const stats = await DemoAwards.getAwardStats();
+    const stats = await Awards.getAwardStats();
     return NextResponse.json(stats);
   } catch (error) {
     console.error("Awards stats error:", error);

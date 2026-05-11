@@ -4,9 +4,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe } from "lucide-react";
+import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe, Lock } from "lucide-react";
 import { useProfile } from "@/components/profile-provider";
 import { useTenant } from "@/contexts/tenant-context";
+import { useSession } from "next-auth/react";
 import type { Environment } from "@/lib/db/tenant-config";
 
 const ENVIRONMENT_INFO: Record<Environment, { label: string; description: string; color: string }> = {
@@ -30,6 +31,8 @@ const ENVIRONMENT_INFO: Record<Environment, { label: string; description: string
 export default function SettingsPage() {
   const { profile, profileId, setProfileId, allProfiles } = useProfile();
   const tenant = useTenant();
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -43,87 +46,108 @@ export default function SettingsPage() {
         </div>
 
         <div className="space-y-6">
-          {/* Client Profile Selector */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Client Profile</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              Select the active entity profile. This controls grant eligibility scoring, alignment matching, and competitiveness analysis across the platform.
-            </p>
-            <div className="space-y-2">
-              {allProfiles.map(({ id, profile: p }) => (
-                <button
-                  key={id}
-                  onClick={() => setProfileId(id)}
-                  className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                    id === profileId
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                  }`}
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{p.name}</span>
-                      {id === profileId && (
-                        <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
-                      )}
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      {p.classification} &middot; {p.location.city}, {p.location.stateCode}
-                    </span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{p.entityType}</span>
-                </button>
-              ))}
-            </div>
-          </Card>
-
-          {/* Environment Selector */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Server className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Environment</h2>
-            </div>
-            <p className="text-xs text-muted-foreground mb-4">
-              Select the database environment. Demo uses OpenAI embeddings for presentations. Test and production use EC2 Qwen3 embeddings.
-            </p>
-            <div className="space-y-2">
-              {(["test", "demo", "production"] as Environment[]).map((env) => {
-                const info = ENVIRONMENT_INFO[env];
-                return (
+          {/* Client Profile Selector — admin only */}
+          {isAdmin ? (
+            <Card className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">Client Profile</h2>
+                <Badge className="bg-amber-500/10 text-amber-600 text-[10px] ml-auto">Admin</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Select the active entity profile. This controls grant eligibility scoring, alignment matching, and competitiveness analysis across the platform.
+              </p>
+              <div className="space-y-2">
+                {allProfiles.map(({ id, profile: p }) => (
                   <button
-                    key={env}
-                    onClick={() => tenant.setEnvironment(env)}
+                    key={id}
+                    onClick={() => setProfileId(id)}
                     className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                      env === tenant.environment
+                      id === profileId
                         ? "border-primary bg-primary/5"
                         : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
                     }`}
                   >
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{info.label}</span>
-                        {env === tenant.environment && (
+                        <span className="text-sm font-medium">{p.name}</span>
+                        {id === profileId && (
                           <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
                         )}
                       </div>
-                      <span className="text-xs text-muted-foreground">{info.description}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {p.classification} &middot; {p.location.city}, {p.location.stateCode}
+                      </span>
                     </div>
-                    <Badge className={`${info.color} text-[10px]`}>{tenant.embeddingDimensions} dims</Badge>
+                    <span className="text-xs text-muted-foreground">{p.entityType}</span>
                   </button>
-                );
-              })}
-            </div>
-          </Card>
+                ))}
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Building2 className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">Your Organization</h2>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">
+                  You are assigned to <span className="font-medium text-foreground">{tenant.portName}</span>.
+                  Contact an administrator to change your organization.
+                </span>
+              </div>
+            </Card>
+          )}
 
-          {/* Port Selector (for Demo environment) */}
-          {tenant.environment === "demo" && (
+          {/* Environment Selector — admin only */}
+          {isAdmin && (
+            <Card className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Server className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">Environment</h2>
+                <Badge className="bg-amber-500/10 text-amber-600 text-[10px] ml-auto">Admin</Badge>
+              </div>
+              <p className="text-xs text-muted-foreground mb-4">
+                Select the database environment. Demo uses OpenAI embeddings for presentations. Test and production use EC2 Qwen3 embeddings.
+              </p>
+              <div className="space-y-2">
+                {(["test", "demo", "production"] as Environment[]).map((env) => {
+                  const info = ENVIRONMENT_INFO[env];
+                  return (
+                    <button
+                      key={env}
+                      onClick={() => tenant.setEnvironment(env)}
+                      className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        env === tenant.environment
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{info.label}</span>
+                          {env === tenant.environment && (
+                            <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">{info.description}</span>
+                      </div>
+                      <Badge className={`${info.color} text-[10px]`}>{tenant.embeddingDimensions} dims</Badge>
+                    </button>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* Port Selector — admin only, demo environment only */}
+          {isAdmin && tenant.environment === "demo" && (
             <Card className="p-5">
               <div className="flex items-center gap-2 mb-4">
                 <Globe className="h-4 w-4 text-muted-foreground" />
                 <h2 className="text-sm font-semibold">Demo Port</h2>
+                <Badge className="bg-amber-500/10 text-amber-600 text-[10px] ml-auto">Admin</Badge>
               </div>
               <p className="text-xs text-muted-foreground mb-4">
                 Select the port for this demo session. Data is isolated by port ID in the demo environment.
@@ -196,29 +220,31 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* API Keys */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Key className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">API Keys</h2>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">Anthropic API Key</label>
-                <div className="flex gap-2">
-                  <Input type="password" value="sk-ant-api03-••••••••••••" readOnly className="text-sm font-mono" />
-                  <Button variant="outline" size="sm">Update</Button>
+          {/* API Keys — admin only */}
+          {isAdmin && (
+            <Card className="p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <Key className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-sm font-semibold">API Keys</h2>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Anthropic API Key</label>
+                  <div className="flex gap-2">
+                    <Input type="password" value="sk-ant-api03-••••••••••••" readOnly className="text-sm font-mono" />
+                    <Button variant="outline" size="sm">Update</Button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1.5">Brave Search API Key</label>
+                  <div className="flex gap-2">
+                    <Input type="password" value="BSA••••••••••••" readOnly className="text-sm font-mono" />
+                    <Button variant="outline" size="sm">Update</Button>
+                  </div>
                 </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1.5">Brave Search API Key</label>
-                <div className="flex gap-2">
-                  <Input type="password" value="BSA••••••••••••" readOnly className="text-sm font-mono" />
-                  <Button variant="outline" size="sm">Update</Button>
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
 
           {/* Data Source */}
           <Card className="p-5">

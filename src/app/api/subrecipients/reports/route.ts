@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import { prisma } from "@/lib/db/client";
+import { getTenantConfig } from "@/lib/db/tenant-config";
+
+async function getPortProfileId(): Promise<string> {
+  const portId = getTenantConfig().portId;
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { id: true },
+  });
+  if (!profile) throw new Error(`No PortProfile found for slug: ${portId}`);
+  return profile.id;
+}
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const { portId } = getTenantConfig();
+    await resolveSecureTenant(request.headers);
+    const portProfileId = await getPortProfileId();
 
-    const rows = await prisma.demoSubrecipientReport.findMany({
+    const rows = await prisma.subrecipientReport.findMany({
       where: {
-        portId,
         status: { in: ["pending", "overdue"] },
+        subrecipient: { award: { portProfileId } },
       },
       include: {
         subrecipient: {

@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 import type { ExpenseStatus } from "@/data/awards";
 
 // GET: List expenses for an award
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const awardId = searchParams.get("awardId");
 
     if (awardId) {
-      const expenses = await DemoAwards.getExpensesForAward(awardId);
+      const expenses = await Awards.getExpensesForAward(awardId);
       return NextResponse.json({ expenses, total: expenses.length });
     }
 
     // Return all expenses
-    const expenses = await DemoAwards.getAllExpenses();
+    const expenses = await Awards.getAllExpenses();
     return NextResponse.json({ expenses, total: expenses.length });
   } catch (error) {
     console.error("Expenses GET error:", error);
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
 // POST: Log a new expense
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { awardId, categoryId, date, description, vendor, amount, ...rest } = body;
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const expense = await DemoAwards.logExpense({
+    const expense = await Awards.logExpense({
       awardId,
       categoryId,
       date,
@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
 // Drawn expenses are immutable per 2 CFR 200.305
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { expenseId, status } = body;
@@ -89,7 +89,7 @@ export async function PUT(request: NextRequest) {
     };
 
     // Get current expense to check transition
-    const allExpenses = await DemoAwards.getAllExpenses();
+    const allExpenses = await Awards.getAllExpenses();
     const current = allExpenses.find((e) => e.id === expenseId);
 
     if (!current) {
@@ -111,7 +111,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const expense = await DemoAwards.updateExpenseStatus(expenseId, status as ExpenseStatus);
+    const expense = await Awards.updateExpenseStatus(expenseId, status as ExpenseStatus);
     if (!expense) {
       return NextResponse.json({ error: "Expense not found" }, { status: 404 });
     }
@@ -128,12 +128,12 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const { id } = await request.json();
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
-    const deleted = await DemoAwards.deleteExpense(id);
+    const deleted = await Awards.deleteExpense(id);
     if (!deleted) {
       return NextResponse.json({ error: "Expense not found" }, { status: 404 });
     }

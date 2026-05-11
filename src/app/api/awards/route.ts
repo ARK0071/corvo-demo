@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/auth/api-guard";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 import type { AwardStatus } from "@/data/awards";
 
 // GET: List all awards or get by ID
 export const GET = withAuth(async (request) => {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
     const status = searchParams.get("status") as AwardStatus | null;
 
     if (id) {
-      const award = await DemoAwards.getAwardById(id);
+      const award = await Awards.getAwardById(id);
       if (!award) {
         return NextResponse.json({ error: "Award not found" }, { status: 404 });
       }
@@ -22,11 +22,11 @@ export const GET = withAuth(async (request) => {
     }
 
     if (status) {
-      const awards = await DemoAwards.getAwardsByStatus(status);
+      const awards = await Awards.getAwardsByStatus(status);
       return NextResponse.json({ awards, total: awards.length });
     }
 
-    const awards = await DemoAwards.getAllAwards();
+    const awards = await Awards.getAllAwards();
     return NextResponse.json({ awards, total: awards.length });
   } catch (error) {
     console.error("Awards GET error:", error);
@@ -40,7 +40,7 @@ export const GET = withAuth(async (request) => {
 // POST: Create a new award
 export const POST = withAuth(async (request) => {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { portProfileId, ...awardData } = body;
@@ -52,7 +52,7 @@ export const POST = withAuth(async (request) => {
       );
     }
 
-    const award = await DemoAwards.createAward(awardData, portProfileId);
+    const award = await Awards.createAward(awardData, portProfileId);
     return NextResponse.json(award, { status: 201 });
   } catch (error) {
     console.error("Awards POST error:", error);
@@ -66,7 +66,7 @@ export const POST = withAuth(async (request) => {
 // PUT: Update award status
 export const PUT = withAuth(async (request) => {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { id, status } = body;
@@ -78,7 +78,7 @@ export const PUT = withAuth(async (request) => {
       );
     }
 
-    const award = await DemoAwards.updateAwardStatus(id, status);
+    const award = await Awards.updateAwardStatus(id, status);
     if (!award) {
       return NextResponse.json({ error: "Award not found" }, { status: 404 });
     }
@@ -96,7 +96,7 @@ export const PUT = withAuth(async (request) => {
 // DELETE: Delete an award
 export const DELETE = withAuth(async (request) => {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
 
@@ -104,7 +104,7 @@ export const DELETE = withAuth(async (request) => {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const deleted = await DemoAwards.deleteAward(id);
+    const deleted = await Awards.deleteAward(id);
     if (!deleted) {
       return NextResponse.json({ error: "Award not found" }, { status: 404 });
     }

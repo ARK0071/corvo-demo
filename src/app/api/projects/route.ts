@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoProjects from "@/lib/db/repositories/demo-projects";
 import type { Project } from "@/data/projects";
 
 // GET: List all projects or search with params
 export async function GET(request: NextRequest) {
   try {
-    // Set tenant config from request headers
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
@@ -53,7 +52,7 @@ export async function GET(request: NextRequest) {
 // POST: Create a new project
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { portProfileId, ...projectData } = body;
@@ -79,7 +78,7 @@ export async function POST(request: NextRequest) {
 // PUT: Update a project
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { id, ...updates } = body;
@@ -106,7 +105,7 @@ export async function PUT(request: NextRequest) {
 // DELETE: Delete a project
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoPipeline from "@/lib/db/repositories/demo-pipeline";
 import * as DemoGrants from "@/lib/db/repositories/demo-grants";
 import type { PipelineStage } from "@/data/grant-pipeline";
@@ -8,7 +8,7 @@ import type { DiscoveredGrant } from "@/lib/grants-gov";
 // GET: List all pipeline grants or by stage
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const stage = searchParams.get("stage") as PipelineStage | null;
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
 // POST: Add grant to pipeline
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { grantId, portProfileId, notes, stage, grant } = body;
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
 // PUT: Update pipeline grant (move stage, update notes/scores)
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { grantId, action, ...data } = body;
@@ -150,7 +150,7 @@ export async function PUT(request: NextRequest) {
 // DELETE: Remove grant from pipeline
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const searchParams = request.nextUrl.searchParams;
     const grantId = searchParams.get("grantId");
 

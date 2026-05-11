@@ -36,15 +36,11 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import {
-  getAllAwards as getInMemoryAwards,
   getAwardById,
-  getAwardStats as getInMemoryStats,
   getExpensesForAward,
   getDrawdownsForAward,
   getBudgetModsForAward,
   getMatchStatus,
-  getAttentionItems as getInMemoryAttentionItems,
-  validateExpense,
   logExpense,
   checkExpenseAllowability,
   updateExpenseStatus,
@@ -198,11 +194,9 @@ export default function AwardsPage() {
       setIsLoading(true);
       const dbSuccess = await fetchFromDB();
 
-      // Fallback to in-memory data if DB returns nothing
       if (!dbSuccess) {
-        const inMemoryAwards = getInMemoryAwards();
-        setAwards(inMemoryAwards);
-        setDataSource("memory");
+        setAwards([]);
+        setDataSource("db");
       }
       setIsLoading(false);
     };
@@ -220,8 +214,6 @@ export default function AwardsPage() {
 
   // Compute stats from awards data
   const stats = useMemo(() => {
-    if (awards.length === 0) return getInMemoryStats();
-
     let totalAwarded = 0;
     let totalSpent = 0;
     let totalDrawn = 0;
@@ -230,20 +222,19 @@ export default function AwardsPage() {
       totalAwarded += award.totalAmount;
       const spent = award.budgetCategories.reduce((s, c) => s + c.spent, 0);
       totalSpent += spent;
-      // Note: totalDrawn would need to come from drawdown data
     }
 
     return {
       totalAwards: awards.length,
       totalAwarded,
       totalSpent,
-      totalDrawn: getInMemoryStats().totalDrawn, // Fallback for now
+      totalDrawn,
       totalRemaining: totalAwarded - totalSpent,
     };
   }, [awards]);
 
   const attentionItems = useMemo(() => {
-    if (awards.length === 0) return getInMemoryAttentionItems();
+    if (awards.length === 0) return [];
     const items: AttentionItem[] = [];
     for (const award of awards) {
       for (const cat of award.budgetCategories) {
@@ -1221,10 +1212,33 @@ function ExpenseForm({ award, onClose, onSave }: { award: AwardType; onClose: ()
   }, [description]);
 
   const handleValidate = useCallback(() => {
-    const result = validateExpense(award.id, categoryId, parseFloat(amount) || 0, date, description);
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    const parsedAmount = parseFloat(amount) || 0;
+
+    const expDate = new Date(date);
+    const periodStart = new Date(award.performancePeriod.start);
+    const periodEnd = new Date(award.performancePeriod.end);
+    if (expDate < periodStart || expDate > periodEnd) {
+      errors.push(`Expense date ${date} falls outside the performance period (${award.performancePeriod.start} to ${award.performancePeriod.end}).`);
+    }
+
+    const category = award.budgetCategories.find((c) => c.id === categoryId);
+    if (category) {
+      const remaining = category.ceiling - category.spent;
+      if (parsedAmount > remaining) {
+        warnings.push(`Amount $${parsedAmount.toLocaleString()} exceeds remaining budget of $${remaining.toLocaleString()} for ${category.name}.`);
+      }
+    }
+
+    if (parsedAmount <= 0) {
+      errors.push("Amount must be greater than zero.");
+    }
+
+    const result = { valid: errors.length === 0, errors, warnings };
     setValidation(result);
     return result;
-  }, [award.id, categoryId, amount, date, description]);
+  }, [award, categoryId, amount, date]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     setExtracting(true);

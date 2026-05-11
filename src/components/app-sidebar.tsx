@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool } from "lucide-react";
 import { useCurrentUser } from "@/contexts/user-context";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import {
@@ -40,7 +40,8 @@ const grantMatchItems = [
   { title: "Pipeline", url: "/grants?tab=pipeline", icon: Layers },
   { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },
   { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },
-  { title: "Grant Intelligence", url: "/grant-match", icon: Anchor },
+  { title: "Porter AI", url: "/grant-match", icon: MessageSquare },
+  { title: "Drafting", url: "/drafting", icon: PenTool },
   { title: "Awards", url: "/awards", icon: Award },
   { title: "Reporting", url: "/reporting/overview", icon: FileText },
   { title: "Competitive Intel", url: "/competitive-intel", icon: BarChart3 },

@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
-import * as DemoReports from "@/lib/db/repositories/demo-reports";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as Reports from "@/lib/db/repositories/reports";
 import type { ReportStatus } from "@/data/reporting";
-
-// Helper to get the appropriate repository based on environment
-// "test" uses demo tables (same as awards route), "production" uses production tables
-function getReportsRepo() {
-  const { environment } = getTenantConfig();
-  return environment === "production" ? Reports : DemoReports;
-}
 
 // GET: List all reports or filter by award
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const repo = getReportsRepo();
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const reportId = searchParams.get("reportId");
@@ -26,41 +17,36 @@ export async function GET(request: NextRequest) {
 
     // Get single report by ID
     if (reportId) {
-      const report = await repo.getReportById(reportId);
+      const report = await Reports.getReportById(reportId);
       return NextResponse.json({ reports: report ? [report] : [] });
     }
 
     // Return statistics
     if (stats === "true") {
-      const reportStats = await repo.getReportingStats();
+      const reportStats = await Reports.getReportingStats();
       return NextResponse.json(reportStats);
     }
 
     // Get overdue reports
     if (overdue === "true") {
-      const reports = await repo.getOverdueReports();
+      const reports = await Reports.getOverdueReports();
       return NextResponse.json({ reports });
     }
 
     // Get upcoming reports (optionally with days parameter)
     if (upcoming === "true") {
       const days = parseInt(searchParams.get("days") || "90");
-      const reports = await repo.getUpcomingReports(days);
+      const reports = await Reports.getUpcomingReports(days);
       return NextResponse.json({ reports });
     }
 
     // Get reports for specific award
     if (awardId) {
-      const reports = await repo.getReportsForAward(awardId);
+      const reports = await Reports.getReportsForAward(awardId);
       return NextResponse.json({ reports });
     }
 
-    // Get all reports — auto-seed if empty (demo environment only)
-    let reports = await repo.getAllReports();
-    if (reports.length === 0 && "autoSeedIfEmpty" in repo) {
-      const seeded = await (repo as typeof DemoReports).autoSeedIfEmpty();
-      if (seeded) reports = await repo.getAllReports();
-    }
+    const reports = await Reports.getAllReports();
     return NextResponse.json({ reports });
   } catch (error) {
     console.error("Reports GET error:", error);
@@ -74,13 +60,12 @@ export async function GET(request: NextRequest) {
 // POST: Create a new report or batch upsert
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const repo = getReportsRepo();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     // Batch upsert reports
     if (body.reports && Array.isArray(body.reports)) {
-      const result = await repo.upsertReports(body.reports);
+      const result = await Reports.upsertReports(body.reports);
       return NextResponse.json({
         success: true,
         created: result.created,
@@ -98,7 +83,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const report = await repo.createReport({
+    const report = await Reports.createReport({
       awardId,
       type,
       title,
@@ -122,8 +107,7 @@ export async function POST(request: NextRequest) {
 // PUT: Update a report (status, notes, content)
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const repo = getReportsRepo();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { reportId, action } = body;
@@ -137,7 +121,7 @@ export async function PUT(request: NextRequest) {
       const status = body.status as ReportStatus;
       const notes = body.notes as string | undefined;
 
-      const report = await repo.updateReportStatus(reportId, status, notes);
+      const report = await Reports.updateReportStatus(reportId, status, notes);
       if (!report) {
         return NextResponse.json({ error: "Report not found" }, { status: 404 });
       }
@@ -146,7 +130,7 @@ export async function PUT(request: NextRequest) {
 
     // Update content
     if (action === "updateContent" || body.generatedContent) {
-      const report = await repo.updateReportContent(
+      const report = await Reports.updateReportContent(
         reportId,
         body.generatedContent,
         body.narrativeDraft

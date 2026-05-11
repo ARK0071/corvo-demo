@@ -6,12 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const fyEnd = request.nextUrl.searchParams.get("fyEnd") || "2025-09-30";
     const fyEndDate = new Date(fyEnd);
@@ -19,8 +19,8 @@ export async function GET(request: NextRequest) {
     const fyStartStr = fyStartDate.toISOString().split("T")[0];
 
     const [awards, allExpenses] = await Promise.all([
-      DemoAwards.getAllAwards(),
-      DemoAwards.getAllExpenses(),
+      Awards.getAllAwards(),
+      Awards.getAllExpenses(),
     ]);
 
     const entries = [];

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import type { AuditLog, User } from "@/generated/prisma";
 
 export async function GET(
@@ -8,8 +8,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: reportId } = await params;
-  setTenantConfigFromHeaders(request.headers);
-  const { portId } = getTenantConfig();
+  const { portId } = await resolveSecureTenant(request.headers);
 
   try {
     const entries = await prisma.auditLog.findMany({

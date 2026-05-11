@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { searchGrants as searchGrantsGov, type GrantsSearchParams } from "@/lib/grants-gov";
 import { enhanceUSDOTGrant } from "@/lib/usdot-grants";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoGrants from "@/lib/db/repositories/demo-grants";
 
 /**
@@ -14,9 +14,7 @@ import * as DemoGrants from "@/lib/db/repositories/demo-grants";
  */
 export async function POST(request: NextRequest) {
   try {
-    // Set tenant config from request headers
-    setTenantConfigFromHeaders(request.headers);
-    const tenantConfig = getTenantConfig();
+    const tenantConfig = await resolveSecureTenant(request.headers);
 
     const body = await request.json();
 

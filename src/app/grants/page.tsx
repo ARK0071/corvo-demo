@@ -761,14 +761,12 @@ function UnifiedGrantsDashboard() {
     }
   }
 
-  // Draft Grant - navigate to Grant Intelligence page
   function handleDraftGrant(grant: { id: string; title: string }) {
     const params = new URLSearchParams({
-      mode: 'draft',
       grantId: grant.id,
       grantTitle: grant.title,
     });
-    router.push(`/grant-match?${params.toString()}`);
+    router.push(`/drafting?${params.toString()}`);
   }
 
   return (

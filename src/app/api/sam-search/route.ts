@@ -2,7 +2,7 @@ import { searchVendors } from "@/lib/usaspending";
 import { deriveNaicsFromGrant } from "@/lib/govcon";
 import { PORT_NAICS_CODES } from "@/lib/naics";
 import type { PortVendor } from "@/data/port-vendors";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoVendors from "@/lib/db/repositories/demo-vendors";
 
 export const maxDuration = 60;
@@ -34,9 +34,7 @@ export async function POST(req: Request) {
     );
   }
 
-  // Set tenant config from request headers
-  setTenantConfigFromHeaders(req.headers as unknown as Headers);
-  const tenantConfig = getTenantConfig();
+  const tenantConfig = await resolveSecureTenant(req.headers as unknown as Headers);
 
   try {
     const body = await req.json();

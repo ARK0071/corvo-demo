@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/auth/api-guard";
 import { prisma } from "@/lib/db/client";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import { assertTransition } from "@/lib/reports/state-transitions";
 import { audit } from "@/lib/audit/log";
 
@@ -11,11 +11,10 @@ export const POST = withAuth(async (request, { user, params }) => {
     return NextResponse.json({ error: "Missing report ID" }, { status: 400 });
   }
 
-  setTenantConfigFromHeaders(request.headers);
-  const { portId } = getTenantConfig();
+  const { portId } = await resolveSecureTenant(request.headers);
 
   try {
-    const report = await prisma.demoScheduledReport.findFirst({
+    const report = await prisma.scheduledReport.findFirst({
       where: { id: reportId, portId },
     });
     if (!report) {
@@ -32,7 +31,7 @@ export const POST = withAuth(async (request, { user, params }) => {
       );
     }
 
-    await prisma.demoScheduledReport.update({
+    await prisma.scheduledReport.update({
       where: { id: reportId },
       data: {
         status: "pending_review",

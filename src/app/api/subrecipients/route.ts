@@ -6,11 +6,20 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import { prisma } from "@/lib/db/client";
+import { getTenantConfig } from "@/lib/db/tenant-config";
 
-function getPortId() {
-  return getTenantConfig().portId;
+// ─── Resolve portProfileId from tenant slug ───
+
+async function getPortProfileId(): Promise<string> {
+  const portId = getTenantConfig().portId;
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { id: true },
+  });
+  if (!profile) throw new Error(`No PortProfile found for slug: ${portId}`);
+  return profile.id;
 }
 
 // ─── Classification logic (2 CFR 200.331) ───
@@ -41,25 +50,25 @@ function computeRiskLevel(factors: Record<string, boolean>): { level: string; in
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
+    const portProfileId = await getPortProfileId();
     const params = request.nextUrl.searchParams;
     const awardId = params.get("awardId");
     const id = params.get("id");
 
     if (id) {
-      const sub = await prisma.demoSubrecipient.findFirst({
-        where: { id, portId },
+      const sub = await prisma.subrecipient.findFirst({
+        where: { id, award: { portProfileId } },
         include: { reports: { orderBy: { dueDate: "asc" } }, award: { select: { title: true, program: true } } },
       });
       if (!sub) return NextResponse.json({ error: "Not found" }, { status: 404 });
       return NextResponse.json(sub);
     }
 
-    const where: Record<string, unknown> = { portId };
+    const where: Record<string, unknown> = { award: { portProfileId } };
     if (awardId) where.awardId = awardId;
 
-    const subs = await prisma.demoSubrecipient.findMany({
+    const subs = await prisma.subrecipient.findMany({
       where,
       include: {
         reports: { orderBy: { dueDate: "asc" } },
@@ -83,8 +92,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { awardId, entityName, uei, subawardAmount, classificationAnswers, riskFactors } = body;
@@ -101,9 +109,8 @@ export async function POST(request: NextRequest) {
     // Compute risk
     const risk = computeRiskLevel(riskFactors || {});
 
-    const sub = await prisma.demoSubrecipient.create({
+    const sub = await prisma.subrecipient.create({
       data: {
-        portId,
         awardId,
         entityName,
         uei: uei || null,
@@ -134,8 +141,7 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { action } = body;
@@ -147,9 +153,8 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: "subrecipientId, reportType, title, dueDate required" }, { status: 400 });
       }
 
-      const report = await prisma.demoSubrecipientReport.create({
+      const report = await prisma.subrecipientReport.create({
         data: {
-          portId,
           subrecipientId,
           reportType,
           title,
@@ -163,7 +168,7 @@ export async function PUT(request: NextRequest) {
     // Mark report received
     if (action === "markReceived") {
       const { reportId } = body;
-      const report = await prisma.demoSubrecipientReport.update({
+      const report = await prisma.subrecipientReport.update({
         where: { id: reportId },
         data: { status: "received", receivedDate: new Date() },
       });
@@ -173,7 +178,7 @@ export async function PUT(request: NextRequest) {
     // Update cumulative spend
     if (action === "updateSpend") {
       const { subrecipientId, amount } = body;
-      const sub = await prisma.demoSubrecipient.update({
+      const sub = await prisma.subrecipient.update({
         where: { id: subrecipientId },
         data: {
           cumulativeSpend: { increment: amount },
@@ -183,7 +188,7 @@ export async function PUT(request: NextRequest) {
       // Check threshold
       const newSpend = Number(sub.cumulativeSpend);
       if (newSpend >= 750000 && !sub.singleAuditRequired) {
-        await prisma.demoSubrecipient.update({
+        await prisma.subrecipient.update({
           where: { id: subrecipientId },
           data: { singleAuditRequired: true },
         });
@@ -200,18 +205,17 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
+    const portProfileId = await getPortProfileId();
     const { id } = await request.json();
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
-    const existing = await prisma.demoSubrecipient.findFirst({ where: { id, portId } });
+    const existing = await prisma.subrecipient.findFirst({ where: { id, award: { portProfileId } } });
     if (!existing) {
       return NextResponse.json({ error: "Subrecipient not found" }, { status: 404 });
     }
-    await prisma.demoSubrecipientReport.deleteMany({ where: { subrecipientId: id } });
-    await prisma.demoSubrecipient.delete({ where: { id } });
+    await prisma.subrecipient.delete({ where: { id } });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Subrecipients DELETE error:", error);

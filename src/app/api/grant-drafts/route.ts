@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as DemoGrantDrafts from "@/lib/db/repositories/demo-grant-drafts";
 import type { DraftStatus } from "@/lib/db/repositories/demo-grant-drafts";
 
 // GET: List all drafts or get by ID/grantId
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 // POST: Create a new draft
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { portProfileId, grantId, grantProgram, ...rest } = body;
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 // PUT: Update a draft (status, sections, research data, etc.)
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { id, action, ...data } = body;
@@ -166,7 +166,7 @@ export async function PUT(request: NextRequest) {
 // DELETE: Delete a draft
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get("id");
 

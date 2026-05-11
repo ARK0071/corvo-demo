@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders } from "@/lib/db/tenant-config";
-import * as DemoAwards from "@/lib/db/repositories/demo-awards";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import * as Awards from "@/lib/db/repositories/awards";
 import type { DrawdownStatus } from "@/data/awards";
 
 // GET: List drawdowns
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
 
     const searchParams = request.nextUrl.searchParams;
     const awardId = searchParams.get("awardId");
 
     if (awardId) {
-      const drawdowns = await DemoAwards.getDrawdownsForAward(awardId);
+      const drawdowns = await Awards.getDrawdownsForAward(awardId);
       return NextResponse.json({ drawdowns, total: drawdowns.length });
     }
 
-    const drawdowns = await DemoAwards.getAllDrawdowns();
+    const drawdowns = await Awards.getAllDrawdowns();
     return NextResponse.json({ drawdowns, total: drawdowns.length });
   } catch (error) {
     console.error("Drawdowns GET error:", error);
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 // POST: Create a new drawdown
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { awardId, expenseIds, notes } = body;
@@ -42,7 +42,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const drawdown = await DemoAwards.createDrawdown({
+    const drawdown = await Awards.createDrawdown({
       awardId,
       expenseIds,
       notes: notes || "",
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 // PUT: Update drawdown status
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
 
     const { id, status } = body;
@@ -73,7 +73,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const drawdown = await DemoAwards.updateDrawdownStatus(id, status as DrawdownStatus);
+    const drawdown = await Awards.updateDrawdownStatus(id, status as DrawdownStatus);
     if (!drawdown) {
       return NextResponse.json({ error: "Drawdown not found" }, { status: 404 });
     }
@@ -90,12 +90,12 @@ export async function PUT(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
+    await resolveSecureTenant(request.headers);
     const { id } = await request.json();
     if (!id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
-    const deleted = await DemoAwards.deleteDrawdown(id);
+    const deleted = await Awards.deleteDrawdown(id);
     if (!deleted) {
       return NextResponse.json({ error: "Drawdown not found" }, { status: 404 });
     }

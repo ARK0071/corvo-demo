@@ -9,6 +9,7 @@ export * as Vendors from "./vendors";
 export * as Pipeline from "./pipeline";
 export * as Matches from "./matches";
 export * as Reports from "./reports";
+export * as Awards from "./awards";
 
 // Demo-specific exports (OpenAI embeddings - 1536 dims, with portId filter)
 export * as DemoGrants from "./demo-grants";

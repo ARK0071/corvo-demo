@@ -1,6 +1,7 @@
 import { prisma } from "../client";
 import { ScheduledReport as PrismaScheduledReport, CloseoutChecklist as PrismaCloseoutChecklist, Prisma } from "@/generated/prisma";
 import { parseDateRequired } from "../date-utils";
+import { getTenantConfig } from "../tenant-config";
 import type {
   ScheduledReport,
   ReportStatus,
@@ -9,6 +10,24 @@ import type {
   CloseoutItem,
   ReportContent,
 } from "@/data/reporting";
+
+// ─── Port Resolution ───
+
+const profileIdCache = new Map<string, string>();
+
+async function getPortProfileId(): Promise<string> {
+  const portId = getTenantConfig().portId;
+  const cached = profileIdCache.get(portId);
+  if (cached) return cached;
+
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { id: true },
+  });
+  if (!profile) throw new Error(`No PortProfile found for slug: ${portId}`);
+  profileIdCache.set(portId, profile.id);
+  return profile.id;
+}
 
 // ─── Scheduled Reports ───
 
@@ -29,12 +48,21 @@ function toScheduledReport(report: PrismaScheduledReport & { award: { title: str
     notes: report.notes,
     generatedContent: (report.generatedContent as unknown) as ReportContent | undefined,
     narrativeDraft: report.narrativeDraft ?? undefined,
+    drafterUserId: report.drafterUserId ?? undefined,
+    reviewerUserId: report.reviewerUserId ?? undefined,
+    reviewedAt: report.reviewedAt?.toISOString() ?? undefined,
+    reviewNotes: report.reviewNotes ?? undefined,
+    certificationId: report.certificationId ?? undefined,
+    contentLockedAt: report.contentLockedAt?.toISOString() ?? undefined,
   };
 }
 
 // Get all scheduled reports
 export async function getAllReports(): Promise<ScheduledReport[]> {
+  await autoSeedIfEmpty();
+  const portProfileId = await getPortProfileId();
   const reports = await prisma.scheduledReport.findMany({
+    where: { award: { portProfileId } },
     include: { award: { select: { title: true, program: true } } },
     orderBy: { dueDate: "asc" },
   });
@@ -43,8 +71,9 @@ export async function getAllReports(): Promise<ScheduledReport[]> {
 
 // Get reports for a specific award
 export async function getReportsForAward(awardId: string): Promise<ScheduledReport[]> {
+  const portProfileId = await getPortProfileId();
   const reports = await prisma.scheduledReport.findMany({
-    where: { awardId },
+    where: { awardId, award: { portProfileId } },
     include: { award: { select: { title: true, program: true } } },
     orderBy: { dueDate: "asc" },
   });
@@ -53,11 +82,13 @@ export async function getReportsForAward(awardId: string): Promise<ScheduledRepo
 
 // Get upcoming reports within N days
 export async function getUpcomingReports(days: number = 90): Promise<ScheduledReport[]> {
+  const portProfileId = await getPortProfileId();
   const now = new Date();
   const cutoff = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
   const reports = await prisma.scheduledReport.findMany({
     where: {
+      award: { portProfileId },
       status: { not: "submitted" },
       dueDate: { gte: now, lte: cutoff },
     },
@@ -69,10 +100,12 @@ export async function getUpcomingReports(days: number = 90): Promise<ScheduledRe
 
 // Get overdue reports
 export async function getOverdueReports(): Promise<ScheduledReport[]> {
+  const portProfileId = await getPortProfileId();
   const today = new Date();
 
   const reports = await prisma.scheduledReport.findMany({
     where: {
+      award: { portProfileId },
       status: { not: "submitted" },
       dueDate: { lt: today },
     },
@@ -84,8 +117,9 @@ export async function getOverdueReports(): Promise<ScheduledReport[]> {
 
 // Get report by ID
 export async function getReportById(id: string): Promise<ScheduledReport | null> {
-  const report = await prisma.scheduledReport.findUnique({
-    where: { id },
+  const portProfileId = await getPortProfileId();
+  const report = await prisma.scheduledReport.findFirst({
+    where: { id, award: { portProfileId } },
     include: { award: { select: { title: true, program: true } } },
   });
   return report ? toScheduledReport(report) : null;
@@ -127,8 +161,9 @@ export async function updateReportStatus(
   status: ReportStatus,
   notes?: string
 ): Promise<ScheduledReport | null> {
-  const existing = await prisma.scheduledReport.findUnique({
-    where: { id: reportId },
+  const portProfileId = await getPortProfileId();
+  const existing = await prisma.scheduledReport.findFirst({
+    where: { id: reportId, award: { portProfileId } },
   });
   if (!existing) return null;
 
@@ -151,8 +186,9 @@ export async function updateReportContent(
   content: ReportContent,
   narrativeDraft?: string
 ): Promise<ScheduledReport | null> {
-  const existing = await prisma.scheduledReport.findUnique({
-    where: { id: reportId },
+  const portProfileId = await getPortProfileId();
+  const existing = await prisma.scheduledReport.findFirst({
+    where: { id: reportId, award: { portProfileId } },
   });
   if (!existing) return null;
 
@@ -219,20 +255,24 @@ export async function upsertReports(
 
 // Get reporting stats
 export async function getReportingStats() {
+  const portProfileId = await getPortProfileId();
   const today = new Date();
   const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
 
+  const portFilter = { award: { portProfileId } };
+
   const [total, upcoming, overdue, submitted, dueNext30] = await Promise.all([
-    prisma.scheduledReport.count(),
+    prisma.scheduledReport.count({ where: portFilter }),
     prisma.scheduledReport.count({
-      where: { status: { not: "submitted" }, dueDate: { gte: today } },
+      where: { ...portFilter, status: { not: "submitted" }, dueDate: { gte: today } },
     }),
     prisma.scheduledReport.count({
-      where: { status: { not: "submitted" }, dueDate: { lt: today } },
+      where: { ...portFilter, status: { not: "submitted" }, dueDate: { lt: today } },
     }),
-    prisma.scheduledReport.count({ where: { status: "submitted" } }),
+    prisma.scheduledReport.count({ where: { ...portFilter, status: "submitted" } }),
     prisma.scheduledReport.count({
       where: {
+        ...portFilter,
         status: { not: "submitted" },
         dueDate: { gte: today, lte: thirtyDaysFromNow },
       },
@@ -240,7 +280,7 @@ export async function getReportingStats() {
   ]);
 
   const nextDue = await prisma.scheduledReport.findFirst({
-    where: { status: { not: "submitted" }, dueDate: { gte: today } },
+    where: { ...portFilter, status: { not: "submitted" }, dueDate: { gte: today } },
     include: { award: { select: { title: true, program: true } } },
     orderBy: { dueDate: "asc" },
   });
@@ -278,6 +318,13 @@ function toCloseoutChecklist(checklist: PrismaCloseoutChecklist): CloseoutCheckl
 
 // Get closeout checklist for an award (creates if doesn't exist)
 export async function getCloseoutChecklist(awardId: string): Promise<CloseoutChecklist> {
+  const portProfileId = await getPortProfileId();
+  const award = await prisma.award.findFirst({
+    where: { id: awardId, portProfileId },
+    select: { id: true },
+  });
+  if (!award) throw new Error(`Award ${awardId} not found for current port`);
+
   let checklist = await prisma.closeoutChecklist.findUnique({
     where: { awardId },
   });
@@ -322,6 +369,57 @@ export async function updateCloseoutItem(
 
 // Get all closeout checklists
 export async function getAllCloseoutChecklists(): Promise<CloseoutChecklist[]> {
-  const checklists = await prisma.closeoutChecklist.findMany();
+  const portProfileId = await getPortProfileId();
+  const checklists = await prisma.closeoutChecklist.findMany({
+    where: { award: { portProfileId } },
+  });
   return checklists.map(toCloseoutChecklist);
+}
+
+// ─── Auto-Seed ───
+
+export async function autoSeedIfEmpty(): Promise<void> {
+  const portProfileId = await getPortProfileId();
+
+  const existingCount = await prisma.scheduledReport.count({
+    where: { award: { portProfileId } },
+  });
+  if (existingCount > 0) return;
+
+  const awards = await prisma.award.findMany({
+    where: { portProfileId },
+    select: { id: true, performancePeriodStart: true, performancePeriodEnd: true, title: true },
+  });
+  if (awards.length === 0) return;
+
+  for (const award of awards) {
+    const start = award.performancePeriodStart;
+    const end = award.performancePeriodEnd;
+
+    await prisma.scheduledReport.createMany({
+      data: [
+        {
+          awardId: award.id,
+          type: "sf425",
+          title: `SF-425 - ${award.title}`,
+          dueDate: new Date(end.getTime() + 90 * 24 * 60 * 60 * 1000),
+          periodStart: start,
+          periodEnd: end,
+          status: "upcoming",
+          notes: "",
+        },
+        {
+          awardId: award.id,
+          type: "progress",
+          title: `Progress Report - ${award.title}`,
+          dueDate: new Date(end.getTime() + 90 * 24 * 60 * 60 * 1000),
+          periodStart: start,
+          periodEnd: end,
+          status: "upcoming",
+          notes: "",
+        },
+      ],
+      skipDuplicates: true,
+    });
+  }
 }

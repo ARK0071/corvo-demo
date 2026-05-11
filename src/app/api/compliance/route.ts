@@ -8,11 +8,20 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { setTenantConfigFromHeaders, getTenantConfig } from "@/lib/db/tenant-config";
+import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import { getTenantConfig } from "@/lib/db/tenant-config";
 import { prisma } from "@/lib/db/client";
 import { Prisma } from "@/generated/prisma";
 
-function getPortId() { return getTenantConfig().portId; }
+async function getPortProfileId(): Promise<string> {
+  const portId = getTenantConfig().portId;
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { id: true },
+  });
+  if (!profile) throw new Error(`No PortProfile found for slug: ${portId}`);
+  return profile.id;
+}
 
 // ─── Checklist Templates ───
 
@@ -78,18 +87,18 @@ const CHECKLIST_TEMPLATES: Record<string, { title: string; items: { section: str
 
 export async function GET(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
+    const portProfileId = await getPortProfileId();
     const params = request.nextUrl.searchParams;
     const section = params.get("section"); // checklists, findings, scorecard
     const awardId = params.get("awardId");
 
     // ─── Checklists ───
     if (section === "checklists" || !section) {
-      const where: Record<string, unknown> = { portId };
+      const where: Record<string, unknown> = { award: { portProfileId } };
       if (awardId) where.awardId = awardId;
 
-      const checklists = await prisma.demoComplianceChecklist.findMany({
+      const checklists = await prisma.complianceChecklist.findMany({
         where,
         include: {
           items: { orderBy: { sortOrder: "asc" } },
@@ -103,8 +112,8 @@ export async function GET(request: NextRequest) {
 
     // ─── Audit Findings ───
     if (section === "findings") {
-      const findings = await prisma.demoAuditFinding.findMany({
-        where: { portId },
+      const findings = await prisma.auditFinding.findMany({
+        where: { award: { portProfileId } },
         include: {
           correctiveActions: { orderBy: { targetDate: "asc" } },
           award: { select: { title: true, program: true } },
@@ -118,12 +127,12 @@ export async function GET(request: NextRequest) {
     // ─── Scorecard ───
     if (section === "scorecard") {
       const [findings, checklists, subs, reports, drawdowns, expenses] = await Promise.all([
-        prisma.demoAuditFinding.findMany({ where: { portId } }),
-        prisma.demoComplianceChecklist.findMany({ where: { portId }, include: { items: true } }),
-        prisma.demoSubrecipient.findMany({ where: { portId }, include: { reports: true } }),
-        prisma.demoScheduledReport.findMany({ where: { portId } }),
-        prisma.demoDrawdownRequest.findMany({ where: { portId } }),
-        prisma.demoExpense.findMany({ where: { portId } }),
+        prisma.auditFinding.findMany({ where: { award: { portProfileId } } }),
+        prisma.complianceChecklist.findMany({ where: { award: { portProfileId } }, include: { items: true } }),
+        prisma.subrecipient.findMany({ where: { award: { portProfileId } }, include: { reports: true } }),
+        prisma.scheduledReport.findMany({ where: { award: { portProfileId } } }),
+        prisma.drawdownRequest.findMany({ where: { award: { portProfileId } } }),
+        prisma.expense.findMany({ where: { award: { portProfileId } } }),
       ]);
 
       const openFindings = findings.filter((f: typeof findings[number]) => f.status === "open" || f.status === "in_progress");
@@ -177,8 +186,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
     const { action } = body;
 
@@ -188,9 +196,8 @@ export async function POST(request: NextRequest) {
       const tmpl = CHECKLIST_TEMPLATES[template];
       if (!tmpl) return NextResponse.json({ error: "Unknown template" }, { status: 400 });
 
-      const checklist = await prisma.demoComplianceChecklist.create({
+      const checklist = await prisma.complianceChecklist.create({
         data: {
-          portId,
           awardId,
           template,
           title: tmpl.title,
@@ -199,7 +206,6 @@ export async function POST(request: NextRequest) {
           totalItems: tmpl.items.length,
           items: {
             create: tmpl.items.map((item, i) => ({
-              portId,
               section: item.section,
               requirement: item.requirement,
               cfrReference: item.cfrReference,
@@ -216,9 +222,8 @@ export async function POST(request: NextRequest) {
     // Create audit finding
     if (action === "createFinding") {
       const { awardId, auditYear, findingNumber, title, description, complianceArea, severity } = body;
-      const finding = await prisma.demoAuditFinding.create({
+      const finding = await prisma.auditFinding.create({
         data: {
-          portId,
           awardId: awardId || null,
           auditYear,
           findingNumber,
@@ -235,9 +240,8 @@ export async function POST(request: NextRequest) {
     // Create corrective action plan
     if (action === "createCAP") {
       const { findingId, actionText, responsible, targetDate } = body;
-      const cap = await prisma.demoCorrectiveActionPlan.create({
+      const cap = await prisma.correctiveActionPlan.create({
         data: {
-          portId,
           findingId,
           action: actionText,
           responsible,
@@ -259,15 +263,14 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
-    setTenantConfigFromHeaders(request.headers);
-    const portId = getPortId();
+    await resolveSecureTenant(request.headers);
     const body = await request.json();
     const { action } = body;
 
     // Toggle checklist item
     if (action === "toggleItem") {
       const { itemId, completed, completedBy } = body;
-      const item = await prisma.demoComplianceChecklistItem.update({
+      const item = await prisma.complianceChecklistItem.update({
         where: { id: itemId },
         data: {
           isCompleted: completed,
@@ -277,13 +280,13 @@ export async function PUT(request: NextRequest) {
       });
 
       // Update checklist completion count
-      const checklistItems = await prisma.demoComplianceChecklistItem.findMany({
+      const checklistItems = await prisma.complianceChecklistItem.findMany({
         where: { checklistId: item.checklistId },
       });
       const completedCount = checklistItems.filter((i: typeof checklistItems[number]) => i.isCompleted).length;
       const allDone = completedCount === checklistItems.length;
 
-      await prisma.demoComplianceChecklist.update({
+      await prisma.complianceChecklist.update({
         where: { id: item.checklistId },
         data: {
           completedItems: completedCount,
@@ -297,7 +300,7 @@ export async function PUT(request: NextRequest) {
     // Update finding status
     if (action === "updateFindingStatus") {
       const { findingId, status } = body;
-      const finding = await prisma.demoAuditFinding.update({
+      const finding = await prisma.auditFinding.update({
         where: { id: findingId },
         data: { status },
       });
@@ -307,7 +310,7 @@ export async function PUT(request: NextRequest) {
     // Update CAP status
     if (action === "updateCAPStatus") {
       const { capId, status } = body;
-      const cap = await prisma.demoCorrectiveActionPlan.update({
+      const cap = await prisma.correctiveActionPlan.update({
         where: { id: capId },
         data: {
           status,

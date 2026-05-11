@@ -2,6 +2,31 @@ import "server-only";
 
 import { prisma } from "./client";
 import { auth } from "@/lib/auth/auth";
+import {
+  setTenantConfigFromHeaders,
+  setTenantConfig,
+  getTenantConfig,
+  type TenantConfig,
+} from "./tenant-config";
+
+/**
+ * Securely resolve tenant config from request headers.
+ * Admins may switch ports/environments freely via headers.
+ * Non-admin users are locked to their assigned portId from the session.
+ */
+export async function resolveSecureTenant(headers: Headers): Promise<TenantConfig> {
+  setTenantConfigFromHeaders(headers);
+  const config = getTenantConfig();
+
+  const session = await auth();
+  if (!session?.user) return config;
+
+  if (session.user.role !== "admin" && session.user.portId) {
+    return setTenantConfig({ portId: session.user.portId });
+  }
+
+  return config;
+}
 
 /**
  * Get the authenticated user from the NextAuth session.
