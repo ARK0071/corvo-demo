@@ -22,6 +22,7 @@ export const AVAILABLE_PORTS = [
   { id: "louisiana-gateway", name: "Louisiana Gateway", slug: "louisiana-gateway" },
   { id: "polestar-defense", name: "Pole Star Defense", slug: "polestar-defense" },
   { id: "freeport-demo", name: "Port Freeport DEMO", slug: "freeport-demo" },
+  { id: "freeport-mock", name: "Port Freeport Mock", slug: "freeport-mock" },
 ] as const;
 
 export type PortId = typeof AVAILABLE_PORTS[number]["id"];

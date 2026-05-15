@@ -18,7 +18,8 @@ const ENVIRONMENT_INFO: Record<Environment, { label: string; description: string
   },
   demo: {
     label: "Demo",
-    description: "Demo environment for client presentations. OpenAI embeddings (1536 dims). Data isolated by port.",
+    description:
+      "Uses demo_* tables with OpenAI embeddings (1536 dims). Pick the active port under Demo session port.",
     color: "bg-blue-500/10 text-blue-600",
   },
   production: {
@@ -141,16 +142,19 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {/* Port Selector — admin only, demo environment only */}
+          {/* Port selector — only when using Demo DB (demo_* tables). Production/Test resolve the same port list via API headers. */}
           {isAdmin && tenant.environment === "demo" && (
             <Card className="p-5">
               <div className="flex items-center gap-2 mb-4">
                 <Globe className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Demo Port</h2>
+                <h2 className="text-sm font-semibold">Demo session port</h2>
                 <Badge className="bg-amber-500/10 text-amber-600 text-[10px] ml-auto">Admin</Badge>
               </div>
               <p className="text-xs text-muted-foreground mb-4">
-                Select the port for this demo session. Data is isolated by port ID in the demo environment.
+                Only applies when Environment is <span className="font-medium text-foreground">Demo</span>. This sets which port’s rows are loaded from the demo tables (filtered by port ID).{" "}
+                <span className="font-medium text-foreground">Client Profile</span> above is separate—it drives static profile content for scoring and UI. For production-style data (shared{" "}
+                <code className="text-[10px]">port_profiles</code> tables), switch Environment to Production and ensure your tenant port ID matches the profile (e.g.{" "}
+                <code className="text-[10px]">freeport-mock</code>).
               </p>
               <div className="space-y-2">
                 {tenant.availablePorts.map((port) => (
