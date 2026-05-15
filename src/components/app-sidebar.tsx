@@ -3,9 +3,10 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool, Radar } from "lucide-react";
 import { useCurrentUser } from "@/contexts/user-context";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
+import { useTenant } from "@/contexts/tenant-context";
 import {
   Sidebar,
   SidebarContent,
@@ -88,6 +89,19 @@ function AppSidebarInner() {
   const searchParams = useSearchParams();
   const collapsed = state === "collapsed";
   const upcomingCount = useMemo(() => getUpcomingDeadlineCount(), []);
+  const { portId, isLoading: tenantLoading } = useTenant();
+
+  const grantNavItems = useMemo(() => {
+    const base = [...grantMatchItems];
+    if (!tenantLoading && portId === "freeport-mock") {
+      base.splice(4, 0, {
+        title: "Partner path",
+        url: "/polestar-opportunity",
+        icon: Radar,
+      });
+    }
+    return base;
+  }, [portId, tenantLoading]);
 
   const checkIsActive = useCallback(
     (itemUrl: string) => isItemActive(itemUrl, pathname, searchParams),
@@ -114,7 +128,7 @@ function AppSidebarInner() {
           )}
           <SidebarGroupContent>
             <SidebarMenu>
-              {grantMatchItems.map((item) => {
+              {grantNavItems.map((item) => {
                 const isActive = checkIsActive(item.url);
                 const isPipeline = item.title === "Pipeline";
                 return (
