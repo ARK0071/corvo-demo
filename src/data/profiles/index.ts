@@ -14,7 +14,6 @@ import { portFreeportProfile } from "./port-freeport";
 import { portOfLosAngelesProfile } from "./port-of-los-angeles";
 import { lawaProfile } from "./lawa";
 import { louisianaGatewayPortProfile } from "./louisiana-gateway-port";
-import { freeportMockProfile } from "./freeport-mock";
 
 // Registry of all available port profiles
 export const AVAILABLE_PROFILES: Record<string, PortProfile> = {
@@ -22,7 +21,6 @@ export const AVAILABLE_PROFILES: Record<string, PortProfile> = {
   "louisiana-gateway-port": louisianaGatewayPortProfile,
   "port-of-los-angeles": portOfLosAngelesProfile,
   "lawa": lawaProfile,
-  "freeport-mock": freeportMockProfile,
 };
 
 // Get profile by ID
