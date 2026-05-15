@@ -5,7 +5,15 @@
       "Bash(npm install:*)",
       "Bash(npm show:*)",
       "Bash(npx prisma:*)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "WebSearch",
+      "WebFetch(domain:www.polestardefense.com)",
+      "WebFetch(domain:sbdctampabay.com)",
+      "WebFetch(domain:stpetecatalyst.com)",
+      "WebFetch(domain:www.highergov.com)",
+      "WebFetch(domain:www.marinelink.com)",
+      "WebFetch(domain:intelligencecommunitynews.com)",
+      "Bash(npx tsx:*)"
     ]
   }
 }

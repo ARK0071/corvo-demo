@@ -20,6 +20,8 @@ export const AVAILABLE_PORTS = [
   { id: "freeport", name: "Port Freeport", slug: "port-freeport" },
   { id: "lawa", name: "Los Angeles World Airports", slug: "lawa" },
   { id: "louisiana-gateway", name: "Louisiana Gateway", slug: "louisiana-gateway" },
+  { id: "polestar-defense", name: "Pole Star Defense", slug: "polestar-defense" },
+  { id: "freeport-demo", name: "Port Freeport DEMO", slug: "freeport-demo" },
 ] as const;
 
 export type PortId = typeof AVAILABLE_PORTS[number]["id"];
