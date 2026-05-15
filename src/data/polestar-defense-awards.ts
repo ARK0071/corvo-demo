@@ -173,7 +173,7 @@ export const polestarDefenseAwards: Award[] = [
       { id: "aurora-pms-sub", name: "Pacific Maritime Sciences Subcontract", ceiling: 864_000, spent: 172_800 },
       { id: "aurora-materials", name: "Hull Materials & Sensors", ceiling: 518_400, spent: 51_840 },
       { id: "aurora-compute", name: "Autonomy HW & Edge Compute", ceiling: 259_200, spent: 25_920 },
-      { id: "aurora-travel", name: "Travel & Sea Trials Prep", ceiling: 172_800, spent: 17,280 },
+      { id: "aurora-travel", name: "Travel & Sea Trials Prep", ceiling: 172_800, spent: 17_280 },
       { id: "aurora-indirect", name: "Overhead & G&A", ceiling: 120_960, spent: 18_144 },
     ],
     performancePeriod: { start: "2023-08-01", end: "2026-07-31" },
