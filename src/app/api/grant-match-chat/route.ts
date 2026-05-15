@@ -4,6 +4,7 @@ import { GRANT_MATCH_SYSTEM_PROMPT } from "@/lib/grant-match-system-prompt";
 import { grantIntelligenceTools } from "@/tools/grant-intelligence/definitions";
 import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
 import { initializeProjectsForProfile } from "@/data/projects";
+import { initializeAwardsForProfile } from "@/data/awards";
 import { runWithProfileIdAsync } from "@/lib/profile-request-context";
 
 export const maxDuration = 60;
@@ -100,6 +101,7 @@ export async function POST(req: Request) {
 
     return runWithProfileIdAsync(profileId, async () => {
       initializeProjectsForProfile(profileId);
+      initializeAwardsForProfile(profileId);
 
       const modelMessages = await convertToModelMessages(messages, {
         tools: grantIntelligenceTools,

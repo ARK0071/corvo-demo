@@ -150,33 +150,88 @@ export function getAllCostRules(): CostRule[] {
   return [...UNALLOWABLE_COST_RULES];
 }
 
+import {
+  polestarDefenseAwards,
+  polestarDefenseExpenses,
+  polestarDefenseDrawdowns,
+  polestarDefenseBudgetMods,
+} from "./polestar-defense-awards";
+
 // ─── In-Memory State ───
 
 const awards: Award[] = [];
 const expenses: Expense[] = [];
 const drawdowns: DrawdownRequest[] = [];
 const budgetModifications: BudgetModification[] = [];
-let initialized = false;
+let initializedAwardsProfileId: string | null = null;
+
+function ensureInitialized() {
+  if (initializedAwardsProfileId === null) {
+    initializeAwardsForProfile("port-freeport");
+  }
+}
+
+export function initializeAwardsForProfile(profileId: string): void {
+  if (initializedAwardsProfileId === profileId) return;
+  awards.length = 0;
+  expenses.length = 0;
+  drawdowns.length = 0;
+  budgetModifications.length = 0;
+  initializedAwardsProfileId = profileId;
+
+  if (profileId === "polestar-defense") {
+    initializePolestarDefenseAwards();
+  } else {
+    initializePortFreeportAwards();
+  }
+}
+
+function initializePolestarDefenseAwards(): void {
+  polestarDefenseAwards.forEach((a) => awards.push(a));
+
+  polestarDefenseExpenses.forEach((e, i) => {
+    expenses.push({
+      ...e,
+      id: `exp-seed-${String(i + 1).padStart(3, "0")}`,
+      createdAt: new Date(e.date).toISOString(),
+    });
+  });
+
+  polestarDefenseDrawdowns.forEach((d, i) => {
+    drawdowns.push({
+      ...d,
+      id: `dw-seed-${String(i + 1).padStart(3, "0")}`,
+      createdAt: new Date().toISOString(),
+    });
+  });
+
+  polestarDefenseBudgetMods.forEach((m, i) => {
+    budgetModifications.push({
+      ...m,
+      id: `bmod-seed-${String(i + 1).padStart(3, "0")}`,
+    });
+  });
+}
 
 // ─── Award CRUD ───
 
 export function getAllAwards(): Award[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return awards;
 }
 
 export function getAwardById(id: string): Award | undefined {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return awards.find((a) => a.id === id);
 }
 
 export function getAwardsByStatus(status: AwardStatus): Award[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return awards.filter((a) => a.status === status);
 }
 
 export function getAwardStats() {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   const totalAwarded = awards.reduce((s, a) => s + a.totalAmount, 0);
   const totalSpent = expenses.filter((e) => e.status !== "flagged").reduce((s, e) => s + e.amount, 0);
   const totalDrawn = drawdowns.filter((d) => d.status === "approved" || d.status === "payment_received").reduce((s, d) => s + d.totalAmount, 0);
@@ -189,12 +244,12 @@ export function getAwardStats() {
 // ─── Expense Operations ───
 
 export function getExpensesForAward(awardId: string): Expense[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return expenses.filter((e) => e.awardId === awardId);
 }
 
 export function getAllExpenses(): Expense[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return expenses;
 }
 
@@ -273,7 +328,7 @@ export function logExpense(data: {
   overrideJustification?: string;
   allocations?: CostAllocation[];
 }): Expense {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
 
   const validation = validateExpense(data.awardId, data.categoryId, data.amount, data.date, data.description);
   const allowability = checkExpenseAllowability(data.description);
@@ -307,7 +362,7 @@ export function logExpense(data: {
 }
 
 export function updateExpenseStatus(expenseId: string, status: ExpenseStatus): Expense | null {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   const exp = expenses.find((e) => e.id === expenseId);
   if (!exp) return null;
   exp.status = status;
@@ -324,7 +379,7 @@ export function addMatchEntry(data: {
   type: MatchType;
   documentation?: string;
 }): MatchLedgerEntry | null {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   const award = awards.find((a) => a.id === data.awardId);
   if (!award) return null;
 
@@ -344,22 +399,22 @@ export function addMatchEntry(data: {
 // ─── Drawdown Operations ───
 
 export function getDrawdownsForAward(awardId: string): DrawdownRequest[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return drawdowns.filter((d) => d.awardId === awardId);
 }
 
 export function getAllDrawdowns(): DrawdownRequest[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return drawdowns;
 }
 
 export function getEligibleExpensesForDrawdown(awardId: string): Expense[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return expenses.filter((e) => e.awardId === awardId && e.status === "approved");
 }
 
 export function createDrawdown(data: { awardId: string; expenseIds: string[]; notes: string }): DrawdownRequest {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
 
   const selectedExpenses = expenses.filter((e) => data.expenseIds.includes(e.id));
   const totalAmount = selectedExpenses.reduce((s, e) => s + e.amount, 0);
@@ -397,7 +452,7 @@ export function updateDrawdownStatus(id: string, status: DrawdownStatus): Drawdo
 // ─── Budget Modification Operations ───
 
 export function getBudgetModsForAward(awardId: string): BudgetModification[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
   return budgetModifications.filter((m) => m.awardId === awardId);
 }
 
@@ -408,7 +463,7 @@ export function createBudgetMod(data: {
   amount: number;
   justification: string;
 }): BudgetModification {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
 
   const mod: BudgetModification = {
     id: `bmod-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -454,7 +509,7 @@ export function getMatchStatus(awardId: string): {
   status: "on_track" | "at_risk" | "shortfall";
   periodProgress: number;
 } {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
 
   const award = getAwardById(awardId);
   if (!award) return { required: 0, committed: 0, percentage: 0, target: 0, status: "on_track", periodProgress: 0 };
@@ -498,7 +553,7 @@ export interface AttentionItem {
 }
 
 export function getAttentionItems(): AttentionItem[] {
-  if (!initialized) initializeSeedData();
+  ensureInitialized();
 
   const items: AttentionItem[] = [];
   const now = Date.now();
@@ -598,9 +653,7 @@ export function getAttentionItems(): AttentionItem[] {
 
 // ─── Seed Data: Port Freeport, TX ───
 
-function initializeSeedData() {
-  if (initialized) return;
-  initialized = true;
+function initializePortFreeportAwards() {
 
   const now = new Date();
   const today = now.toISOString().split("T")[0];

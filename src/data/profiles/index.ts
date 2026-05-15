@@ -14,6 +14,7 @@ import { portFreeportProfile } from "./port-freeport";
 import { portOfLosAngelesProfile } from "./port-of-los-angeles";
 import { lawaProfile } from "./lawa";
 import { louisianaGatewayPortProfile } from "./louisiana-gateway-port";
+import { polestarDefenseProfile } from "./polestar-defense";
 
 // Registry of all available port profiles
 export const AVAILABLE_PROFILES: Record<string, PortProfile> = {
@@ -21,6 +22,7 @@ export const AVAILABLE_PROFILES: Record<string, PortProfile> = {
   "louisiana-gateway-port": louisianaGatewayPortProfile,
   "port-of-los-angeles": portOfLosAngelesProfile,
   "lawa": lawaProfile,
+  "polestar-defense": polestarDefenseProfile,
   // Add new profiles here:
   // "port-of-seattle": portOfSeattleProfile,
   // "port-of-houston": portOfHoustonProfile,

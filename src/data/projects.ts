@@ -5,6 +5,7 @@
  */
 
 import { louisianaGatewayProjects } from "./louisiana-projects";
+import { polestarDefenseProjects } from "./polestar-defense-projects";
 
 export interface ProjectReadiness {
   nepaStatus: "not_started" | "categorical_exclusion" | "ea_in_progress" | "ea_complete" | "eis_in_progress" | "eis_complete" | "record_of_decision";
@@ -119,6 +120,8 @@ export function initializeProjectsForProfile(profileId: string): void {
     louisianaGatewayProjects.forEach((p) => createProject(p));
   } else if (profileId === "port-freeport") {
     initializePortFreeportDefaults();
+  } else if (profileId === "polestar-defense") {
+    polestarDefenseProjects.forEach((p) => createProject(p));
   } else {
     // Demo fallback: Port of LA and other profiles reuse Freeport project set until dedicated data exists
     initializePortFreeportDefaults();
