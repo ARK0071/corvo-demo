@@ -13,7 +13,16 @@
       "WebFetch(domain:www.highergov.com)",
       "WebFetch(domain:www.marinelink.com)",
       "WebFetch(domain:intelligencecommunitynews.com)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(grep -q '\"\"docx\"\"' package.json)",
+      "WebFetch(domain:api.grants.gov)",
+      "WebFetch(domain:www.grants.gov)",
+      "Bash(curl -s -X POST \"https://api.grants.gov/v1/api/fetchRelatedOpps\" -H \"Content-Type: application/json\" -d '{\"\"\"\"opportunityId\"\"\"\": 356289}')",
+      "Bash(curl -s \"https://api.grants.gov/v1/api/fetchOpportunity\" -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"opportunityId\"\"\"\": 356289}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.get\\(''''data'''',{}\\).keys\\(\\)\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \":*)",
+      "Bash(curl -s \"https://api.grants.gov/v1/api/fetchOpportunity\" -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"opportunityId\"\"\"\": 361059}')",
+      "Bash(npx next:*)"
     ]
   }
 }

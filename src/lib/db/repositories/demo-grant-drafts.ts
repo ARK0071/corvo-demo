@@ -1,13 +1,27 @@
 import { prisma } from "../client";
-import { DemoGrantDraft as PrismaDraft, Prisma } from "@/generated/prisma";
+import { Prisma } from "@/generated/prisma";
+import type { DemoGrantDraft as PrismaDraft, DemoGrantDraftVersion as PrismaVersion } from "@/generated/prisma";
 import { getTenantConfig } from "../tenant-config";
+import type {
+  DraftStatus,
+  DraftSection,
+  AttachmentStatus,
+  ResearchData,
+  UserGuidance,
+  EditedBy,
+  SavedDraft,
+  DraftVersion,
+} from "@/lib/grant-drafting/types";
 
-// Get current port ID from tenant config
+// Re-export types for consumers
+export type { DraftStatus, DraftSection, AttachmentStatus, ResearchData, UserGuidance, EditedBy, SavedDraft, DraftVersion };
+
+// ─── Helpers ───
+
 function getPortId(): string {
   return getTenantConfig().portId;
 }
 
-// Helper to resolve portProfileId from UUID or slug - creates profile on demand if needed
 async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string | null> {
   const portId = getPortId();
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -16,22 +30,19 @@ async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string
     return portProfileIdOrSlug;
   }
 
-  // Look up the port profile by portId
   let portProfile = await prisma.demoPortProfile.findFirst({
     where: { portId },
     select: { id: true },
   });
 
-  // If no port profile exists, create one on demand
   if (!portProfile) {
-    console.log(`[demo-grant-drafts] Creating port profile on demand for portId: ${portId}`);
     try {
       const tenantConfig = getTenantConfig();
       portProfile = await prisma.demoPortProfile.create({
         data: {
           portId,
           slug: tenantConfig.portSlug || portId,
-          name: portProfileIdOrSlug || portId, // Use the name passed in or portId as fallback
+          name: portProfileIdOrSlug || portId,
           entityType: "port",
           location: {},
           characteristics: {},
@@ -53,139 +64,114 @@ async function resolvePortProfileId(portProfileIdOrSlug: string): Promise<string
   return portProfile.id;
 }
 
-// Draft status type
-export type DraftStatus = "researching" | "drafting" | "reviewing" | "ready" | "submitted";
-
-// Draft section type
-export interface DraftSection {
-  id: string;
-  title: string;
-  content: string;
-  completeness: number; // 0-100
-  weight?: number; // percentage of total score
-  lastEditedAt?: string;
-  aiGenerated?: boolean;
-  notes?: string;
-}
-
-// Attachment checklist item
-export interface AttachmentItem {
-  id: string;
-  name: string;
-  required: boolean;
-  uploaded: boolean;
-  fileName?: string;
-  uploadedAt?: string;
-}
-
-// Research data type
-export interface ResearchData {
-  grantDetails?: any;
-  nofoRequirements?: any;
-  portProfile?: any;
-  matchingProject?: any;
-  competitiveIntel?: any;
-  citations?: any[];
-  researchedAt?: string;
-}
-
-// Application type
-export interface GrantDraft {
-  id: string;
-  grantId: string;
-  grantProgram: string;
-  status: DraftStatus;
-  researchData?: ResearchData;
-  sections: DraftSection[];
-  overallCompleteness: number;
-  attachmentsChecklist: AttachmentItem[];
-  generatedAt?: string;
-  lastEditedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Convert Prisma model to application type
-function toGrantDraft(draft: PrismaDraft): GrantDraft {
+function toSavedDraft(draft: PrismaDraft): SavedDraft {
   return {
     id: draft.id,
     grantId: draft.grantId,
     grantProgram: draft.grantProgram,
     status: draft.status as DraftStatus,
     researchData: (draft.researchData as unknown as ResearchData) || undefined,
+    userGuidance: (draft.userGuidance as unknown as UserGuidance) || undefined,
     sections: (draft.sections as unknown as DraftSection[]) || [],
     overallCompleteness: draft.overallCompleteness,
-    attachmentsChecklist: (draft.attachmentsChecklist as unknown as AttachmentItem[]) || [],
+    attachmentsChecklist: (draft.attachmentsChecklist as unknown as AttachmentStatus[]) || [],
     generatedAt: draft.generatedAt?.toISOString(),
     lastEditedAt: draft.lastEditedAt?.toISOString(),
+    lastEditedBy: draft.lastEditedById
+      ? { userId: draft.lastEditedById, userName: draft.lastEditedByName || "" }
+      : undefined,
+    createdBy: draft.createdById
+      ? { userId: draft.createdById, userName: draft.createdByName || "" }
+      : undefined,
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };
 }
 
-// Get all drafts for current port
-export async function getAllDrafts(): Promise<GrantDraft[]> {
+function toDraftVersion(v: PrismaVersion): DraftVersion {
+  return {
+    id: v.id,
+    versionNumber: v.versionNumber,
+    sections: (v.sections as unknown as DraftSection[]) || [],
+    overallCompleteness: v.overallCompleteness,
+    editedBy: {
+      userId: v.editedById || "",
+      userName: v.editedByName || "",
+    },
+    editSummary: v.editSummary,
+    createdAt: v.createdAt.toISOString(),
+  };
+}
+
+function calculateCompleteness(sections: DraftSection[]): number {
+  if (sections.length === 0) return 0;
+  const totalWeight = sections.reduce((sum, s) => sum + s.weight, 0);
+  if (totalWeight === 0) return 0;
+  const weighted = sections.reduce((sum, s) => {
+    const c = s.confidence === "high" ? 1.0 : s.confidence === "medium" ? 0.7 : 0.4;
+    return sum + c * s.weight;
+  }, 0);
+  return Math.round((weighted / totalWeight) * 100);
+}
+
+// ─── CRUD Operations ───
+
+export async function getAllDrafts(): Promise<SavedDraft[]> {
   const portId = getPortId();
   const drafts = await prisma.demoGrantDraft.findMany({
     where: { portId },
     orderBy: { updatedAt: "desc" },
   });
-  return drafts.map(toGrantDraft);
+  return drafts.map(toSavedDraft);
 }
 
-// Get draft by ID
-export async function getDraftById(id: string): Promise<GrantDraft | undefined> {
+export async function getDraftById(id: string): Promise<SavedDraft | undefined> {
   const portId = getPortId();
   const draft = await prisma.demoGrantDraft.findFirst({
     where: { id, portId },
   });
-  return draft ? toGrantDraft(draft) : undefined;
+  return draft ? toSavedDraft(draft) : undefined;
 }
 
-// Get draft by grant ID (there should only be one draft per grant per port)
-export async function getDraftByGrantId(grantId: string): Promise<GrantDraft | undefined> {
+export async function getDraftByGrantId(grantId: string): Promise<SavedDraft | undefined> {
   const portId = getPortId();
   const draft = await prisma.demoGrantDraft.findFirst({
     where: { grantId, portId },
   });
-  return draft ? toGrantDraft(draft) : undefined;
+  return draft ? toSavedDraft(draft) : undefined;
 }
 
-// Get drafts by status
-export async function getDraftsByStatus(status: DraftStatus): Promise<GrantDraft[]> {
+export async function getDraftsByStatus(status: DraftStatus): Promise<SavedDraft[]> {
   const portId = getPortId();
   const drafts = await prisma.demoGrantDraft.findMany({
     where: { portId, status },
     orderBy: { updatedAt: "desc" },
   });
-  return drafts.map(toGrantDraft);
+  return drafts.map(toSavedDraft);
 }
 
-// Create a new draft
 export async function createDraft(
   data: {
     grantId: string;
     grantProgram: string;
     status?: DraftStatus;
     researchData?: ResearchData;
+    userGuidance?: UserGuidance;
     sections?: DraftSection[];
-    attachmentsChecklist?: AttachmentItem[];
+    attachmentsChecklist?: AttachmentStatus[];
   },
-  portProfileIdOrSlug: string
-): Promise<GrantDraft> {
+  portProfileIdOrSlug: string,
+  createdBy?: EditedBy,
+): Promise<SavedDraft> {
   const portId = getPortId();
 
-  // Resolve portProfileId from slug if needed
   const portProfileId = await resolvePortProfileId(portProfileIdOrSlug);
   if (!portProfileId) {
     throw new Error(`Could not resolve port profile for: ${portProfileIdOrSlug}`);
   }
 
-  // Calculate initial completeness
   const sections = data.sections || [];
-  const overallCompleteness = sections.length > 0
-    ? Math.round(sections.reduce((s, sec) => s + sec.completeness, 0) / sections.length)
-    : 0;
+  const overallCompleteness = calculateCompleteness(sections);
 
   const draft = await prisma.demoGrantDraft.create({
     data: {
@@ -195,66 +181,95 @@ export async function createDraft(
       grantProgram: data.grantProgram,
       status: data.status || "researching",
       researchData: (data.researchData as unknown as Prisma.InputJsonValue) || Prisma.JsonNull,
+      userGuidance: (data.userGuidance as unknown as Prisma.InputJsonValue) || Prisma.JsonNull,
       sections: sections as unknown as Prisma.InputJsonValue,
       overallCompleteness,
       attachmentsChecklist: (data.attachmentsChecklist || []) as unknown as Prisma.InputJsonValue,
       generatedAt: sections.length > 0 ? new Date() : null,
+      createdById: createdBy?.userId || null,
+      createdByName: createdBy?.userName || null,
     },
   });
 
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Update draft status
+// ─── Updates ───
+
 export async function updateDraftStatus(
   id: string,
-  status: DraftStatus
-): Promise<GrantDraft | null> {
+  status: DraftStatus,
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
   const draft = await prisma.demoGrantDraft.update({
     where: { id },
-    data: { status },
+    data: {
+      status,
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
+    },
   });
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Update research data
 export async function updateResearchData(
   id: string,
-  researchData: ResearchData
-): Promise<GrantDraft | null> {
+  researchData: ResearchData,
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
   const draft = await prisma.demoGrantDraft.update({
     where: { id },
-    data: { researchData: researchData as unknown as Prisma.InputJsonValue },
+    data: {
+      researchData: researchData as unknown as Prisma.InputJsonValue,
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
+    },
   });
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Update draft sections
-export async function updateSections(
+export async function updateUserGuidance(
   id: string,
-  sections: DraftSection[]
-): Promise<GrantDraft | null> {
+  userGuidance: UserGuidance,
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
-  const overallCompleteness = sections.length > 0
-    ? Math.round(sections.reduce((s, sec) => s + sec.completeness, 0) / sections.length)
-    : 0;
+  const draft = await prisma.demoGrantDraft.update({
+    where: { id },
+    data: {
+      userGuidance: userGuidance as unknown as Prisma.InputJsonValue,
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
+    },
+  });
+  return toSavedDraft(draft);
+}
+
+export async function updateSections(
+  id: string,
+  sections: DraftSection[],
+  editedBy?: EditedBy,
+  editSummary?: string,
+): Promise<SavedDraft | null> {
+  const portId = getPortId();
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
+  if (!existing) return null;
+
+  const overallCompleteness = calculateCompleteness(sections);
+
+  // Create version snapshot before updating
+  await createVersionSnapshot(id, existing, editedBy, editSummary || "Sections updated");
 
   const draft = await prisma.demoGrantDraft.update({
     where: { id },
@@ -262,46 +277,45 @@ export async function updateSections(
       sections: sections as unknown as Prisma.InputJsonValue,
       overallCompleteness,
       lastEditedAt: new Date(),
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
       generatedAt: existing.generatedAt || new Date(),
     },
   });
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Update a single section
 export async function updateSection(
   id: string,
   sectionId: string,
-  updates: Partial<DraftSection>
-): Promise<GrantDraft | null> {
+  updates: Partial<DraftSection>,
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
   const sections = (existing.sections as unknown as DraftSection[]) || [];
-  const sectionIndex = sections.findIndex((s) => s.id === sectionId);
+  const sectionIndex = sections.findIndex(s => s.sectionId === sectionId);
   if (sectionIndex === -1) return null;
 
   sections[sectionIndex] = {
     ...sections[sectionIndex],
     ...updates,
     lastEditedAt: new Date().toISOString(),
+    lastEditedBy: editedBy,
   };
 
-  return updateSections(id, sections);
+  return updateSections(id, sections, editedBy, `Updated section: ${sections[sectionIndex].title}`);
 }
 
-// Update attachments checklist
 export async function updateAttachments(
   id: string,
-  attachmentsChecklist: AttachmentItem[]
-): Promise<GrantDraft | null> {
+  attachmentsChecklist: AttachmentStatus[],
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
   const draft = await prisma.demoGrantDraft.update({
@@ -309,58 +323,33 @@ export async function updateAttachments(
     data: {
       attachmentsChecklist: attachmentsChecklist as unknown as Prisma.InputJsonValue,
       lastEditedAt: new Date(),
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
     },
   });
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Mark an attachment as uploaded
-export async function markAttachmentUploaded(
-  id: string,
-  attachmentId: string,
-  fileName: string
-): Promise<GrantDraft | null> {
-  const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
-  if (!existing) return null;
-
-  const attachments = (existing.attachmentsChecklist as unknown as AttachmentItem[]) || [];
-  const attachmentIndex = attachments.findIndex((a) => a.id === attachmentId);
-  if (attachmentIndex === -1) return null;
-
-  attachments[attachmentIndex] = {
-    ...attachments[attachmentIndex],
-    uploaded: true,
-    fileName,
-    uploadedAt: new Date().toISOString(),
-  };
-
-  return updateAttachments(id, attachments);
-}
-
-// Generate or regenerate sections using AI
 export async function setSectionsFromAI(
   id: string,
-  sections: DraftSection[]
-): Promise<GrantDraft | null> {
+  sections: DraftSection[],
+  editedBy?: EditedBy,
+): Promise<SavedDraft | null> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return null;
 
-  // Mark sections as AI generated
-  const markedSections = sections.map((s) => ({
+  const markedSections = sections.map(s => ({
     ...s,
     aiGenerated: true,
     lastEditedAt: new Date().toISOString(),
+    lastEditedBy: editedBy,
   }));
 
-  const overallCompleteness = markedSections.length > 0
-    ? Math.round(markedSections.reduce((s, sec) => s + sec.completeness, 0) / markedSections.length)
-    : 0;
+  const overallCompleteness = calculateCompleteness(markedSections);
+
+  // Create version snapshot
+  await createVersionSnapshot(id, existing, editedBy, "AI-generated draft");
 
   const draft = await prisma.demoGrantDraft.update({
     where: { id },
@@ -369,25 +358,85 @@ export async function setSectionsFromAI(
       overallCompleteness,
       generatedAt: new Date(),
       lastEditedAt: new Date(),
+      lastEditedById: editedBy?.userId,
+      lastEditedByName: editedBy?.userName,
       status: "drafting",
     },
   });
-  return toGrantDraft(draft);
+  return toSavedDraft(draft);
 }
 
-// Delete draft
+// ─── Version History ───
+
+async function createVersionSnapshot(
+  draftId: string,
+  existing: PrismaDraft,
+  editedBy?: EditedBy,
+  editSummary?: string,
+): Promise<void> {
+  const existingSections = existing.sections as unknown as DraftSection[];
+  // Only create a version if there are actual sections to snapshot
+  if (!existingSections || !Array.isArray(existingSections) || existingSections.length === 0) return;
+  // Skip if all sections are empty
+  if (existingSections.every(s => !s.content || s.content.trim().length === 0)) return;
+
+  // Get next version number
+  const lastVersion = await prisma.demoGrantDraftVersion.findFirst({
+    where: { draftId },
+    orderBy: { versionNumber: "desc" },
+    select: { versionNumber: true },
+  });
+  const nextVersion = (lastVersion?.versionNumber || 0) + 1;
+
+  await prisma.demoGrantDraftVersion.create({
+    data: {
+      draftId,
+      versionNumber: nextVersion,
+      sections: existingSections as unknown as Prisma.InputJsonValue,
+      overallCompleteness: existing.overallCompleteness,
+      editedById: editedBy?.userId || existing.lastEditedById || null,
+      editedByName: editedBy?.userName || existing.lastEditedByName || null,
+      editSummary: editSummary || "",
+    },
+  });
+}
+
+export async function getVersionHistory(draftId: string): Promise<DraftVersion[]> {
+  const portId = getPortId();
+  // Verify draft belongs to this port
+  const draft = await prisma.demoGrantDraft.findFirst({ where: { id: draftId, portId } });
+  if (!draft) return [];
+
+  const versions = await prisma.demoGrantDraftVersion.findMany({
+    where: { draftId },
+    orderBy: { versionNumber: "desc" },
+  });
+  return versions.map(toDraftVersion);
+}
+
+export async function getVersion(draftId: string, versionNumber: number): Promise<DraftVersion | null> {
+  const portId = getPortId();
+  const draft = await prisma.demoGrantDraft.findFirst({ where: { id: draftId, portId } });
+  if (!draft) return null;
+
+  const version = await prisma.demoGrantDraftVersion.findUnique({
+    where: { draftId_versionNumber: { draftId, versionNumber } },
+  });
+  return version ? toDraftVersion(version) : null;
+}
+
+// ─── Delete & Stats ───
+
 export async function deleteDraft(id: string): Promise<boolean> {
   const portId = getPortId();
-  const existing = await prisma.demoGrantDraft.findFirst({
-    where: { id, portId },
-  });
+  const existing = await prisma.demoGrantDraft.findFirst({ where: { id, portId } });
   if (!existing) return false;
 
+  // Cascade will delete versions
   await prisma.demoGrantDraft.delete({ where: { id } });
   return true;
 }
 
-// Get draft statistics
 export async function getDraftStats(): Promise<{
   total: number;
   byStatus: Record<DraftStatus, number>;
@@ -420,7 +469,6 @@ export async function getDraftStats(): Promise<{
   };
 }
 
-// Clear all drafts for current port
 export async function clearDrafts(): Promise<void> {
   const portId = getPortId();
   await prisma.demoGrantDraft.deleteMany({ where: { portId } });

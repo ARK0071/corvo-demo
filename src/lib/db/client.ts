@@ -14,18 +14,22 @@ try {
   };
 
   function createPrismaClient() {
+    const host = process.env.RDS_HOST || "localhost";
+    const sslMode = process.env.RDS_SSL_MODE || "require";
+    // SSH tunnels to RDS listen on localhost without TLS on the local hop
+    const useSsl =
+      sslMode !== "disable" && host !== "localhost" && host !== "127.0.0.1";
+
     const pool =
       globalForPrisma.pool ??
       new pg.Pool({
-        host: process.env.RDS_HOST || "localhost",
+        host,
         port: parseInt(process.env.RDS_PORT || "5432"),
         database: process.env.RDS_DATABASE || "postgres",
         user: process.env.RDS_USER || "postgres",
         password: process.env.RDS_PASSWORD,
         max: 10,
-        ssl: {
-          rejectUnauthorized: false,
-        },
+        ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
       });
 
     if (process.env.NODE_ENV !== "production") {

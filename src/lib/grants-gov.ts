@@ -101,6 +101,17 @@ interface OpportunityDetail {
     alns?: Array<{ alnNum: string; programTitle: string }>;
     oppStatus?: string;
     assistURL?: string;
+    synopsisAttachmentFolders?: Array<{
+      id: number;
+      folderType: string;
+      folderName: string;
+      synopsisAttachments?: Array<{
+        id: number;
+        mimeType: string;
+        fileName: string;
+        fileDescription: string;
+      }>;
+    }>;
   };
 }
 
@@ -255,6 +266,79 @@ export async function fetchGrantDetails(opportunityId: number | string): Promise
   } catch (error) {
     console.error("Error fetching grant details:", error);
     throw error;
+  }
+}
+
+const GRANTS_GOV_ATTACHMENT_BASE = "https://apply07.grants.gov/grantsws/rest/opportunity/att/download";
+
+/**
+ * Fetch NOFO PDF attachment URL directly from the Grants.gov API.
+ * The API returns synopsisAttachmentFolders which contain the actual NOFO documents.
+ * Returns the download URL for the best NOFO match, or null if none found.
+ */
+export async function fetchNofoAttachmentUrl(opportunityId: number | string): Promise<{ url: string; fileName: string; attachmentId: number } | null> {
+  try {
+    const response = await fetch(`${GRANTS_GOV_BASE_URL}/fetchOpportunity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunityId: Number(opportunityId) }),
+    });
+
+    if (!response.ok) return null;
+
+    const data: OpportunityDetail = await response.json();
+    if (data.errorcode !== 0) return null;
+
+    const folders = data.data.synopsisAttachmentFolders || [];
+
+    // Strategy: Find the NOFO PDF in attachment folders
+    // Priority 1: "Full Announcement" folder (standard location for NOFOs)
+    // Priority 2: Any folder/file with "NOFO" or "notice" in the name
+    // Priority 3: Any PDF in any folder
+    for (const folder of folders) {
+      if (folder.folderType === "Full Announcement") {
+        const pdfAtt = folder.synopsisAttachments?.find(a => a.mimeType === "application/pdf");
+        if (pdfAtt) {
+          return {
+            url: `${GRANTS_GOV_ATTACHMENT_BASE}/${pdfAtt.id}`,
+            fileName: pdfAtt.fileName,
+            attachmentId: pdfAtt.id,
+          };
+        }
+      }
+    }
+
+    // Fallback: look for NOFO-named attachments in any folder
+    for (const folder of folders) {
+      for (const att of folder.synopsisAttachments || []) {
+        if (att.mimeType === "application/pdf") {
+          const name = (att.fileName + " " + att.fileDescription).toLowerCase();
+          if (name.includes("nofo") || name.includes("notice") || name.includes("announcement")) {
+            return {
+              url: `${GRANTS_GOV_ATTACHMENT_BASE}/${att.id}`,
+              fileName: att.fileName,
+              attachmentId: att.id,
+            };
+          }
+        }
+      }
+    }
+
+    // Last resort: first PDF in any folder
+    for (const folder of folders) {
+      const pdfAtt = folder.synopsisAttachments?.find(a => a.mimeType === "application/pdf");
+      if (pdfAtt) {
+        return {
+          url: `${GRANTS_GOV_ATTACHMENT_BASE}/${pdfAtt.id}`,
+          fileName: pdfAtt.fileName,
+          attachmentId: pdfAtt.id,
+        };
+      }
+    }
+
+    return null;
+  } catch {
+    return null;
   }
 }
 

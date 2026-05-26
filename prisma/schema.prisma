@@ -1284,19 +1284,42 @@ model DemoGrantDraft {
   grantProgram         String          @map("grant_program") @db.VarChar(255)
   status               String          @default("researching") @db.VarChar(20)
   researchData         Json?           @map("research_data")
+  userGuidance         Json?           @map("user_guidance")
   sections             Json            @default("[]")
   overallCompleteness  Int             @default(0) @map("overall_completeness")
   attachmentsChecklist Json            @default("[]") @map("attachments_checklist")
   generatedAt          DateTime?       @map("generated_at")
   lastEditedAt         DateTime?       @map("last_edited_at")
+  lastEditedById       String?         @map("last_edited_by_id") @db.VarChar(100)
+  lastEditedByName     String?         @map("last_edited_by_name") @db.VarChar(255)
+  createdById          String?         @map("created_by_id") @db.VarChar(100)
+  createdByName        String?         @map("created_by_name") @db.VarChar(255)
   createdAt            DateTime        @default(now()) @map("created_at")
   updatedAt            DateTime        @updatedAt @map("updated_at")
   portProfile          DemoPortProfile @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+  versions             DemoGrantDraftVersion[]
 
   @@unique([grantId, portProfileId, portId])
   @@index([portId])
   @@index([portProfileId])
   @@map("demo_grant_drafts")
+}
+
+model DemoGrantDraftVersion {
+  id                   String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  draftId              String         @map("draft_id") @db.Uuid
+  versionNumber        Int            @map("version_number")
+  sections             Json           @default("[]")
+  overallCompleteness  Int            @default(0) @map("overall_completeness")
+  editedById           String?        @map("edited_by_id") @db.VarChar(100)
+  editedByName         String?        @map("edited_by_name") @db.VarChar(255)
+  editSummary          String         @default("") @map("edit_summary")
+  createdAt            DateTime       @default(now()) @map("created_at")
+  draft                DemoGrantDraft @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@unique([draftId, versionNumber])
+  @@index([draftId])
+  @@map("demo_grant_draft_versions")
 }
 
 // =============================================================================

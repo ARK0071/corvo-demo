@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, Fragment, useRef } from "react";
-import { useProfile } from "@/components/profile-provider";
-import { useTenantHeaders } from "@/contexts/tenant-context";
+import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
+import { getProfile } from "@/data/profiles";
 import { FEDERAL_FORMS } from "@/data/federal-forms";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,83 +34,31 @@ import {
   RefreshCw,
   FileCheck,
   ArrowRight,
+  History,
+  RotateCw,
+  Save,
+  User,
+  Clock,
+  Plus,
 } from "lucide-react";
+import type {
+  DraftSection,
+  AttachmentStatus,
+  DraftResponse,
+  DraftStreamEvent,
+  ResearchData,
+  ResearchEntityProfile,
+  GrantApplicationSection,
+  EnrichedForm,
+  UserGuidance,
+  DraftVersion,
+  SavedDraft,
+  EditedBy,
+  SectionConfidenceDetail,
+} from "@/lib/grant-drafting/types";
+import { EMPTY_USER_GUIDANCE, mergeValue, mergeArray } from "@/lib/grant-drafting/types";
 
-// ─── Types ───
-
-interface SectionDraft {
-  sectionId: string;
-  title: string;
-  content: string;
-  confidence: "high" | "medium" | "low";
-  confidenceReason: string;
-  gapAnnotations: string[];
-  wordCount: number;
-  maxWords: number;
-  weight: number;
-}
-
-interface AttachmentStatus {
-  id: string;
-  name: string;
-  description: string;
-  required: boolean;
-  status: "on_file" | "needs_preparation" | "missing";
-  notes: string;
-}
-
-interface DraftResponse {
-  sections: SectionDraft[];
-  overallCompleteness: number;
-  attachmentsChecklist: AttachmentStatus[];
-  generatedAt: string;
-  grantProgram: string;
-  applicantName: string;
-}
-
-interface SavedDraft extends DraftResponse {
-  id: string;
-  grantId: string;
-  grantTitle: string;
-  status?: "researching" | "drafting" | "reviewing" | "ready" | "submitted";
-  researchData?: ResearchData;
-}
-
-interface ResearchData {
-  entityProfile: any;
-  grantRequirements: any;
-  forms: any[];
-  researchSummary: {
-    entityDataQuality: "high" | "medium" | "low";
-    grantDataQuality: "high" | "medium" | "low";
-    keyFindings: string[];
-    dataGaps: string[];
-  };
-  grantDetails: any;
-  webSources: {
-    entitySources: { title: string; url: string }[];
-    grantSources: { title: string; url: string }[];
-  };
-  metadata: {
-    researchedAt: string;
-    grantsGovAvailable: boolean;
-    braveSearchAvailable: boolean;
-    webResultsFound: number;
-    nofoAutoFetched?: boolean;
-    nofoPdfUrl?: string | null;
-    nofoPdfPages?: number;
-    nofoValidation?: {
-      isMatch: boolean;
-      confidence: string;
-      detectedProgram: string;
-      detectedFiscalYear: string;
-      reason: string;
-    } | null;
-    acfrAutoFetched?: boolean;
-    acfrPdfUrl?: string | null;
-    acfrPdfPages?: number;
-  };
-}
+// ─── Local UI Types ───
 
 type Phase = "idle" | "researching" | "review" | "generating" | "draft";
 
@@ -139,7 +87,95 @@ const qualityColors = {
   low: "text-red-600 bg-red-500/10 border-red-500/20",
 };
 
-function highlightGapAnnotations(text: string): React.ReactNode[] {
+function looksLikeHtml(content: string): boolean {
+  return /<(h[1-6]|p|ul|ol|table|strong|em)\b/i.test(content);
+}
+
+const GAP_HTML_STYLES = {
+  needs:
+    "display:inline-block;background:rgba(251,191,36,0.35);color:rgb(146,64,14);padding:0.125rem 0.375rem;border-radius:0.25rem;font-size:0.875rem;font-weight:500;margin:0 0.125rem",
+  source:
+    "display:inline-block;background:rgba(219,234,254,0.6);color:rgb(29,78,216);padding:0.125rem 0.25rem;border-radius:0.25rem;font-size:0.75rem;font-weight:500;margin:0 0.125rem",
+  tbp:
+    "display:inline-block;background:rgba(254,226,226,0.6);color:rgb(185,28,28);padding:0.125rem 0.375rem;border-radius:0.25rem;font-size:0.875rem;font-weight:500;margin:0 0.125rem",
+  citation:
+    "color:rgb(29,78,216);font-size:0.7rem;font-weight:500;text-decoration:none;vertical-align:super;margin:0 0.125rem;border-bottom:1px dotted rgb(29,78,216)",
+  citationInternal:
+    "display:inline;color:rgb(100,116,139);font-size:0.7rem;font-weight:500;vertical-align:super;margin:0 0.125rem",
+};
+
+function annotateHtmlGaps(html: string, previewMode = false): string {
+  let result = html;
+
+  // Style citation links (<a class="citation">)
+  if (previewMode) {
+    // In preview mode: remove citation links entirely (keep surrounding text clean)
+    result = result.replace(/<a\s+[^>]*class="citation"[^>]*>.*?<\/a>/gi, "");
+    // Remove internal citations too
+    result = result.replace(/<span\s+[^>]*class="citation-internal"[^>]*>.*?<\/span>/gi, "");
+    // Remove legacy [Source: X] tags
+    result = result.replace(/\[Source:[^\]]+\]/g, "");
+  } else {
+    // In edit mode: style citation links as superscript references
+    result = result.replace(
+      /<a\s+([^>]*class="citation"[^>]*)>/gi,
+      `<a $1 style="${GAP_HTML_STYLES.citation}">`,
+    );
+    // Style internal citations
+    result = result.replace(
+      /<span\s+([^>]*class="citation-internal"[^>]*)>/gi,
+      `<span $1 style="${GAP_HTML_STYLES.citationInternal}">`,
+    );
+    // Legacy [Source: X] tags (from older drafts)
+    result = result.replace(
+      /\[Source:([^\]]+)\]/g,
+      `<span style="${GAP_HTML_STYLES.source}">[Source:$1]</span>`,
+    );
+  }
+
+  // Gap annotations (always shown)
+  result = result.replace(
+    /\[NEEDS:([^\]]+)\]/g,
+    `<span style="${GAP_HTML_STYLES.needs}">[NEEDS:$1]</span>`,
+  );
+  result = result.replace(
+    /\[To be provided by applicant\]/g,
+    `<span style="${GAP_HTML_STYLES.tbp}">[To be provided by applicant]</span>`,
+  );
+
+  return result;
+}
+
+function SectionContent({
+  content,
+  className = "",
+  previewMode = false,
+}: {
+  content: string;
+  className?: string;
+  previewMode?: boolean;
+}) {
+  const fontStyle = { fontFamily: "Georgia, 'Times New Roman', serif" };
+  if (looksLikeHtml(content)) {
+    return (
+      <div
+        className={`text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none ${className}`}
+        style={fontStyle}
+        dangerouslySetInnerHTML={{ __html: annotateHtmlGaps(content, previewMode) }}
+      />
+    );
+  }
+  return (
+    <div
+      className={`text-sm leading-relaxed whitespace-pre-wrap ${className}`}
+      style={fontStyle}
+    >
+      {highlightGapAnnotations(content, previewMode)}
+    </div>
+  );
+}
+
+function highlightGapAnnotations(text: string, previewMode = false): React.ReactNode[] {
   const parts = text.split(/(\[NEEDS:[^\]]+\]|\[Source:[^\]]+\]|\[To be provided by applicant\])/g);
   return parts.map((part, i) => {
     if (part.startsWith("[NEEDS:")) {
@@ -153,6 +189,8 @@ function highlightGapAnnotations(text: string): React.ReactNode[] {
       );
     }
     if (part.startsWith("[Source:")) {
+      // In preview mode, hide legacy [Source: X] citations
+      if (previewMode) return null;
       return (
         <span
           key={i}
@@ -183,11 +221,67 @@ function formatDollars(n: number): string {
   return n > 0 ? `$${n}` : "-";
 }
 
+/** Convert DB draft shape → local component shape */
+function dbDraftToLocal(d: SavedDraft, profileName: string): LocalDraft {
+  return {
+    id: d.id,
+    grantId: d.grantId,
+    grantTitle: d.grantProgram,
+    grantProgram: d.grantProgram,
+    applicantName: profileName,
+    status: d.status,
+    researchData: d.researchData,
+    userGuidance: d.userGuidance,
+    sections: (d.sections || []).map((s) => ({
+      sectionId: s.sectionId,
+      title: s.title,
+      content: s.content || "",
+      confidence: s.confidence || "low",
+      confidenceReason: s.confidenceReason || "",
+      confidenceDetails: s.confidenceDetails,
+      gapAnnotations: s.gapAnnotations || [],
+      wordCount: s.wordCount || (s.content || "").split(/\s+/).filter(Boolean).length,
+      maxWords: s.maxWords || 5000,
+      weight: s.weight || 0,
+      lastEditedAt: s.lastEditedAt,
+      lastEditedBy: s.lastEditedBy,
+      aiGenerated: s.aiGenerated,
+    })),
+    overallCompleteness: d.overallCompleteness || 0,
+    attachmentsChecklist: (d.attachmentsChecklist || []).map((a) => ({
+      id: a.id,
+      name: a.name,
+      description: a.description || "",
+      required: a.required,
+      status: a.status || "missing",
+      notes: a.notes || "",
+    })),
+    generatedAt: d.generatedAt || d.createdAt,
+    lastEditedAt: d.lastEditedAt,
+    lastEditedBy: d.lastEditedBy,
+    createdBy: d.createdBy,
+  };
+}
+
+/** Local draft shape used within the component (extends DraftResponse with extra fields) */
+interface LocalDraft extends DraftResponse {
+  id: string;
+  grantId: string;
+  grantTitle: string;
+  status?: "researching" | "drafting" | "reviewing" | "ready" | "submitted";
+  researchData?: ResearchData;
+  userGuidance?: UserGuidance;
+  lastEditedAt?: string;
+  lastEditedBy?: EditedBy;
+  createdBy?: EditedBy;
+}
+
 // ─── Component ───
 
 export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraftViewProps) {
-  const { profile } = useProfile();
+  const tenant = useTenant();
   const tenantHeaders = useTenantHeaders();
+  const profile = getProfile(tenant.portSlug) ?? { name: tenant.portName };
 
   // Phase state
   const [phase, setPhase] = useState<Phase>("idle");
@@ -196,15 +290,26 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   const [researchProgress, setResearchProgress] = useState("");
 
   // Draft state
-  const [drafts, setDrafts] = useState<SavedDraft[]>([]);
+  const [drafts, setDrafts] = useState<LocalDraft[]>([]);
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingProgress, setGeneratingProgress] = useState("");
+  const [streamingSections, setStreamingSections] = useState<DraftSection[]>([]);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [editingSections, setEditingSections] = useState<Map<string, string>>(new Map());
   const [showAttachments, setShowAttachments] = useState(false);
   const [activeView, setActiveView] = useState<"sections" | "preview">("sections");
   const [draftsLoaded, setDraftsLoaded] = useState(false);
+
+  // User guidance state
+  const [userGuidance, setUserGuidance] = useState<UserGuidance>(EMPTY_USER_GUIDANCE);
+
+  // Version history state
+  const [versionHistory, setVersionHistory] = useState<DraftVersion[]>([]);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+
+  // Regenerating sections
+  const [regeneratingSection, setRegeneratingSection] = useState<string | null>(null);
 
   // Current grant context
   const [currentGrantId, setCurrentGrantId] = useState<string | null>(null);
@@ -222,7 +327,11 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   const [nofoError, setNofoError] = useState<string | null>(null);
   const [nofoUploaded, setNofoUploaded] = useState(false);
 
-  // Track pending saves to prevent race conditions
+  // Grant picker state
+  const [showGrantPicker, setShowGrantPicker] = useState(false);
+
+  // Autosave state
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "unsaved" | "error">("saved");
   const pendingSaveRef = useRef<AbortController | null>(null);
 
   // Load drafts from database on mount
@@ -234,37 +343,9 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
         });
         if (res.ok) {
           const data = await res.json();
-          // Transform database format to component format
-          const loadedDrafts: SavedDraft[] = (data.drafts || []).map((d: any) => ({
-            id: d.id,
-            grantId: d.grantId,
-            grantTitle: d.grantProgram, // Use grantProgram as title
-            grantProgram: d.grantProgram,
-            applicantName: profile.name,
-            status: d.status, // Include draft status
-            researchData: d.researchData, // Include research data for "researching" drafts
-            sections: (d.sections || []).map((s: any) => ({
-              sectionId: s.id || s.sectionId,
-              title: s.title,
-              content: s.content || "",
-              confidence: s.completeness >= 80 ? "high" : s.completeness >= 50 ? "medium" : "low",
-              confidenceReason: "",
-              gapAnnotations: [],
-              wordCount: (s.content || "").split(/\s+/).filter(Boolean).length,
-              maxWords: 5000,
-              weight: s.weight || Math.round(100 / Math.max((d.sections || []).length, 1)),
-            })),
-            overallCompleteness: d.overallCompleteness || 0,
-            attachmentsChecklist: (d.attachmentsChecklist || []).map((a: any) => ({
-              id: a.id,
-              name: a.name,
-              description: "",
-              required: a.required,
-              status: a.uploaded ? "on_file" : "missing",
-              notes: "",
-            })),
-            generatedAt: d.generatedAt || d.createdAt,
-          }));
+          const loadedDrafts: LocalDraft[] = (data.drafts || []).map((d: SavedDraft) =>
+            dbDraftToLocal(d, profile.name)
+          );
           setDrafts(loadedDrafts);
         }
       } catch (error) {
@@ -278,12 +359,11 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
   // Auto-start research when coming from Draft Grant button
   useEffect(() => {
-    if (!draftsLoaded) return; // Wait for drafts to load from DB
+    if (!draftsLoaded) return;
 
     async function initializeFromGrant() {
       if (!initialGrantId || !initialGrantTitle || phase !== "idle") return;
 
-      // First, check the database for the authoritative draft state
       try {
         const res = await fetch(`/api/grant-drafts?grantId=${initialGrantId}`, {
           headers: tenantHeaders,
@@ -291,37 +371,22 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
         if (res.ok) {
           const dbDraft = await res.json();
-
-          // Check the draft's status to determine which phase to show
           const status = dbDraft.status as string;
           const hasSections = Array.isArray(dbDraft.sections) && dbDraft.sections.length > 0 &&
-                             dbDraft.sections.some((s: any) => s.content && s.content.trim().length > 0);
-
-          console.log("[GrantDraftView] DB draft loaded:", {
-            id: dbDraft.id,
-            status,
-            hasSections,
-            sectionsLength: dbDraft.sections?.length,
-            hasResearchData: !!dbDraft.researchData,
-          });
+                             dbDraft.sections.some((s: DraftSection) => s.content && s.content.trim().length > 0);
 
           if (status === "researching" || (status === "drafting" && !hasSections)) {
-            // Draft is in research/review phase - show review page
-            console.log("[GrantDraftView] Draft is in research phase, showing review");
             if (dbDraft.researchData) {
               setResearchData(dbDraft.researchData);
               setCurrentGrantId(initialGrantId);
               setCurrentGrantTitle(initialGrantTitle);
               setCurrentDraftId(dbDraft.id);
+              if (dbDraft.userGuidance) setUserGuidance(dbDraft.userGuidance);
               sessionStorage.setItem(`research_${initialGrantId}`, JSON.stringify(dbDraft.researchData));
               setPhase("review");
               return;
-            } else {
-              console.log("[GrantDraftView] No research data in draft!");
             }
           } else if (hasSections) {
-            // Draft has been generated - show draft view
-            console.log("[GrantDraftView] Draft has sections, showing draft view");
             const localDraft = drafts.find((d) => d.id === dbDraft.id || d.grantId === initialGrantId);
             if (localDraft && localDraft.sections.length > 0) {
               setSelectedDraftId(localDraft.id);
@@ -329,18 +394,12 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
               setPhase("draft");
               return;
             }
-          } else {
-            console.log("[GrantDraftView] Draft exists but no matching condition - status:", status, "hasSections:", hasSections);
           }
-        } else {
-          console.log("[GrantDraftView] No draft found in DB for grantId:", initialGrantId, "status:", res.status);
         }
       } catch (e) {
         console.error("Failed to check database for existing draft:", e);
       }
 
-      // Fallback: Check for cached research in sessionStorage (for same tab)
-      console.log("[GrantDraftView] Checking sessionStorage fallback");
       const cachedResearch = sessionStorage.getItem(`research_${initialGrantId}`);
       if (cachedResearch) {
         try {
@@ -349,10 +408,9 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
           setCurrentGrantTitle(initialGrantTitle);
           setPhase("review");
           return;
-        } catch {}
+        } catch { /* ignore */ }
       }
 
-      // No existing draft or research found - start fresh research
       handleStartResearch(initialGrantId, initialGrantTitle);
     }
 
@@ -371,7 +429,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
     try {
       setResearchProgress("Fetching grant details from Grants.gov...");
-      await new Promise((r) => setTimeout(r, 300)); // UI feedback
+      await new Promise((r) => setTimeout(r, 300));
 
       setResearchProgress("Searching web & auto-fetching NOFO/ACFR PDFs...");
 
@@ -389,27 +447,21 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       const data: ResearchData = await res.json();
       setResearchData(data);
 
-      // If NOFO was auto-fetched during research, mark as uploaded
       if (data.metadata?.nofoAutoFetched) {
         setNofoUploaded(true);
       }
-      // If ACFR was auto-fetched, mark with filename
       if (data.metadata?.acfrAutoFetched && data.metadata?.acfrPdfUrl) {
         setAcfrFileName("Auto-fetched from web");
       }
 
-      // Cache research in sessionStorage (for quick access in same tab)
       sessionStorage.setItem(`research_${grantId}`, JSON.stringify(data));
 
-      // Save research to database for persistence across tabs
       try {
-        // Check if draft already exists for this grant
         const existingRes = await fetch(`/api/grant-drafts?grantId=${grantId}`, {
           headers: tenantHeaders,
         });
 
         if (existingRes.ok) {
-          // Update existing draft with research data
           const existing = await existingRes.json();
           await fetch("/api/grant-drafts", {
             method: "PUT",
@@ -422,7 +474,6 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
           });
           setCurrentDraftId(existing.id);
         } else if (existingRes.status === 404) {
-          // Create new draft in "researching" status
           const createRes = await fetch("/api/grant-drafts", {
             method: "POST",
             headers: { ...tenantHeaders, "Content-Type": "application/json" },
@@ -441,7 +492,6 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
         }
       } catch (dbError) {
         console.error("Failed to save research to database:", dbError);
-        // Continue anyway - sessionStorage will still work for current tab
       }
 
       setPhase("review");
@@ -453,18 +503,34 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     }
   }
 
-  // ─── Phase 3: Generate Draft ───
+  // ─── Phase 3: Generate Draft (with SSE streaming) ───
 
   async function handleGenerateDraft() {
     if (!researchData || !currentGrantId || !currentGrantTitle) return;
 
     setPhase("generating");
     setIsGenerating(true);
-    setGeneratingProgress("Generating all sections in parallel with Claude Sonnet...");
+    setGeneratingProgress("Starting generation...");
+    setStreamingSections([]);
+
+    // Save user guidance to DB if we have a draft
+    if (currentDraftId && hasNonEmptyGuidance(userGuidance)) {
+      try {
+        await fetch("/api/grant-drafts", {
+          method: "PUT",
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: currentDraftId,
+            action: "updateUserGuidance",
+            userGuidance,
+          }),
+        });
+      } catch { /* continue anyway */ }
+    }
 
     try {
       const gr = researchData.grantRequirements;
-      const requestBody: any = {
+      const requestBody = {
         grantId: currentGrantId,
         grantTitle: currentGrantTitle,
         portName: researchData.entityProfile?.name || profile.name,
@@ -477,27 +543,37 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
           costShareMinimum: gr?.costSharePercentage || 0,
           costSharePercentage: gr?.costSharePercentage || 0,
           submissionDeadline: gr?.submissionDeadline || researchData.grantDetails?.closeDate || "",
-          sections: (gr?.applicationSections || []).map((s: any, i: number) => ({
+          sections: (gr?.applicationSections || []).map((s: GrantApplicationSection, i: number) => ({
             id: `section-${i}`,
             title: s.title,
             description: s.description,
             maxWords: s.maxWords || 5000,
             weight: s.weight || Math.round(100 / (gr?.applicationSections?.length || 1)),
             evaluationCriteria: s.evaluationCriteria || [],
-            requiredElements: [],
+            requiredElements: s.requiredElements || [],
           })),
-          requiredAttachments: (researchData.forms || []).map((f: any) => ({
+          requiredAttachments: (researchData.forms || []).map((f: EnrichedForm) => ({
             id: f.id || f.number.toLowerCase().replace(/[^a-z0-9]/g, "-"),
             name: `${f.number}: ${f.name}`,
             description: f.notes || f.description || "",
             required: f.required !== false,
           })),
         },
+        grantDetails: researchData.grantDetails || null,
+        userGuidance: hasNonEmptyGuidance(userGuidance) ? userGuidance : undefined,
+        webSources: [
+          ...(researchData.webSources?.entitySources || []),
+          ...(researchData.webSources?.grantSources || []),
+        ],
       };
 
+      // Try SSE streaming first
       const res = await fetch("/api/build-grant-application", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
         body: JSON.stringify(requestBody),
       });
 
@@ -506,44 +582,82 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
         throw new Error(data.error || "Failed to generate draft");
       }
 
-      const response: DraftResponse = await res.json();
+      let finalResponse: DraftResponse | null = null;
+
+      if (res.headers.get("content-type")?.includes("text/event-stream") && res.body) {
+        // Stream SSE events
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const event: DraftStreamEvent = JSON.parse(line.slice(6));
+
+              switch (event.type) {
+                case "section_start":
+                  setGeneratingProgress(`Generating section ${event.index + 1}/${event.total}: ${event.title}...`);
+                  break;
+                case "section_complete":
+                  setStreamingSections((prev) => [...prev, event.section]);
+                  break;
+                case "scoring_start":
+                  setGeneratingProgress("Scoring sections with Claude...");
+                  break;
+                case "scoring_complete":
+                  setStreamingSections(event.sections);
+                  break;
+                case "attachments":
+                  // Attachments processed
+                  break;
+                case "complete":
+                  finalResponse = event.response;
+                  break;
+                case "error":
+                  throw new Error(event.message);
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof Error && parseErr.message !== "Unexpected end of JSON input") {
+                throw parseErr;
+              }
+            }
+          }
+        }
+      } else {
+        // Fallback: non-streaming JSON response
+        finalResponse = await res.json();
+      }
+
+      if (!finalResponse) {
+        throw new Error("No response received from generation");
+      }
 
       // Save to database
-      const dbSections = response.sections.map((s) => ({
-        id: s.sectionId,
-        title: s.title,
-        content: s.content,
-        completeness: s.confidence === "high" ? 90 : s.confidence === "medium" ? 60 : 30,
-        weight: s.weight,
-        aiGenerated: true,
-      }));
-
-      const dbAttachments = response.attachmentsChecklist.map((a) => ({
-        id: a.id,
-        name: a.name,
-        required: a.required,
-        uploaded: a.status === "on_file",
-      }));
-
       let draftId = currentDraftId || `draft-${Date.now()}`;
       let savedToDb = false;
 
-      // If we have an existing draft (from research phase), update it; otherwise create new
       if (currentDraftId) {
-        // Update existing draft with generated sections
         const updateRes = await fetch("/api/grant-drafts", {
           method: "PUT",
           headers: { ...tenantHeaders, "Content-Type": "application/json" },
           body: JSON.stringify({
             id: currentDraftId,
             action: "setSectionsFromAI",
-            sections: dbSections,
+            sections: finalResponse.sections,
           }),
         });
 
         if (updateRes.ok) {
           savedToDb = true;
-          // Also update status and attachments
           await fetch("/api/grant-drafts", {
             method: "PUT",
             headers: { ...tenantHeaders, "Content-Type": "application/json" },
@@ -559,15 +673,11 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
             body: JSON.stringify({
               id: currentDraftId,
               action: "updateAttachments",
-              attachmentsChecklist: dbAttachments,
+              attachmentsChecklist: finalResponse.attachmentsChecklist,
             }),
           });
-        } else {
-          const errorData = await updateRes.json().catch(() => ({}));
-          console.error("Failed to update draft in database:", errorData.error || updateRes.statusText);
         }
       } else {
-        // Create new draft
         const createRes = await fetch("/api/grant-drafts", {
           method: "POST",
           headers: { ...tenantHeaders, "Content-Type": "application/json" },
@@ -577,9 +687,10 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
             grantProgram: currentGrantTitle,
             status: "drafting",
             researchData: researchData,
-            sections: dbSections,
-            overallCompleteness: response.overallCompleteness,
-            attachmentsChecklist: dbAttachments,
+            sections: finalResponse.sections,
+            overallCompleteness: finalResponse.overallCompleteness,
+            attachmentsChecklist: finalResponse.attachmentsChecklist,
+            userGuidance: hasNonEmptyGuidance(userGuidance) ? userGuidance : undefined,
           }),
         });
 
@@ -587,37 +698,34 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
           const created = await createRes.json();
           draftId = created.id;
           savedToDb = true;
-        } else {
-          const errorData = await createRes.json().catch(() => ({}));
-          console.error("Failed to save draft to database:", errorData.error || createRes.statusText);
         }
       }
 
       if (!savedToDb) {
-        alert(`Warning: Draft generated but could not be saved to database. Changes may not persist across sessions.`);
+        alert("Warning: Draft generated but could not be saved to database. Changes may not persist across sessions.");
       }
 
-      const newDraft: SavedDraft = {
-        ...response,
+      const newDraft: LocalDraft = {
+        ...finalResponse,
         id: draftId,
         grantId: currentGrantId,
         grantTitle: currentGrantTitle,
+        researchData,
+        userGuidance: hasNonEmptyGuidance(userGuidance) ? userGuidance : undefined,
       };
 
-      // Update or add the draft in the list
       setDrafts((prev) => {
         const existingIndex = prev.findIndex((d) => d.id === draftId || d.grantId === currentGrantId);
         if (existingIndex >= 0) {
-          // Update existing draft
           const updated = [...prev];
           updated[existingIndex] = newDraft;
           return updated;
         }
-        // Add new draft at the beginning
         return [newDraft, ...prev];
       });
       setSelectedDraftId(newDraft.id);
-      setExpandedSections(new Set(response.sections.map((s) => s.sectionId)));
+      setExpandedSections(new Set(finalResponse.sections.map((s) => s.sectionId)));
+      setStreamingSections([]);
       setPhase("draft");
     } catch (error) {
       alert(`Error: ${error instanceof Error ? error.message : "Failed to generate draft"}`);
@@ -628,7 +736,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     }
   }
 
-  // ─── ACFR Upload ───
+  // ─── ACFR Upload (using mergeValue/mergeArray) ───
 
   async function handleAcfrUpload(file: File) {
     setAcfrLoading(true);
@@ -644,67 +752,64 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       const data = await res.json();
       setAcfrFileName(file.name);
 
-      // Merge ACFR-extracted profile into research data (ACFR overrides web research)
       if (researchData) {
-        const acfr = data.profile;
-        const merged = {
+        const acfr = data.profile as Partial<ResearchEntityProfile>;
+        const ep = researchData.entityProfile;
+
+        const merged: ResearchData = {
           ...researchData,
           entityProfile: {
-            ...researchData.entityProfile,
-            name: acfr.name || researchData.entityProfile.name,
-            legalName: acfr.legalName || researchData.entityProfile.legalName,
-            entityType: acfr.entityType || researchData.entityProfile.entityType,
-            classification: acfr.classification || researchData.entityProfile.classification,
-            location: {
-              ...researchData.entityProfile.location,
-              ...(acfr.location || {}),
-            },
+            ...ep,
+            name: mergeValue(acfr.name, ep.name),
+            legalName: mergeValue(acfr.legalName, ep.legalName),
+            entityType: mergeValue(acfr.entityType, ep.entityType),
+            classification: mergeValue(acfr.classification, ep.classification),
+            location: { ...ep.location, ...(acfr.location || {}) },
             financials: {
-              annualRevenue: acfr.financials?.annualRevenue || researchData.entityProfile.financials?.annualRevenue || 0,
-              operatingBudget: acfr.financials?.operatingBudget || researchData.entityProfile.financials?.operatingBudget || 0,
-              capitalBudget: acfr.financials?.capitalBudget || researchData.entityProfile.financials?.capitalBudget || 0,
-              bondRating: acfr.financials?.bondRating || researchData.entityProfile.financials?.bondRating || "",
-              totalAssets: acfr.financials?.totalAssets || researchData.entityProfile.financials?.totalAssets || 0,
+              annualRevenue: mergeValue(acfr.financials?.annualRevenue, ep.financials?.annualRevenue || 0),
+              operatingBudget: mergeValue(acfr.financials?.operatingBudget, ep.financials?.operatingBudget || 0),
+              capitalBudget: mergeValue(acfr.financials?.capitalBudget, ep.financials?.capitalBudget || 0),
+              bondRating: mergeValue(acfr.financials?.bondRating, ep.financials?.bondRating || ""),
+              totalAssets: mergeValue(acfr.financials?.totalAssets, ep.financials?.totalAssets || 0),
             },
             operations: {
-              annualTonnage: acfr.operations?.annualTonnage || researchData.entityProfile.operations?.annualTonnage || 0,
-              annualTEUs: acfr.operations?.annualTEUs || researchData.entityProfile.operations?.annualTEUs || 0,
-              vesselCalls: acfr.operations?.vesselCalls || researchData.entityProfile.operations?.vesselCalls || 0,
-              employeeCount: acfr.operations?.employeeCount || researchData.entityProfile.operations?.employeeCount || 0,
-              directJobs: acfr.operations?.directJobs || researchData.entityProfile.operations?.directJobs || 0,
-              cargoTypes: acfr.operations?.cargoTypes?.length > 0 ? acfr.operations.cargoTypes : researchData.entityProfile.operations?.cargoTypes || [],
+              annualTonnage: mergeValue(acfr.operations?.annualTonnage, ep.operations?.annualTonnage || 0),
+              annualTEUs: mergeValue(acfr.operations?.annualTEUs, ep.operations?.annualTEUs || 0),
+              vesselCalls: mergeValue(acfr.operations?.vesselCalls, ep.operations?.vesselCalls || 0),
+              employeeCount: mergeValue(acfr.operations?.employeeCount, ep.operations?.employeeCount || 0),
+              directJobs: mergeValue(acfr.operations?.directJobs, ep.operations?.directJobs || 0),
+              cargoTypes: mergeArray(acfr.operations?.cargoTypes, ep.operations?.cargoTypes || []),
             },
             infrastructure: {
-              keyFacilities: acfr.infrastructure?.keyFacilities?.length > 0 ? acfr.infrastructure.keyFacilities : researchData.entityProfile.infrastructure?.keyFacilities || [],
-              acreage: acfr.infrastructure?.acreage || researchData.entityProfile.infrastructure?.acreage || 0,
+              keyFacilities: mergeArray(acfr.infrastructure?.keyFacilities, ep.infrastructure?.keyFacilities || []),
+              acreage: mergeValue(acfr.infrastructure?.acreage, ep.infrastructure?.acreage || 0),
             },
             economicImpact: {
-              regionalEconomicImpact: acfr.economicImpact?.regionalEconomicImpact || researchData.entityProfile.economicImpact?.regionalEconomicImpact || 0,
-              totalJobs: acfr.economicImpact?.totalJobs || researchData.entityProfile.economicImpact?.totalJobs || 0,
-              tradeValue: acfr.economicImpact?.tradeValue || researchData.entityProfile.economicImpact?.tradeValue || 0,
+              regionalEconomicImpact: mergeValue(acfr.economicImpact?.regionalEconomicImpact, ep.economicImpact?.regionalEconomicImpact || 0),
+              totalJobs: mergeValue(acfr.economicImpact?.totalJobs, ep.economicImpact?.totalJobs || 0),
+              tradeValue: mergeValue(acfr.economicImpact?.tradeValue, ep.economicImpact?.tradeValue || 0),
             },
-            currentProjects: acfr.currentProjects?.length > 0 ? acfr.currentProjects : researchData.entityProfile.currentProjects || [],
-            pastGrantAwards: acfr.pastGrantAwards?.length > 0 ? acfr.pastGrantAwards : researchData.entityProfile.pastGrantAwards || [],
-            certifications: acfr.certifications?.length > 0 ? acfr.certifications : researchData.entityProfile.certifications || [],
-            strategicPriorities: acfr.strategicPriorities?.length > 0 ? acfr.strategicPriorities : researchData.entityProfile.strategicPriorities || [],
-            environmentalGoals: acfr.environmentalGoals?.length > 0 ? acfr.environmentalGoals : researchData.entityProfile.environmentalGoals || [],
+            currentProjects: mergeArray(acfr.currentProjects, ep.currentProjects || []),
+            pastGrantAwards: mergeArray(acfr.pastGrantAwards, ep.pastGrantAwards || []),
+            certifications: mergeArray(acfr.certifications, ep.certifications || []),
+            strategicPriorities: mergeArray(acfr.strategicPriorities, ep.strategicPriorities || []),
+            environmentalGoals: mergeArray(acfr.environmentalGoals, ep.environmentalGoals || []),
           },
           researchSummary: {
             ...researchData.researchSummary,
             entityDataQuality: "high" as const,
             dataGaps: researchData.researchSummary.dataGaps.filter(
-              (g) => !["annualRevenue", "operatingBudget", "capitalBudget", "totalAssets", "bondRating", "employeeCount"].some((k) => g.toLowerCase().includes(k.toLowerCase()))
+              (g) => !["annualRevenue", "operatingBudget", "capitalBudget", "totalAssets", "bondRating", "employeeCount"]
+                .some((k) => g.toLowerCase().includes(k.toLowerCase()))
             ),
           },
         };
         setResearchData(merged);
-        // Update cache
         if (currentGrantId) {
           sessionStorage.setItem(`research_${currentGrantId}`, JSON.stringify(merged));
         }
       }
 
-      // Also cache standalone
       sessionStorage.setItem("acfrProfile", JSON.stringify({ profile: data.profile, fileName: file.name }));
     } catch (error) {
       setAcfrError(error instanceof Error ? error.message : "Upload failed");
@@ -730,9 +835,8 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       setNofoFileName(file.name);
       setNofoUploaded(true);
 
-      // Merge NOFO-extracted requirements into research data
       if (researchData) {
-        const merged = {
+        const merged: ResearchData = {
           ...researchData,
           grantRequirements: {
             ...researchData.grantRequirements,
@@ -762,9 +866,42 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     }
   }
 
+  // ─── Clear NOFO (revert to AI-estimated requirements) ───
+
+  function handleClearNofo() {
+    setNofoFileName(null);
+    setNofoUploaded(false);
+    setNofoError(null);
+
+    if (researchData) {
+      const merged: ResearchData = {
+        ...researchData,
+        metadata: {
+          ...researchData.metadata,
+          nofoAutoFetched: false,
+          nofoPdfUrl: null,
+          nofoPdfPages: 0,
+          nofoValidation: null,
+        },
+        grantRequirements: {
+          ...researchData.grantRequirements,
+          source: "ai-estimated" as const,
+        },
+        researchSummary: {
+          ...researchData.researchSummary,
+          grantDataQuality: "medium" as const,
+        },
+      };
+      setResearchData(merged);
+      if (currentGrantId) {
+        sessionStorage.setItem(`research_${currentGrantId}`, JSON.stringify(merged));
+      }
+    }
+  }
+
   // ─── Forms management ───
 
-  function handleUpdateForms(updatedForms: any[]) {
+  function handleUpdateForms(updatedForms: EnrichedForm[]) {
     if (!researchData) return;
     const merged = { ...researchData, forms: updatedForms };
     setResearchData(merged);
@@ -778,7 +915,6 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
   async function handleDeleteDraft(draftId: string) {
     if (!confirm("Delete this draft?")) return;
 
-    // Delete from database
     try {
       await fetch(`/api/grant-drafts?id=${draftId}`, {
         method: "DELETE",
@@ -788,7 +924,6 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       console.error("Failed to delete draft from database:", error);
     }
 
-    // Update local state
     const newDrafts = drafts.filter((d) => d.id !== draftId);
     setDrafts(newDrafts);
     if (selectedDraftId === draftId) setSelectedDraftId(null);
@@ -808,7 +943,15 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       const wordRatio = wordCount / s.maxWords;
       const confidence: "high" | "medium" | "low" =
         gaps === 0 && wordRatio >= 0.6 ? "high" : gaps <= 2 && wordRatio >= 0.5 ? "medium" : "low";
-      return { ...s, content: newContent, wordCount, gapAnnotations, confidence };
+      return {
+        ...s,
+        content: newContent,
+        wordCount,
+        gapAnnotations,
+        confidence,
+        lastEditedAt: new Date().toISOString(),
+        lastEditedBy: { userId: "current-user", userName: profile.name },
+      };
     });
 
     const totalWeight = updatedSections.reduce((sum, s) => sum + s.weight, 0);
@@ -818,9 +961,14 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     }, 0);
     const overallCompleteness = Math.round((weighted / totalWeight) * 100);
 
-    const updatedDraft = { ...selectedDraft, sections: updatedSections, overallCompleteness };
+    const updatedDraft: LocalDraft = {
+      ...selectedDraft,
+      sections: updatedSections,
+      overallCompleteness,
+      lastEditedAt: new Date().toISOString(),
+      lastEditedBy: { userId: "current-user", userName: profile.name },
+    };
 
-    // Update local state immediately for responsiveness
     setDrafts((prev) => prev.map((d) => (d.id === updatedDraft.id ? updatedDraft : d)));
     setEditingSections((prev) => {
       const next = new Map(prev);
@@ -828,7 +976,8 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
       return next;
     });
 
-    // Sync to database in background
+    // Sync to database
+    setSaveStatus("saving");
     try {
       const section = updatedSections.find((s) => s.sectionId === sectionId);
       if (section) {
@@ -841,13 +990,184 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
             sectionId: sectionId,
             updates: {
               content: section.content,
-              completeness: section.confidence === "high" ? 90 : section.confidence === "medium" ? 60 : 30,
+              confidence: section.confidence,
+              confidenceReason: section.confidenceReason,
+              wordCount: section.wordCount,
+              gapAnnotations: section.gapAnnotations,
             },
           }),
         });
+        setSaveStatus("saved");
       }
     } catch (error) {
       console.error("Failed to save section to database:", error);
+      setSaveStatus("error");
+    }
+  }
+
+  // ─── Section Regeneration ───
+
+  async function handleRegenerateSection(sectionId: string, additionalInstructions?: string) {
+    if (!selectedDraft || !selectedDraft.researchData) return;
+
+    const rd = selectedDraft.researchData;
+    const section = selectedDraft.sections.find((s) => s.sectionId === sectionId);
+    if (!section) return;
+
+    setRegeneratingSection(sectionId);
+    try {
+      const res = await fetch("/api/regenerate-section", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          draftId: selectedDraft.id,
+          sectionId,
+          entityProfile: rd.entityProfile,
+          grantRequirements: rd.grantRequirements,
+          grantDetails: rd.grantDetails,
+          userGuidance: selectedDraft.userGuidance,
+          otherSections: selectedDraft.sections.filter((s) => s.sectionId !== sectionId),
+          portName: rd.entityProfile.name,
+          additionalInstructions,
+          webSources: [
+            ...(rd.webSources?.entitySources || []),
+            ...(rd.webSources?.grantSources || []),
+          ],
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to regenerate section");
+      }
+
+      const { section: newSection } = await res.json();
+
+      // Update local state
+      const updatedSections = selectedDraft.sections.map((s) =>
+        s.sectionId === sectionId ? { ...newSection, sectionId } : s
+      );
+      const totalWeight = updatedSections.reduce((sum, s) => sum + s.weight, 0);
+      const weighted = updatedSections.reduce((sum, s) => {
+        const c = s.confidence === "high" ? 1.0 : s.confidence === "medium" ? 0.7 : 0.4;
+        return sum + c * s.weight;
+      }, 0);
+      const overallCompleteness = Math.round((weighted / totalWeight) * 100);
+
+      const updatedDraft: LocalDraft = { ...selectedDraft, sections: updatedSections, overallCompleteness };
+      setDrafts((prev) => prev.map((d) => (d.id === updatedDraft.id ? updatedDraft : d)));
+
+      // Save to DB
+      await fetch("/api/grant-drafts", {
+        method: "PUT",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selectedDraft.id,
+          action: "updateSection",
+          sectionId,
+          updates: newSection,
+        }),
+      });
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : "Regeneration failed"}`);
+    } finally {
+      setRegeneratingSection(null);
+    }
+  }
+
+  // ─── Version History ───
+
+  async function loadVersionHistory(draftId: string) {
+    try {
+      const res = await fetch(`/api/grant-drafts?id=${draftId}&versions=true`, {
+        headers: tenantHeaders,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVersionHistory(data.versions || []);
+      }
+    } catch (error) {
+      console.error("Failed to load version history:", error);
+    }
+  }
+
+  async function handleRestoreVersion(draftId: string, versionNumber: number) {
+    if (!confirm(`Restore to version ${versionNumber}? Current sections will be saved as a new version first.`)) return;
+
+    try {
+      const res = await fetch(`/api/grant-drafts?id=${draftId}&versionNumber=${versionNumber}`, {
+        headers: tenantHeaders,
+      });
+      if (!res.ok) throw new Error("Failed to fetch version");
+
+      const version: DraftVersion = await res.json();
+
+      // Update sections from version
+      await fetch("/api/grant-drafts", {
+        method: "PUT",
+        headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: draftId,
+          action: "updateSections",
+          sections: version.sections,
+          editSummary: `Restored from version ${versionNumber}`,
+        }),
+      });
+
+      // Refresh local state
+      const updatedDraft = drafts.find((d) => d.id === draftId);
+      if (updatedDraft) {
+        const restored: LocalDraft = {
+          ...updatedDraft,
+          sections: version.sections,
+          overallCompleteness: version.overallCompleteness,
+        };
+        setDrafts((prev) => prev.map((d) => (d.id === draftId ? restored : d)));
+      }
+
+      // Reload version history
+      await loadVersionHistory(draftId);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : "Failed to restore version"}`);
+    }
+  }
+
+  // ─── PDF/DOCX Export ───
+
+  async function handleExportFile(format: "pdf" | "docx") {
+    if (!selectedDraft) return;
+
+    try {
+      const res = await fetch("/api/export-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          format,
+          grantProgram: selectedDraft.grantProgram,
+          applicantName: selectedDraft.applicantName,
+          sections: selectedDraft.sections,
+          generatedAt: selectedDraft.generatedAt,
+          overallCompleteness: selectedDraft.overallCompleteness,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Export failed");
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safeName = selectedDraft.grantProgram.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+      a.download = `${safeName}-draft.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      alert(`Export error: ${error instanceof Error ? error.message : "Failed to export"}`);
     }
   }
 
@@ -860,7 +1180,7 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     });
   }, []);
 
-  // ─── Export Functions ───
+  // ─── Legacy Export Functions (kept for HTML/TXT) ───
 
   function exportToHTML() {
     if (!selectedDraft) return;
@@ -927,18 +1247,18 @@ ${s.content
       `Generated: ${new Date(selectedDraft.generatedAt).toLocaleDateString()}`,
       `Completeness: ${selectedDraft.overallCompleteness}%`,
       "",
-      "═".repeat(72),
+      "\u2550".repeat(72),
       "",
       ...selectedDraft.sections.flatMap((s) => [
         `${s.title}`,
         `Confidence: ${s.confidence} | Words: ${s.wordCount}/${s.maxWords} | Weight: ${s.weight}%`,
-        "─".repeat(72),
+        "\u2500".repeat(72),
         s.content,
         "",
         ...(s.gapAnnotations.length > 0
-          ? [`Data Gaps:`, ...s.gapAnnotations.map((g) => `  • ${g}`), ""]
+          ? [`Data Gaps:`, ...s.gapAnnotations.map((g) => `  \u2022 ${g}`), ""]
           : []),
-        "═".repeat(72),
+        "\u2550".repeat(72),
         "",
       ]),
     ].join("\n");
@@ -967,8 +1287,19 @@ ${s.content
       {/* Sidebar */}
       <div className="w-80 border-r flex flex-col bg-background">
         <div className="p-4 border-b">
-          <h2 className="font-semibold text-lg">Grant Drafts</h2>
-          <p className="text-sm text-muted-foreground mt-1">AI-powered application drafting</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-lg">Grant Drafts</h2>
+              <p className="text-sm text-muted-foreground mt-1">AI-powered application drafting</p>
+            </div>
+            <Button
+              size="sm"
+              className="gap-1.5 shrink-0"
+              onClick={() => setShowGrantPicker(true)}
+            >
+              <Plus className="h-3.5 w-3.5" /> New
+            </Button>
+          </div>
         </div>
 
         {/* Pipeline Status */}
@@ -979,11 +1310,12 @@ ${s.content
               { key: "review", label: "Review & Forms", icon: FileCheck, phases: ["review", "generating", "draft"] },
               { key: "draft", label: "Generate Draft", icon: FileText, phases: ["generating", "draft"] },
             ].map((step, i) => {
-              const isActive = phase === step.phases[0] || (step.key === "review" && phase === "review");
-              const isComplete = step.phases.includes(phase) && phase !== step.phases[0];
               const isDone = step.key === "research" && ["review", "generating", "draft"].includes(phase);
               const isDone2 = step.key === "review" && ["generating", "draft"].includes(phase);
               const isDone3 = step.key === "draft" && phase === "draft";
+              const isActive = (step.key === "research" && phase === "researching") ||
+                               (step.key === "review" && phase === "review") ||
+                               (step.key === "draft" && phase === "generating");
 
               return (
                 <div key={step.key} className="flex items-center gap-3">
@@ -996,7 +1328,7 @@ ${s.content
                   }`}>
                     {isDone || isDone2 || isDone3 ? (
                       <CheckCircle2 className="h-4 w-4" />
-                    ) : isActive && (phase === "researching" || phase === "generating") ? (
+                    ) : isActive ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <span className="text-xs font-bold">{i + 1}</span>
@@ -1024,7 +1356,7 @@ ${s.content
               <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">No drafts yet</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Click &ldquo;Draft Grant&rdquo; on any grant to start
+                Click <strong>New</strong> to pick a grant from your pipeline
               </p>
             </div>
           )}
@@ -1039,15 +1371,14 @@ ${s.content
                 }`}
                 onClick={() => {
                   if (isResearching && draft.researchData) {
-                    // Draft is in research/review phase - show review page
                     setResearchData(draft.researchData);
                     setCurrentGrantId(draft.grantId);
                     setCurrentGrantTitle(draft.grantTitle);
                     setCurrentDraftId(draft.id);
                     setSelectedDraftId(null);
+                    if (draft.userGuidance) setUserGuidance(draft.userGuidance);
                     setPhase("review");
                   } else if (draft.sections.length > 0 && draft.sections.some(s => s.content?.trim())) {
-                    // Draft has been generated - show draft view
                     setSelectedDraftId(draft.id);
                     setCurrentDraftId(null);
                     setExpandedSections(new Set(draft.sections.map((s) => s.sectionId)));
@@ -1070,7 +1401,7 @@ ${s.content
                   )}
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-1">
-                  {new Date(draft.generatedAt).toLocaleString()}
+                  {draft.generatedAt ? new Date(draft.generatedAt).toLocaleString() : "Not yet generated"}
                 </div>
               </Card>
             );
@@ -1081,7 +1412,7 @@ ${s.content
       {/* Main Content - Phase Router */}
       <div className="flex-1 flex flex-col bg-background overflow-hidden">
         {phase === "idle" && (
-          <IdleView />
+          <IdleView onNewDraft={() => setShowGrantPicker(true)} />
         )}
         {phase === "researching" && (
           <ResearchingView progress={researchProgress} grantTitle={currentGrantTitle || ""} />
@@ -1090,6 +1421,8 @@ ${s.content
           <ReviewView
             research={researchData}
             grantTitle={currentGrantTitle || ""}
+            userGuidance={userGuidance}
+            onUserGuidanceChange={setUserGuidance}
             onGenerateDraft={handleGenerateDraft}
             onRerunResearch={() => currentGrantId && currentGrantTitle && handleStartResearch(currentGrantId, currentGrantTitle)}
             onAcfrUpload={handleAcfrUpload}
@@ -1097,6 +1430,7 @@ ${s.content
             acfrFileName={acfrFileName}
             acfrError={acfrError}
             onNofoUpload={handleNofoUpload}
+            onNofoClear={handleClearNofo}
             nofoLoading={nofoLoading}
             nofoFileName={nofoFileName}
             nofoError={nofoError}
@@ -1105,7 +1439,7 @@ ${s.content
           />
         )}
         {phase === "generating" && (
-          <GeneratingView progress={generatingProgress} />
+          <GeneratingView progress={generatingProgress} streamingSections={streamingSections} />
         )}
         {phase === "draft" && selectedDraft && (
           <DraftView
@@ -1114,6 +1448,10 @@ ${s.content
             editingSections={editingSections}
             showAttachments={showAttachments}
             activeView={activeView}
+            saveStatus={saveStatus}
+            regeneratingSection={regeneratingSection}
+            versionHistory={versionHistory}
+            showVersionHistory={showVersionHistory}
             onToggleSection={toggleSection}
             onSetEditingSections={setEditingSections}
             onSaveSectionEdit={handleSaveSectionEdit}
@@ -1123,33 +1461,195 @@ ${s.content
             onCopy={handleCopy}
             onExportHTML={exportToHTML}
             onExportText={exportToText}
+            onExportPdf={() => handleExportFile("pdf")}
+            onExportDocx={() => handleExportFile("docx")}
+            onRegenerateSection={handleRegenerateSection}
+            onToggleVersionHistory={() => {
+              if (!showVersionHistory) loadVersionHistory(selectedDraft.id);
+              setShowVersionHistory(!showVersionHistory);
+            }}
+            onRestoreVersion={(vn) => handleRestoreVersion(selectedDraft.id, vn)}
           />
         )}
         {phase === "draft" && !selectedDraft && (
-          <IdleView />
+          <IdleView onNewDraft={() => setShowGrantPicker(true)} />
         )}
       </div>
+
+      {/* Grant Picker Modal */}
+      {showGrantPicker && (
+        <GrantPickerModal
+          tenantHeaders={tenantHeaders}
+          existingGrantIds={new Set(drafts.map(d => d.grantId))}
+          onSelect={(grantId, grantTitle) => {
+            setShowGrantPicker(false);
+            handleStartResearch(grantId, grantTitle);
+          }}
+          onClose={() => setShowGrantPicker(false)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Helper: check if guidance has any non-empty fields ───
+
+function hasNonEmptyGuidance(g: UserGuidance): boolean {
+  return !!(
+    g.coreFundingNeed.trim() ||
+    g.internalJustification.trim() ||
+    g.impactJustification.trim() ||
+    g.budgetPriorities.trim() ||
+    g.strategicEmphasis.trim() ||
+    g.additionalNotes.trim()
   );
 }
 
 // ─── Phase Views ───
 
-function IdleView() {
+function IdleView({ onNewDraft }: { onNewDraft: () => void }) {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center max-w-md">
         <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
         <h3 className="text-lg font-semibold mb-2">Grant Application Drafting</h3>
         <p className="text-sm text-muted-foreground mb-2">
-          Click &ldquo;Draft Grant&rdquo; on any grant in the discovery or pipeline tabs to start the automated research and drafting pipeline.
+          Select a grant from your pipeline to start the automated research and drafting process.
         </p>
+        <Button className="mt-4 gap-2" onClick={onNewDraft}>
+          <Plus className="h-4 w-4" /> New Draft
+        </Button>
         <div className="flex items-center justify-center gap-6 mt-6 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5"><Search className="h-3.5 w-3.5" /> Auto-research</div>
           <ArrowRight className="h-3 w-3" />
           <div className="flex items-center gap-1.5"><FileCheck className="h-3.5 w-3.5" /> Review</div>
           <ArrowRight className="h-3 w-3" />
           <div className="flex items-center gap-1.5"><FileText className="h-3.5 w-3.5" /> Draft</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GrantPickerModal({
+  tenantHeaders,
+  existingGrantIds,
+  onSelect,
+  onClose,
+}: {
+  tenantHeaders: Record<string, string>;
+  existingGrantIds: Set<string>;
+  onSelect: (grantId: string, grantTitle: string) => void;
+  onClose: () => void;
+}) {
+  const [grants, setGrants] = useState<Array<{ id: string; title: string; agency: string; closeDate: string; awardCeiling: number; stage: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => {
+    async function loadPipeline() {
+      try {
+        const res = await fetch("/api/pipeline", { headers: tenantHeaders });
+        if (!res.ok) throw new Error("Failed to fetch pipeline");
+        const data = await res.json();
+        setGrants(
+          (data.grants || []).map((g: { id: string; title: string; agency: string; closeDate: string; awardCeiling: number; stage: string }) => ({
+            id: g.id,
+            title: g.title,
+            agency: g.agency,
+            closeDate: g.closeDate,
+            awardCeiling: g.awardCeiling,
+            stage: g.stage,
+          }))
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load grants");
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadPipeline();
+  }, [tenantHeaders]);
+
+  const filtered = grants.filter(
+    (g) =>
+      g.title.toLowerCase().includes(filter.toLowerCase()) ||
+      g.agency.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="bg-background border rounded-lg shadow-xl w-full max-w-2xl max-h-[70vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b">
+          <div>
+            <h3 className="font-semibold text-lg">Select Grant from Pipeline</h3>
+            <p className="text-sm text-muted-foreground">Choose a grant to start drafting an application</p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        <div className="p-4 border-b">
+          <input
+            type="text"
+            placeholder="Search grants..."
+            className="w-full px-3 py-2 text-sm border rounded-md bg-background focus:outline-none focus:ring-2 focus:ring-ring"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            autoFocus
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-2">
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          )}
+          {error && (
+            <div className="text-center py-12 text-sm text-red-500">{error}</div>
+          )}
+          {!loading && !error && filtered.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-sm text-muted-foreground">
+                {grants.length === 0
+                  ? "No grants in your pipeline. Add grants from the Discover tab first."
+                  : "No grants match your search."}
+              </p>
+            </div>
+          )}
+          {filtered.map((g) => {
+            const hasDraft = existingGrantIds.has(g.id);
+            return (
+              <button
+                key={g.id}
+                className="w-full text-left p-3 rounded-md hover:bg-muted/50 transition-colors flex items-start gap-3"
+                onClick={() => onSelect(g.id, g.title)}
+              >
+                <FileText className="h-5 w-5 text-[#3d8b8b] shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm line-clamp-2">{g.title}</div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                    <span>{g.agency}</span>
+                    {g.awardCeiling > 0 && (
+                      <span>Up to ${(g.awardCeiling / 1_000_000).toFixed(1)}M</span>
+                    )}
+                    {g.closeDate && (
+                      <span>Due {g.closeDate}</span>
+                    )}
+                  </div>
+                </div>
+                {hasDraft && (
+                  <Badge variant="outline" className="text-[10px] shrink-0">Has Draft</Badge>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -1179,9 +1679,49 @@ function ResearchingView({ progress, grantTitle }: { progress: string; grantTitl
   );
 }
 
+// ─── User Guidance Form ───
+
+function UserGuidanceForm({
+  guidance,
+  onChange,
+}: {
+  guidance: UserGuidance;
+  onChange: (g: UserGuidance) => void;
+}) {
+  const fields: { key: keyof UserGuidance; label: string; placeholder: string }[] = [
+    { key: "coreFundingNeed", label: "Core Funding Need", placeholder: "What specific need does this grant address? e.g., Channel deepening to accommodate larger vessels..." },
+    { key: "internalJustification", label: "Internal Justification", placeholder: "Why is this project important internally? Board priorities, strategic plan alignment..." },
+    { key: "impactJustification", label: "Investment / Impact Justification", placeholder: "What impact will this investment create? Jobs, economic output, safety improvements..." },
+    { key: "budgetPriorities", label: "Budget Priorities", placeholder: "Key budget items or cost allocations to emphasize..." },
+    { key: "strategicEmphasis", label: "Strategic Emphasis", placeholder: "Key themes to weave through the narrative: equity, climate resilience, supply chain..." },
+    { key: "additionalNotes", label: "Additional Notes", placeholder: "Any other points, talking points, or instructions for the AI..." },
+  ];
+
+  return (
+    <div className="space-y-3">
+      {fields.map(({ key, label, placeholder }) => (
+        <div key={key}>
+          <label className="text-xs font-medium text-muted-foreground block mb-1">{label}</label>
+          <textarea
+            className="w-full text-sm border rounded-md px-3 py-2 bg-background resize-y focus:outline-none focus:ring-2 focus:ring-ring min-h-[60px]"
+            placeholder={placeholder}
+            value={guidance[key]}
+            onChange={(e) => onChange({ ...guidance, [key]: e.target.value })}
+            rows={2}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Review View ───
+
 function ReviewView({
   research,
   grantTitle,
+  userGuidance,
+  onUserGuidanceChange,
   onGenerateDraft,
   onRerunResearch,
   onAcfrUpload,
@@ -1189,6 +1729,7 @@ function ReviewView({
   acfrFileName,
   acfrError,
   onNofoUpload,
+  onNofoClear,
   nofoLoading,
   nofoFileName,
   nofoError,
@@ -1197,6 +1738,8 @@ function ReviewView({
 }: {
   research: ResearchData;
   grantTitle: string;
+  userGuidance: UserGuidance;
+  onUserGuidanceChange: (g: UserGuidance) => void;
   onGenerateDraft: () => void;
   onRerunResearch: () => void;
   onAcfrUpload: (file: File) => void;
@@ -1204,17 +1747,18 @@ function ReviewView({
   acfrFileName: string | null;
   acfrError: string | null;
   onNofoUpload: (file: File) => void;
+  onNofoClear: () => void;
   nofoLoading: boolean;
   nofoFileName: string | null;
   nofoError: string | null;
   nofoUploaded: boolean;
-  onUpdateForms: (forms: any[]) => void;
+  onUpdateForms: (forms: EnrichedForm[]) => void;
 }) {
   const [expandedPanel, setExpandedPanel] = useState<string | null>("summary");
   const ep = research.entityProfile;
   const gr = research.grantRequirements;
   const summary = research.researchSummary;
-  const hasRealRequirements = true; // Always allow generation — Claude estimates if NOFO not uploaded
+  const hasRealRequirements = true; // Always allow generation
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -1259,9 +1803,9 @@ function ReviewView({
               <Globe className="h-3 w-3 mr-1" /> Grants.gov
             </Badge>
           )}
-          {research.metadata.braveSearchAvailable && (
+          {research.metadata.claudeWebSearchUsed && (
             <Badge variant="outline" className="text-xs text-purple-600 bg-purple-500/10 border-purple-500/20">
-              <Search className="h-3 w-3 mr-1" /> Web Search ({research.metadata.webResultsFound} results)
+              <Search className="h-3 w-3 mr-1" /> Web Research ({research.metadata.webResultsFound} sources)
             </Badge>
           )}
         </div>
@@ -1359,8 +1903,8 @@ function ReviewView({
                 <div>
                   <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Key Facilities</h4>
                   <ul className="text-xs space-y-0.5">
-                    {(ep.infrastructure?.keyFacilities || []).slice(0, 4).map((f: string, i: number) => (
-                      <li key={i} className="truncate">• {f}</li>
+                    {(ep.infrastructure?.keyFacilities || []).slice(0, 4).map((f, i) => (
+                      <li key={i} className="truncate">&bull; {f}</li>
                     ))}
                   </ul>
                 </div>
@@ -1369,7 +1913,7 @@ function ReviewView({
                 <div className="mt-3">
                   <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Current Projects</h4>
                   <div className="space-y-1">
-                    {ep.currentProjects.map((p: any, i: number) => (
+                    {ep.currentProjects.map((p, i) => (
                       <div key={i} className="text-xs flex items-center gap-2">
                         <span className="font-medium">{p.name}</span>
                         <span className="text-muted-foreground">{formatDollars(p.totalCost)}</span>
@@ -1383,7 +1927,7 @@ function ReviewView({
           )}
         </Card>
 
-        {/* ACFR Upload - Enrich Entity Profile */}
+        {/* ACFR Upload */}
         <Card className="overflow-hidden border-dashed">
           <div className="p-4">
             <div className="flex items-center gap-3">
@@ -1432,63 +1976,113 @@ function ReviewView({
           </div>
         </Card>
 
-        {/* NOFO Upload - Extract Real Grant Requirements */}
-        <Card className={`overflow-hidden border-dashed ${!hasRealRequirements ? "border-amber-500/50 bg-amber-500/5" : ""}`}>
+        {/* NOFO Document */}
+        <Card className={`overflow-hidden ${gr?.source !== "nofo-extracted" ? "border-dashed border-amber-500/50 bg-amber-500/5" : ""}`}>
           <div className="p-4">
             <div className="flex items-center gap-3">
               <ScrollText className="h-4 w-4 text-[#3d8b8b] shrink-0" />
               <div className="flex-1 min-w-0">
-                <span className="font-semibold text-sm">Upload NOFO Document</span>
+                <span className="font-semibold text-sm">NOFO Document</span>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {hasRealRequirements
-                    ? "NOFO requirements extracted. Sections, forms, and scoring criteria are ready"
+                  {nofoFileName
+                    ? "Uploaded NOFO — sections, forms, and scoring criteria extracted"
+                    : research.metadata?.nofoAutoFetched
+                    ? "Auto-fetched from web — sections, forms, and scoring criteria extracted"
                     : research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
                     ? `Auto-fetched NOFO did not match (found: ${research.metadata.nofoValidation.detectedProgram}). Upload the correct NOFO`
-                    : "Optional: Upload the NOFO PDF to extract exact application requirements (otherwise Claude will estimate)"
+                    : "Upload the NOFO PDF to extract exact requirements (otherwise AI-estimated)"
                   }
                 </p>
               </div>
+            </div>
+
+            {/* Status + actions row */}
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              {/* Current status badge */}
               {nofoFileName ? (
-                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20 shrink-0">
+                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
                   <CheckCircle2 className="h-3 w-3 mr-1" /> {nofoFileName}
                 </Badge>
-              ) : hasRealRequirements ? (
-                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20 shrink-0">
-                  <CheckCircle2 className="h-3 w-3 mr-1" /> Auto-fetched from web
+              ) : research.metadata?.nofoAutoFetched ? (
+                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> Auto-fetched ({research.metadata.nofoPdfPages} pages)
+                </Badge>
+              ) : gr?.source === "nofo-extracted" ? (
+                <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
+                  <CheckCircle2 className="h-3 w-3 mr-1" /> NOFO extracted
                 </Badge>
               ) : (
-                <label className={`shrink-0 ${nofoLoading ? "pointer-events-none" : ""}`}>
-                  <Button size="sm" variant="outline" className="gap-1.5 text-xs" asChild disabled={nofoLoading}>
-                    <span>
-                      {nofoLoading ? (
-                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Extracting...</>
-                      ) : (
-                        <><Upload className="h-3.5 w-3.5" /> Upload NOFO</>
-                      )}
-                    </span>
-                  </Button>
-                  <input
-                    type="file"
-                    accept=".pdf,.txt"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) onNofoUpload(f);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
+                <Badge variant="outline" className="text-[10px] text-amber-600 bg-amber-500/10 border-amber-500/20">
+                  <AlertTriangle className="h-3 w-3 mr-1" /> AI-estimated
+                </Badge>
               )}
+
+              {/* View PDF link (when auto-fetched) */}
+              {research.metadata?.nofoAutoFetched && research.metadata?.nofoPdfUrl && !nofoFileName && (
+                <a
+                  href={research.metadata.nofoPdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-[#3d8b8b] hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" /> View PDF
+                </a>
+              )}
+
+              {/* Remove / Replace button (when NOFO is active) */}
+              {(nofoFileName || research.metadata?.nofoAutoFetched || gr?.source === "nofo-extracted") && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[11px] text-muted-foreground hover:text-destructive"
+                  onClick={onNofoClear}
+                >
+                  <X className="h-3 w-3 mr-1" /> Remove
+                </Button>
+              )}
+
+              {/* Upload / Replace button */}
+              <label className={`shrink-0 ${nofoLoading ? "pointer-events-none" : ""}`}>
+                <Button size="sm" variant="outline" className="gap-1.5 text-xs h-6" asChild disabled={nofoLoading}>
+                  <span>
+                    {nofoLoading ? (
+                      <><Loader2 className="h-3 w-3 animate-spin" /> Extracting...</>
+                    ) : nofoFileName || research.metadata?.nofoAutoFetched || gr?.source === "nofo-extracted" ? (
+                      <><Upload className="h-3 w-3" /> Replace</>
+                    ) : (
+                      <><Upload className="h-3 w-3" /> Upload NOFO</>
+                    )}
+                  </span>
+                </Button>
+                <input
+                  type="file"
+                  accept=".pdf,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onNofoUpload(f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
             </div>
-            {!hasRealRequirements && !nofoLoading && (
+
+            {/* Validation warning */}
+            {research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch && !nofoFileName && !research.metadata.nofoAutoFetched && (
               <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded p-2 flex items-start gap-1.5">
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                {research.metadata?.nofoValidation && !research.metadata.nofoValidation.isMatch
-                  ? `The auto-fetched NOFO was for "${research.metadata.nofoValidation.detectedProgram}" (${research.metadata.nofoValidation.detectedFiscalYear}) and was discarded. Please upload the correct NOFO for this grant.`
-                  : "Optional. Uploading the NOFO improves accuracy of application sections, scoring criteria, and form requirements."
-                }
+                The auto-fetched NOFO was for &ldquo;{research.metadata.nofoValidation.detectedProgram}&rdquo; ({research.metadata.nofoValidation.detectedFiscalYear}) and was discarded. Upload the correct NOFO.
               </div>
             )}
+
+            {/* AI-estimated hint */}
+            {gr?.source !== "nofo-extracted" && !nofoLoading && !research.metadata?.nofoAutoFetched && !nofoFileName && (
+              <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 rounded p-2 flex items-start gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                Uploading the NOFO improves accuracy of application sections, scoring criteria, and form requirements.
+              </div>
+            )}
+
             {nofoError && (
               <div className="mt-2 text-xs text-destructive bg-destructive/10 rounded p-2">
                 {nofoError}
@@ -1506,7 +2100,7 @@ function ReviewView({
             {expandedPanel === "grant" ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
             <ScrollText className="h-4 w-4 text-[#3d8b8b] shrink-0" />
             <span className="font-semibold text-sm flex-1">Grant Requirements</span>
-            {hasRealRequirements ? (
+            {gr?.source === "nofo-extracted" ? (
               <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
                 NOFO-extracted: {gr?.applicationSections?.length || 0} sections
               </Badge>
@@ -1535,7 +2129,7 @@ function ReviewView({
               )}
               <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Application Sections</h4>
               <div className="space-y-2">
-                {(gr?.applicationSections || []).map((s: any, i: number) => (
+                {(gr?.applicationSections || []).map((s, i) => (
                   <div key={i} className="border rounded p-3">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium">{s.title}</span>
@@ -1549,7 +2143,7 @@ function ReviewView({
                     <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{s.description}</p>
                     {s.evaluationCriteria?.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1">
-                        {s.evaluationCriteria.slice(0, 3).map((c: string, j: number) => (
+                        {s.evaluationCriteria.slice(0, 3).map((c, j) => (
                           <span key={j} className="text-[10px] bg-muted rounded px-1.5 py-0.5">{c}</span>
                         ))}
                         {s.evaluationCriteria.length > 3 && (
@@ -1564,7 +2158,7 @@ function ReviewView({
           )}
         </Card>
 
-        {/* Required Forms - Editable */}
+        {/* Required Forms */}
         <Card className="overflow-hidden">
           <button
             className="w-full flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors text-left"
@@ -1580,7 +2174,7 @@ function ReviewView({
           {expandedPanel === "forms" && (
             <div className="border-t px-4 pb-4 pt-3">
               <div className="space-y-2">
-                {research.forms.map((form: any, i: number) => (
+                {research.forms.map((form, i) => (
                   <div key={i} className="flex items-start gap-3 text-sm border rounded p-3 group">
                     <FileText className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
@@ -1619,7 +2213,7 @@ function ReviewView({
                     <button
                       className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                       onClick={() => {
-                        const updated = research.forms.filter((_: any, idx: number) => idx !== i);
+                        const updated = research.forms.filter((_, idx) => idx !== i);
                         onUpdateForms(updated);
                       }}
                     >
@@ -1628,7 +2222,6 @@ function ReviewView({
                   </div>
                 ))}
               </div>
-              {/* Add form from registry */}
               <div className="mt-3">
                 <select
                   className="w-full text-xs border rounded px-2 py-1.5 bg-background text-muted-foreground"
@@ -1640,14 +2233,14 @@ function ReviewView({
                         ...formToAdd,
                         notes: "Manually added",
                         required: formToAdd.requiredLevel === "required",
-                      }]);
+                      } as EnrichedForm]);
                     }
                   }}
                 >
                   <option value="">+ Add a form from registry...</option>
                   {FEDERAL_FORMS
                     .filter(f => f.requiredLevel !== "post-award")
-                    .filter(f => !research.forms.some((ef: any) => ef.number === f.number))
+                    .filter(f => !research.forms.some((ef) => ef.number === f.number))
                     .map(f => (
                       <option key={f.id} value={f.id}>{f.number}: {f.name}</option>
                     ))}
@@ -1698,6 +2291,35 @@ function ReviewView({
           </Card>
         )}
 
+        {/* User Guidance / Outline */}
+        <Card className="overflow-hidden border-[#3d8b8b]/30 bg-[#3d8b8b]/5">
+          <button
+            className="w-full flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors text-left"
+            onClick={() => setExpandedPanel(expandedPanel === "guidance" ? null : "guidance")}
+          >
+            {expandedPanel === "guidance" ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+            <Edit className="h-4 w-4 text-[#3d8b8b] shrink-0" />
+            <span className="font-semibold text-sm flex-1">Your Narrative Outline</span>
+            {hasNonEmptyGuidance(userGuidance) ? (
+              <Badge variant="outline" className="text-[10px] text-emerald-600 bg-emerald-500/10 border-emerald-500/20">
+                <CheckCircle2 className="h-3 w-3 mr-1" /> Guidance provided
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                Optional
+              </Badge>
+            )}
+          </button>
+          {expandedPanel === "guidance" && (
+            <div className="border-t px-4 pb-4 pt-3">
+              <p className="text-xs text-muted-foreground mb-3">
+                Provide key talking points and priorities. The AI will weave these into the narrative as its guiding outline.
+              </p>
+              <UserGuidanceForm guidance={userGuidance} onChange={onUserGuidanceChange} />
+            </div>
+          )}
+        </Card>
+
         {/* Generate CTA */}
         <div className="py-4 flex flex-col items-center gap-2">
           <Button
@@ -1721,7 +2343,9 @@ function ReviewView({
   );
 }
 
-function GeneratingView({ progress }: { progress: string }) {
+// ─── Generating View (with streaming progress) ───
+
+function GeneratingView({ progress, streamingSections }: { progress: string; streamingSections: DraftSection[] }) {
   return (
     <div className="flex-1 flex items-center justify-center">
       <div className="text-center max-w-md">
@@ -1733,12 +2357,27 @@ function GeneratingView({ progress }: { progress: string }) {
         <p className="text-xs text-muted-foreground mt-2">
           Drafting all sections in parallel with Claude Sonnet. Typically takes 15-30 seconds
         </p>
+
+        {/* Live streaming progress */}
+        {streamingSections.length > 0 && (
+          <div className="mt-6 text-left max-w-sm mx-auto space-y-2">
+            {streamingSections.map((s) => (
+              <div key={s.sectionId} className="flex items-center gap-2 text-xs">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                <span className="text-foreground font-medium truncate">{s.title}</span>
+                <Badge variant="outline" className={`text-[9px] ml-auto shrink-0 ${confidenceConfig[s.confidence].color}`}>
+                  {s.confidence}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Draft View (existing section editor) ───
+// ─── Draft View ───
 
 function DraftView({
   draft,
@@ -1746,6 +2385,10 @@ function DraftView({
   editingSections,
   showAttachments,
   activeView,
+  saveStatus,
+  regeneratingSection,
+  versionHistory,
+  showVersionHistory,
   onToggleSection,
   onSetEditingSections,
   onSaveSectionEdit,
@@ -1755,12 +2398,21 @@ function DraftView({
   onCopy,
   onExportHTML,
   onExportText,
+  onExportPdf,
+  onExportDocx,
+  onRegenerateSection,
+  onToggleVersionHistory,
+  onRestoreVersion,
 }: {
-  draft: SavedDraft;
+  draft: LocalDraft;
   expandedSections: Set<string>;
   editingSections: Map<string, string>;
   showAttachments: boolean;
   activeView: "sections" | "preview";
+  saveStatus: "saved" | "saving" | "unsaved" | "error";
+  regeneratingSection: string | null;
+  versionHistory: DraftVersion[];
+  showVersionHistory: boolean;
   onToggleSection: (id: string) => void;
   onSetEditingSections: React.Dispatch<React.SetStateAction<Map<string, string>>>;
   onSaveSectionEdit: (id: string) => void;
@@ -1770,6 +2422,11 @@ function DraftView({
   onCopy: () => void;
   onExportHTML: () => void;
   onExportText: () => void;
+  onExportPdf: () => void;
+  onExportDocx: () => void;
+  onRegenerateSection: (sectionId: string, additionalInstructions?: string) => void;
+  onToggleVersionHistory: () => void;
+  onRestoreVersion: (versionNumber: number) => void;
 }) {
   return (
     <>
@@ -1779,8 +2436,28 @@ function DraftView({
           <div className="flex-1 min-w-0">
             <h1 className="text-xl font-bold truncate">{draft.grantTitle}</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {draft.applicantName}, Generated {new Date(draft.generatedAt).toLocaleDateString()}
+              {draft.applicantName}{draft.generatedAt ? `, Generated ${new Date(draft.generatedAt).toLocaleDateString()}` : ""}
             </p>
+            {/* Save status & last edited info */}
+            <div className="flex items-center gap-3 mt-1.5">
+              <span className={`text-[10px] flex items-center gap-1 ${
+                saveStatus === "saved" ? "text-emerald-600" :
+                saveStatus === "saving" ? "text-amber-600" :
+                saveStatus === "error" ? "text-red-600" : "text-muted-foreground"
+              }`}>
+                {saveStatus === "saved" && <><CheckCircle2 className="h-3 w-3" /> Saved</>}
+                {saveStatus === "saving" && <><Loader2 className="h-3 w-3 animate-spin" /> Saving...</>}
+                {saveStatus === "error" && <><AlertCircle className="h-3 w-3" /> Save failed</>}
+                {saveStatus === "unsaved" && <><Clock className="h-3 w-3" /> Unsaved changes</>}
+              </span>
+              {draft.lastEditedBy && (
+                <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  Last edited by {draft.lastEditedBy.userName}
+                  {draft.lastEditedAt && ` at ${new Date(draft.lastEditedAt).toLocaleString()}`}
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <CompletenessRing value={draft.overallCompleteness} size={48} />
@@ -1792,7 +2469,7 @@ function DraftView({
         </div>
 
         {/* Action bar */}
-        <div className="flex items-center gap-2 mt-4">
+        <div className="flex items-center gap-2 mt-4 flex-wrap">
           <div className="flex items-center bg-muted rounded-md p-0.5">
             <button
               className={`px-3 py-1 text-xs rounded ${
@@ -1819,20 +2496,66 @@ function DraftView({
               {draft.attachmentsChecklist.filter((a) => a.status === "on_file").length}/{draft.attachmentsChecklist.length}
             </Badge>
           </Button>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onToggleVersionHistory}>
+            <History className="h-3.5 w-3.5" /> History
+          </Button>
           <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onCopy}>
             <Copy className="h-3.5 w-3.5" /> Copy
           </Button>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onExportPdf}>
+            <FileDown className="h-3.5 w-3.5" /> PDF
+          </Button>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onExportDocx}>
+            <FileText className="h-3.5 w-3.5" /> DOCX
+          </Button>
           <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onExportHTML}>
             <FileDown className="h-3.5 w-3.5" /> HTML
-          </Button>
-          <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onExportText}>
-            <Download className="h-3.5 w-3.5" /> TXT
           </Button>
           <Button size="sm" variant="destructive" className="gap-1.5 text-xs" onClick={() => onDeleteDraft(draft.id)}>
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
+
+      {/* Version History panel */}
+      {showVersionHistory && (
+        <div className="border-b p-4 bg-muted/30 shrink-0 max-h-60 overflow-y-auto">
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+            <History className="h-4 w-4" /> Version History
+          </h3>
+          {versionHistory.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No previous versions yet. Versions are created when sections are updated.</p>
+          ) : (
+            <div className="space-y-2">
+              {versionHistory.map((v) => (
+                <div key={v.id} className="flex items-center gap-3 text-xs border rounded p-2 bg-background">
+                  <div className="flex items-center justify-center w-6 h-6 rounded-full bg-muted font-bold text-[10px]">
+                    v{v.versionNumber}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{v.editSummary || "Sections updated"}</div>
+                    <div className="text-muted-foreground flex items-center gap-2">
+                      <span>{new Date(v.createdAt).toLocaleString()}</span>
+                      {v.editedBy?.userName && (
+                        <span className="flex items-center gap-1"><User className="h-3 w-3" /> {v.editedBy.userName}</span>
+                      )}
+                      <span>{v.overallCompleteness}% complete</span>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-[10px] h-6 px-2"
+                    onClick={() => onRestoreVersion(v.versionNumber)}
+                  >
+                    Restore
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Attachments panel */}
       {showAttachments && (
@@ -1867,6 +2590,7 @@ function DraftView({
             {draft.sections.map((section) => {
               const isExpanded = expandedSections.has(section.sectionId);
               const isEditing = editingSections.has(section.sectionId);
+              const isRegenerating = regeneratingSection === section.sectionId;
               const conf = confidenceConfig[section.confidence];
               const ConfIcon = conf.icon;
               const wordPct = Math.min(100, Math.round((section.wordCount / section.maxWords) * 100));
@@ -1886,6 +2610,9 @@ function DraftView({
                           <ConfIcon className="h-3 w-3 mr-1" /> {conf.label}
                         </Badge>
                         <span className="text-[10px] text-muted-foreground">{section.weight}% of score</span>
+                        {section.aiGenerated && (
+                          <Badge variant="outline" className="text-[9px] text-blue-600 bg-blue-500/10 border-blue-500/20">AI</Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 mt-1.5">
                         <div className="flex items-center gap-2 flex-1 max-w-[200px]">
@@ -1907,6 +2634,11 @@ function DraftView({
                             {section.gapAnnotations.length} gap{section.gapAnnotations.length !== 1 ? "s" : ""}
                           </span>
                         )}
+                        {section.lastEditedBy && (
+                          <span className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <User className="h-3 w-3" /> {section.lastEditedBy.userName}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -1926,26 +2658,67 @@ function DraftView({
                         </div>
                       )}
 
+                      {/* Confidence details (from Claude scoring) */}
+                      {section.confidenceDetails && section.confidenceDetails.length > 0 && (
+                        <div className="px-4 py-3 bg-muted/20 border-b">
+                          <div className="text-xs font-medium text-muted-foreground mb-2">Scoring Breakdown</div>
+                          <div className="space-y-1.5">
+                            {section.confidenceDetails.map((d, i) => (
+                              <div key={i} className="flex items-center gap-2 text-xs">
+                                <div className="w-28 truncate font-medium">{d.criterionName}</div>
+                                <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${
+                                      d.score >= 80 ? "bg-emerald-500" : d.score >= 50 ? "bg-amber-500" : "bg-red-500"
+                                    }`}
+                                    style={{ width: `${d.score}%` }}
+                                  />
+                                </div>
+                                <span className="text-[10px] tabular-nums w-8 text-right">{d.score}%</span>
+                                <span className="text-muted-foreground truncate max-w-[200px]">{d.feedback}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="px-4 pt-3 flex items-center justify-between">
                         <span className="text-[10px] text-muted-foreground">{section.confidenceReason}</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-xs h-7 gap-1"
-                          onClick={() => {
-                            if (isEditing) {
-                              onSaveSectionEdit(section.sectionId);
-                            } else {
-                              onSetEditingSections((prev) => new Map(prev).set(section.sectionId, section.content));
-                            }
-                          }}
-                        >
-                          {isEditing ? (
-                            <><CheckCircle2 className="h-3 w-3" /> Save</>
-                          ) : (
-                            <><Edit className="h-3 w-3" /> Edit</>
-                          )}
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          {/* Regenerate button */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 gap-1"
+                            disabled={isRegenerating}
+                            onClick={() => onRegenerateSection(section.sectionId)}
+                          >
+                            {isRegenerating ? (
+                              <><Loader2 className="h-3 w-3 animate-spin" /> Regenerating...</>
+                            ) : (
+                              <><RotateCw className="h-3 w-3" /> Regenerate</>
+                            )}
+                          </Button>
+                          {/* Edit/Save button */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-xs h-7 gap-1"
+                            onClick={() => {
+                              if (isEditing) {
+                                onSaveSectionEdit(section.sectionId);
+                              } else {
+                                onSetEditingSections((prev) => new Map(prev).set(section.sectionId, section.content));
+                              }
+                            }}
+                          >
+                            {isEditing ? (
+                              <><Save className="h-3 w-3" /> Save</>
+                            ) : (
+                              <><Edit className="h-3 w-3" /> Edit</>
+                            )}
+                          </Button>
+                        </div>
                       </div>
 
                       <div className="p-4">
@@ -1959,12 +2732,7 @@ function DraftView({
                             }
                           />
                         ) : (
-                          <div
-                            className="text-sm leading-relaxed whitespace-pre-wrap"
-                            style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}
-                          >
-                            {highlightGapAnnotations(section.content)}
-                          </div>
+                          <SectionContent content={section.content} />
                         )}
                       </div>
                     </div>
@@ -1986,9 +2754,7 @@ function DraftView({
                 <h2 className="text-lg font-semibold mb-4 pb-2 border-b" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
                   {section.title}
                 </h2>
-                <div className="text-sm leading-[1.8] whitespace-pre-wrap" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
-                  {highlightGapAnnotations(section.content)}
-                </div>
+                <SectionContent content={section.content} className="leading-[1.8]" previewMode />
               </div>
             ))}
           </div>

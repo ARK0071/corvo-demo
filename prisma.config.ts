@@ -1,5 +1,7 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import { defineConfig } from "prisma/config";
+
+dotenv.config({ path: ".env.local" });
 
 // Remove schema=corvo from DATABASE_URL if present, to use public schema
 function getDbUrl(): string {

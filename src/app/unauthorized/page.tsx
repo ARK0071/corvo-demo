@@ -19,6 +19,12 @@ function UnauthorizedContent() {
               Your email is not associated with an active account.
               Please contact your administrator to get access.
             </p>
+          ) : error === "Configuration" ? (
+            <p className="text-sm text-muted-foreground">
+              Sign-in could not complete because the database is unavailable or
+              not set up. Ensure your RDS tunnel is running, run{" "}
+              <code className="text-xs">npx prisma db push</code>, then try again.
+            </p>
           ) : (
             <p className="text-sm text-muted-foreground">
               You do not have permission to access this application.

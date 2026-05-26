@@ -215,12 +215,9 @@ function UnifiedGrantsDashboard() {
       });
       if (!res.ok) throw new Error("Failed to fetch pipeline");
       const data = await res.json();
-      if (data.grants && data.grants.length > 0) {
-        setPipelineGrants(data.grants);
-        setPipelineDataSource("db");
-        return true;
-      }
-      return false;
+      setPipelineGrants(data.grants || []);
+      setPipelineDataSource("db");
+      return true;
     } catch (error) {
       console.error("[Grants] Pipeline DB fetch error:", error);
       return false;

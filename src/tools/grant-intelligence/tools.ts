@@ -15,7 +15,7 @@ import type { GrantScore } from "@/data/grant-scoring";
 import { getAllProjects, getProjectById } from "@/data/projects";
 import { matchGrantsToProject, matchGrantToProjects } from "@/data/grant-project-matching";
 import { analyzeCompetitiveIntelligence } from "@/data/competitive-intelligence";
-import { buildGrantApplication as buildGrantApplicationCore } from "@/lib/grant-application-builder";
+import { generateDraft, type GenerateDraftRequest, type ResearchEntityProfile, type GrantRequirementsResearch } from "@/lib/grant-drafting";
 
 // In-memory cache of grant scores (keyed by profileId:grantId)
 const grantScoreCache = new Map<string, GrantScore>();
@@ -653,6 +653,7 @@ export async function getCompetitiveIntelligence(params: { grantId: string }) {
 
 /**
  * Build a grant application narrative using AI.
+ * Uses the unified generation pipeline from lib/grant-drafting.
  * Enriches with port profile and best-matching project for specificity.
  */
 export async function buildGrantApplication(params: {
@@ -663,26 +664,109 @@ export async function buildGrantApplication(params: {
   const profile = activeProfile();
   const portName = params.portName ?? profile.name;
 
+  // Fetch grant details
+  let grant: DiscoveredGrant | null = null;
+  try {
+    grant = await fetchGrantDetails(params.grantId);
+  } catch {
+    // continue with limited info
+  }
+
+  // Match a project
   let project = params.projectId ? getProjectById(params.projectId) : undefined;
-  if (!project) {
-    try {
-      const grant = await fetchGrantDetails(params.grantId);
-      const allProjects = getAllProjects();
-      if (allProjects.length > 0) {
-        const projectMatches = matchGrantToProjects(grant, allProjects);
-        if (projectMatches.length > 0 && projectMatches[0].matchScore >= 30) {
-          project = getProjectById(projectMatches[0].projectId) ?? undefined;
-        }
+  if (!project && grant) {
+    const allProjects = getAllProjects();
+    if (allProjects.length > 0) {
+      const projectMatches = matchGrantToProjects(grant, allProjects);
+      if (projectMatches.length > 0 && projectMatches[0].matchScore >= 30) {
+        project = getProjectById(projectMatches[0].projectId) ?? undefined;
       }
-    } catch {
-      // If grant fetch fails here, buildGrantApplicationCore will handle it
     }
   }
 
-  return buildGrantApplicationCore({
+  // Build entity profile from port profile + project data
+  const entityProfile: ResearchEntityProfile = {
+    name: profile.name,
+    legalName: profile.name,
+    entityType: profile.entityType,
+    classification: profile.classification,
+    location: {
+      city: profile.location.city,
+      state: profile.location.state,
+      stateCode: profile.location.stateCode,
+      county: profile.location.county,
+      region: profile.location.region,
+      congressionalDistrict: "",
+    },
+    financials: {
+      annualRevenue: 0,
+      operatingBudget: profile.characteristics.operatingBudget || 0,
+      capitalBudget: 0,
+      bondRating: "",
+      totalAssets: 0,
+    },
+    operations: {
+      annualTonnage: profile.characteristics.annualTonnage || 0,
+      annualTEUs: 0,
+      vesselCalls: 0,
+      employeeCount: profile.characteristics.employeeCount || 0,
+      directJobs: 0,
+      cargoTypes: profile.characteristics.cargoTypes || [],
+    },
+    infrastructure: { acreage: 0 },
+    economicImpact: { regionalEconomicImpact: 0, totalJobs: 0, tradeValue: 0 },
+    currentProjects: project ? [{
+      name: project.name,
+      description: project.description,
+      totalCost: project.budget,
+      status: project.status,
+    }] : [],
+    pastGrantAwards: [],
+    certifications: profile.certifications,
+    strategicPriorities: profile.priorities,
+    environmentalGoals: profile.environmentalGoals,
+    communityImpact: profile.communityImpact,
+  };
+
+  const grantReqs: GrantRequirementsResearch = {
+    applicationSections: [
+      { title: "Project Narrative", description: "Comprehensive project description", maxWords: 5000, weight: 30, evaluationCriteria: [], requiredElements: [] },
+      { title: "Statement of Need", description: "Why this project is needed", maxWords: 3000, weight: 20, evaluationCriteria: [], requiredElements: [] },
+      { title: "Budget & Cost Effectiveness", description: "Detailed budget and cost effectiveness", maxWords: 2000, weight: 20, evaluationCriteria: [], requiredElements: [] },
+      { title: "Organizational Capability", description: "Capacity to manage and complete the project", maxWords: 2000, weight: 15, evaluationCriteria: [], requiredElements: [] },
+      { title: "Schedule & Milestones", description: "Project timeline with milestones", maxWords: 1500, weight: 15, evaluationCriteria: [], requiredElements: [] },
+    ],
+    costShareRequired: grant?.costSharing ?? false,
+    costSharePercentage: grant?.costSharing ? 20 : 0,
+    maxAward: grant?.awardCeiling ?? 0,
+    eligibleApplicants: grant?.eligibility ?? [],
+    submissionDeadline: grant?.closeDate ?? "",
+    source: "ai-estimated",
+  };
+
+  const request: GenerateDraftRequest = {
     grantId: params.grantId,
+    grantTitle: grant?.title ?? params.grantId,
+    entityProfile,
+    grantRequirements: grantReqs,
+    forms: [],
+    grantDetails: grant ? {
+      agency: grant.agency,
+      awardCeiling: grant.awardCeiling,
+      awardFloor: grant.awardFloor,
+      totalFunding: grant.totalFunding,
+      closeDate: grant.closeDate,
+      costSharing: grant.costSharing,
+      eligibility: grant.eligibility,
+      applicationUrl: grant.applicationUrl,
+    } : null,
     portName,
-    portProfile: profile,
-    project,
-  });
+  };
+
+  const draft = await generateDraft(request);
+
+  // Format as HTML for chat display
+  return draft.sections
+    .map(s => `<h2>${s.title}</h2>\n${s.content}`)
+    .join("\n\n");
 }
