@@ -1205,13 +1205,27 @@ function UnifiedGrantsDashboard() {
               </div>
             )}
 
-            {totalCount > 0 && (
+            {totalCount > 0 && !searching && !scanning && (
               <p className="text-xs text-muted-foreground mb-4">
                 Found {totalCount.toLocaleString()} opportunities (showing {discoveredGrants.length})
               </p>
             )}
 
-            <div className="space-y-2">
+            {(searching || scanning) && (
+              <div className="space-y-3 py-8">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">{searching ? "Searching federal grants..." : "Analyzing grant matches..."}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {searching ? "Querying Grants.gov and scoring results" : "Evaluating eligibility and alignment"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2" style={{ display: searching || scanning ? "none" : undefined }}>
               {(() => {
                 // Filter grants
                 let filtered = discoveredGrants;
