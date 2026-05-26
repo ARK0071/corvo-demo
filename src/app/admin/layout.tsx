@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Users, FileText, Key, Settings, LayoutDashboard } from "lucide-react";
+import { Users, FileText, Key, Settings, LayoutDashboard, Building2 } from "lucide-react";
 
 const adminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
+  { title: "Entities", href: "/admin/entities", icon: Building2 },
   { title: "Users", href: "/admin/users", icon: Users },
   { title: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
   { title: "API Keys", href: "/admin/api-keys", icon: Key },

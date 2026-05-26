@@ -15,8 +15,8 @@ export interface TenantConfig {
   portSlug: string; // URL-safe version
 }
 
-// Available ports (will be expanded as needed)
-export const AVAILABLE_PORTS = [
+// Static ports (built-in)
+const STATIC_PORTS = [
   { id: "freeport", name: "Port Freeport", slug: "port-freeport" },
   { id: "lawa", name: "Los Angeles World Airports", slug: "lawa" },
   { id: "louisiana-gateway", name: "Louisiana Gateway", slug: "louisiana-gateway" },
@@ -25,7 +25,48 @@ export const AVAILABLE_PORTS = [
   { id: "freeport-mock", name: "Port Freeport Mock", slug: "freeport-mock" },
 ] as const;
 
-export type PortId = typeof AVAILABLE_PORTS[number]["id"];
+// Dynamic ports added at runtime via admin
+const dynamicPorts: { id: string; name: string; slug: string }[] = [];
+
+// Combined view of all ports
+export const AVAILABLE_PORTS: readonly { id: string; name: string; slug: string }[] = new Proxy(
+  [] as { id: string; name: string; slug: string }[],
+  {
+    get(_target, prop) {
+      const combined = [...STATIC_PORTS, ...dynamicPorts];
+      if (prop === "length") return combined.length;
+      if (prop === Symbol.iterator) return combined[Symbol.iterator].bind(combined);
+      if (prop === "find") return combined.find.bind(combined);
+      if (prop === "filter") return combined.filter.bind(combined);
+      if (prop === "map") return combined.map.bind(combined);
+      if (prop === "forEach") return combined.forEach.bind(combined);
+      if (prop === "some") return combined.some.bind(combined);
+      if (prop === "every") return combined.every.bind(combined);
+      if (prop === "includes") return combined.includes.bind(combined);
+      if (typeof prop === "string" && !isNaN(Number(prop))) return combined[Number(prop)];
+      return (combined as unknown as Record<string | symbol, unknown>)[prop];
+    },
+  }
+);
+
+// Add a port at runtime
+export function registerPort(port: { id: string; name: string; slug: string }): void {
+  if (!dynamicPorts.some((p) => p.id === port.id) && !STATIC_PORTS.some((p) => p.id === port.id)) {
+    dynamicPorts.push(port);
+  }
+}
+
+// Remove a dynamic port
+export function unregisterPort(id: string): boolean {
+  const idx = dynamicPorts.findIndex((p) => p.id === id);
+  if (idx !== -1) {
+    dynamicPorts.splice(idx, 1);
+    return true;
+  }
+  return false;
+}
+
+export type PortId = typeof STATIC_PORTS[number]["id"] | string;
 
 // Embedding dimensions by environment
 export const EMBEDDING_DIMENSIONS: Record<Environment, number> = {
