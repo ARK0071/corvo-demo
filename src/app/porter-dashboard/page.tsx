@@ -83,11 +83,8 @@ export default function PorterDashboardPage() {
       });
       if (!res.ok) throw new Error("Failed to fetch pipeline");
       const data = await res.json();
-      if (data.grants && data.grants.length > 0) {
-        setPipeline(data.grants);
-        return true;
-      }
-      return false;
+      setPipeline(data.grants || []);
+      return true;
     } catch (error) {
       console.error("[Dashboard] Pipeline fetch error:", error);
       return false;

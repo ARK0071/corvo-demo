@@ -25,7 +25,7 @@ export async function GET(
 
   try {
     const report = await prisma.scheduledReport.findFirst({
-      where: { id: reportId, portId },
+      where: { id: reportId, award: { portProfile: { slug: portId } } },
       include: {
         award: {
           include: {
@@ -45,7 +45,7 @@ export async function GET(
     const award = report.award;
 
     const profile = await prisma.portProfile.findFirst({
-      where: { portId },
+      where: { slug: portId },
     });
 
     let cert = null;

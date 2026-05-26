@@ -180,6 +180,30 @@ async function generateDocx(data: ExportRequest): Promise<Buffer> {
 
 // ─── PDF Generation ───
 
+/** Replace Unicode characters that WinAnsi (standard PDF fonts) cannot encode. */
+function sanitizeForPdf(text: string): string {
+  return text
+    // Subscript / superscript digits
+    .replace(/[\u2080-\u2089]/g, (ch) => String(ch.charCodeAt(0) - 0x2080))
+    .replace(/[\u2070\u00B9\u00B2\u00B3\u2074-\u2079]/g, (ch) => {
+      const map: Record<number, string> = {
+        0x2070: "0", 0x00B9: "1", 0x00B2: "2", 0x00B3: "3",
+        0x2074: "4", 0x2075: "5", 0x2076: "6", 0x2077: "7", 0x2078: "8", 0x2079: "9",
+      };
+      return map[ch.charCodeAt(0)] ?? ch;
+    })
+    // Common typographic replacements
+    .replace(/[\u2018\u2019\u201A]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/\u2013/g, "-")
+    .replace(/\u2014/g, "--")
+    .replace(/\u2026/g, "...")
+    .replace(/\u2022/g, "*")
+    .replace(/\u00A0/g, " ")
+    // Drop any remaining non-WinAnsi characters (keep basic Latin + Latin-1 Supplement)
+    .replace(/[^\x00-\xFF]/g, "");
+}
+
 async function generatePdf(data: ExportRequest): Promise<Buffer> {
   const pdfDoc = await PDFDocument.create();
   const font = await pdfDoc.embedFont(StandardFonts.TimesRoman);
@@ -199,7 +223,7 @@ async function generatePdf(data: ExportRequest): Promise<Buffer> {
   let y = pageHeight - margin;
 
   function addFooter(page: ReturnType<typeof pdfDoc.addPage>, pageNum: number) {
-    page.drawText(`${data.applicantName} — Page ${pageNum}`, {
+    page.drawText(sanitizeForPdf(`${data.applicantName} — Page ${pageNum}`), {
       x: margin,
       y: 36,
       size: 9,
@@ -223,7 +247,7 @@ async function generatePdf(data: ExportRequest): Promise<Buffer> {
 
   // Helper to wrap text
   function wrapText(text: string, maxWidth: number, textFont: typeof font, textSize: number): string[] {
-    const words = text.split(/\s+/);
+    const words = sanitizeForPdf(text).split(/\s+/);
     const lines: string[] = [];
     let currentLine = "";
 
@@ -256,7 +280,7 @@ async function generatePdf(data: ExportRequest): Promise<Buffer> {
   }
 
   y -= 20;
-  const subtitleText = `Application by ${data.applicantName}`;
+  const subtitleText = sanitizeForPdf(`Application by ${data.applicantName}`);
   const subtitleWidth = font.widthOfTextAtSize(subtitleText, 14);
   currentPage.drawText(subtitleText, {
     x: margin + (contentWidth - subtitleWidth) / 2,
@@ -283,7 +307,7 @@ async function generatePdf(data: ExportRequest): Promise<Buffer> {
     ensureSpace(headingHeight + lineHeight * 3);
 
     // Section heading
-    currentPage.drawText(section.title, {
+    currentPage.drawText(sanitizeForPdf(section.title), {
       x: margin,
       y,
       size: headingSize,

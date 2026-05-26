@@ -23,7 +23,7 @@ export const POST = withRole(
       const certifierPhone = body.phone || "";
 
       const report = await prisma.scheduledReport.findFirst({
-        where: { id: reportId, portId },
+        where: { id: reportId, award: { portProfile: { slug: portId } } },
       });
       if (!report) {
         return NextResponse.json({ error: "Report not found" }, { status: 404 });

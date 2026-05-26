@@ -1,14 +1,105 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
-import * as DemoPipeline from "@/lib/db/repositories/demo-pipeline";
-import * as DemoGrants from "@/lib/db/repositories/demo-grants";
+import { auth } from "@/lib/auth/auth";
+import * as Pipeline from "@/lib/db/repositories/pipeline";
+import * as Grants from "@/lib/db/repositories/grants";
+import { prisma } from "@/lib/db/client";
 import type { PipelineStage } from "@/data/grant-pipeline";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
+
+/**
+ * Resolve the portProfileId (UUID) for the current user.
+ *
+ * Tries multiple strategies because identifiers are inconsistent across the
+ * codebase (e.g. portId "louisiana-gateway", slug "louisiana-gateway-port",
+ * profile key "louisiana-gateway-port"):
+ *   1. If the value is already a UUID, use it directly.
+ *   2. Exact slug match in port_profiles.
+ *   3. Slug LIKE match (e.g. "louisiana-gateway" matches "louisiana-gateway-port").
+ */
+async function resolvePortProfileId(
+  ...candidates: (string | null | undefined)[]
+): Promise<string | null> {
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  for (const value of candidates) {
+    if (!value) continue;
+
+    // Already a UUID
+    if (uuidRegex.test(value)) return value;
+
+    // Exact slug match
+    const exact = await prisma.portProfile.findUnique({
+      where: { slug: value },
+      select: { id: true },
+    });
+    if (exact) return exact.id;
+  }
+
+  // Fuzzy: try slug LIKE any candidate (e.g. "louisiana-gateway" → "louisiana-gateway-port")
+  for (const value of candidates) {
+    if (!value || uuidRegex.test(value)) continue;
+
+    const like = await prisma.portProfile.findFirst({
+      where: { slug: { startsWith: value } },
+      select: { id: true },
+    });
+    if (like) return like.id;
+  }
+
+  return null;
+}
+
+/**
+ * Get the best identifiers for the current request:
+ * session portId, header slug, header portId, and the tenant config values.
+ */
+async function getPortCandidates(
+  request: NextRequest
+): Promise<{ candidates: string[]; tenant: Awaited<ReturnType<typeof resolveSecureTenant>> }> {
+  const tenant = await resolveSecureTenant(request.headers);
+  const session = await auth();
+
+  const candidates: string[] = [];
+  // Session portId is most authoritative for non-admin users
+  if (session?.user?.portId) candidates.push(session.user.portId);
+  // Header values
+  const headerSlug = request.headers.get("x-corvo-port-slug");
+  const headerPortId = request.headers.get("x-corvo-port-id");
+  if (headerSlug) candidates.push(headerSlug);
+  if (headerPortId) candidates.push(headerPortId);
+  // Tenant config fallback
+  if (tenant.portSlug) candidates.push(tenant.portSlug);
+  if (tenant.portId) candidates.push(tenant.portId);
+
+  return { candidates, tenant };
+}
+
+/**
+ * Normalize production PipelineGrant for client consumption.
+ * The client uses `id` as the Grants.gov opportunity ID, but the production
+ * DB stores it as `grantId` (with `id` being the row UUID).
+ */
+function toClientGrant(grant: Pipeline.PipelineGrant) {
+  return {
+    ...grant,
+    id: grant.grantId, // Client expects id = opportunity ID
+  };
+}
 
 // GET: List all pipeline grants or by stage
 export async function GET(request: NextRequest) {
   try {
-    await resolveSecureTenant(request.headers);
+    const { candidates } = await getPortCandidates(request);
+
+    const portProfileId = await resolvePortProfileId(...candidates);
+    if (!portProfileId) {
+      return NextResponse.json(
+        { error: `No port profile found. Tried: ${candidates.join(", ")}` },
+        { status: 404 }
+      );
+    }
 
     const searchParams = request.nextUrl.searchParams;
     const stage = searchParams.get("stage") as PipelineStage | null;
@@ -16,23 +107,38 @@ export async function GET(request: NextRequest) {
 
     // If grantId provided, check if in pipeline
     if (grantId) {
-      const grant = await DemoPipeline.getPipelineGrantById(grantId);
-      return NextResponse.json({ grant, inPipeline: !!grant });
+      const grant = await Pipeline.getPipelineGrantByGrantId(
+        grantId,
+        portProfileId
+      );
+      return NextResponse.json({
+        grant: grant ? toClientGrant(grant) : null,
+        inPipeline: !!grant,
+      });
     }
 
     // If stage filter provided
     if (stage) {
-      const grants = await DemoPipeline.getGrantsByStage(stage);
-      return NextResponse.json({ grants, total: grants.length });
+      const grants = await Pipeline.getGrantsByStage(portProfileId, stage);
+      return NextResponse.json({
+        grants: grants.map(toClientGrant),
+        total: grants.length,
+      });
     }
 
     // Otherwise return all pipeline grants
-    const grants = await DemoPipeline.getAllPipelineGrants();
-    return NextResponse.json({ grants, total: grants.length });
+    const grants = await Pipeline.getAllPipelineGrants(portProfileId);
+    return NextResponse.json({
+      grants: grants.map(toClientGrant),
+      total: grants.length,
+    });
   } catch (error) {
     console.error("Pipeline GET error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch pipeline" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to fetch pipeline",
+      },
       { status: 500 }
     );
   }
@@ -41,15 +147,27 @@ export async function GET(request: NextRequest) {
 // POST: Add grant to pipeline
 export async function POST(request: NextRequest) {
   try {
-    await resolveSecureTenant(request.headers);
+    const { candidates } = await getPortCandidates(request);
     const body = await request.json();
 
-    const { grantId, portProfileId, notes, stage, grant } = body;
+    const { grantId, portProfileId: clientProfileId, notes, stage, grant } = body;
 
-    if (!grantId || !portProfileId) {
+    if (!grantId) {
       return NextResponse.json(
-        { error: "grantId and portProfileId are required" },
+        { error: "grantId is required" },
         { status: 400 }
+      );
+    }
+
+    // Resolve portProfileId — try the client-sent value first, then session/header candidates
+    const allCandidates = clientProfileId
+      ? [clientProfileId, ...candidates]
+      : candidates;
+    const portProfileId = await resolvePortProfileId(...allCandidates);
+    if (!portProfileId) {
+      return NextResponse.json(
+        { error: `Could not resolve port profile. Tried: ${allCandidates.join(", ")}` },
+        { status: 404 }
       );
     }
 
@@ -79,18 +197,23 @@ export async function POST(request: NextRequest) {
         contactEmail: grant.contactEmail,
         contactPhone: grant.contactPhone,
       };
-      await DemoGrants.upsertGrant(grantData);
+      await Grants.upsertGrant(grantData);
     }
 
-    const pipelineGrant = await DemoPipeline.addToPipeline(grantId, portProfileId, {
-      notes,
-      stage,
-    });
-    return NextResponse.json(pipelineGrant, { status: 201 });
+    const pipelineGrant = await Pipeline.addToPipeline(
+      grantId,
+      portProfileId
+    );
+    return NextResponse.json(toClientGrant(pipelineGrant), { status: 201 });
   } catch (error) {
     console.error("Pipeline POST error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to add to pipeline" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to add to pipeline",
+      },
       { status: 500 }
     );
   }
@@ -99,13 +222,24 @@ export async function POST(request: NextRequest) {
 // PUT: Update pipeline grant (move stage, update notes/scores)
 export async function PUT(request: NextRequest) {
   try {
-    await resolveSecureTenant(request.headers);
+    const { candidates } = await getPortCandidates(request);
     const body = await request.json();
 
     const { grantId, action, ...data } = body;
 
     if (!grantId) {
-      return NextResponse.json({ error: "grantId is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "grantId is required" },
+        { status: 400 }
+      );
+    }
+
+    const portProfileId = await resolvePortProfileId(...candidates);
+    if (!portProfileId) {
+      return NextResponse.json(
+        { error: `No port profile found. Tried: ${candidates.join(", ")}` },
+        { status: 404 }
+      );
     }
 
     let result;
@@ -113,17 +247,32 @@ export async function PUT(request: NextRequest) {
     switch (action) {
       case "move":
         if (!data.stage) {
-          return NextResponse.json({ error: "stage is required for move action" }, { status: 400 });
+          return NextResponse.json(
+            { error: "stage is required for move action" },
+            { status: 400 }
+          );
         }
-        result = await DemoPipeline.moveGrantToStage(grantId, data.stage);
+        result = await Pipeline.moveGrantToStage(
+          grantId,
+          portProfileId,
+          data.stage
+        );
         break;
 
       case "notes":
-        result = await DemoPipeline.updateGrantNotes(grantId, data.notes || "");
+        result = await Pipeline.updateGrantNotes(
+          grantId,
+          portProfileId,
+          data.notes || ""
+        );
         break;
 
       case "scores":
-        result = await DemoPipeline.updateGrantScores(grantId, data.scores || {});
+        result = await Pipeline.updateGrantScores(
+          grantId,
+          portProfileId,
+          data.scores || {}
+        );
         break;
 
       default:
@@ -134,14 +283,22 @@ export async function PUT(request: NextRequest) {
     }
 
     if (!result) {
-      return NextResponse.json({ error: "Grant not found in pipeline" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Grant not found in pipeline" },
+        { status: 404 }
+      );
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(toClientGrant(result));
   } catch (error) {
     console.error("Pipeline PUT error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update pipeline" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update pipeline",
+      },
       { status: 500 }
     );
   }
@@ -150,24 +307,43 @@ export async function PUT(request: NextRequest) {
 // DELETE: Remove grant from pipeline
 export async function DELETE(request: NextRequest) {
   try {
-    await resolveSecureTenant(request.headers);
+    const { candidates } = await getPortCandidates(request);
     const searchParams = request.nextUrl.searchParams;
     const grantId = searchParams.get("grantId");
 
     if (!grantId) {
-      return NextResponse.json({ error: "grantId is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: "grantId is required" },
+        { status: 400 }
+      );
     }
 
-    const deleted = await DemoPipeline.removeFromPipeline(grantId);
+    const portProfileId = await resolvePortProfileId(...candidates);
+    if (!portProfileId) {
+      return NextResponse.json(
+        { error: `No port profile found. Tried: ${candidates.join(", ")}` },
+        { status: 404 }
+      );
+    }
+
+    const deleted = await Pipeline.removeFromPipeline(grantId, portProfileId);
     if (!deleted) {
-      return NextResponse.json({ error: "Grant not found in pipeline" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Grant not found in pipeline" },
+        { status: 404 }
+      );
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Pipeline DELETE error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to remove from pipeline" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to remove from pipeline",
+      },
       { status: 500 }
     );
   }

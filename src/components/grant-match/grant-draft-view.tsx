@@ -1351,7 +1351,13 @@ ${s.content
 
         {/* Draft list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {drafts.length === 0 && phase === "idle" && (
+          {!draftsLoaded && drafts.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 gap-2">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Loading drafts...</p>
+            </div>
+          )}
+          {draftsLoaded && drafts.length === 0 && phase === "idle" && (
             <div className="text-center py-12">
               <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">No drafts yet</p>

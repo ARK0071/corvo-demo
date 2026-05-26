@@ -617,10 +617,10 @@ function UnifiedGrantsDashboard() {
     }
     setActiveTab("pipeline");
 
-    // Persist to DB in background (non-blocking)
+    // Persist to DB
     // Include full grant data so it gets stored in DemoDiscoveredGrant
     try {
-      await fetch("/api/pipeline", {
+      const res = await fetch("/api/pipeline", {
         method: "POST",
         headers: { ...tenantHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -651,8 +651,16 @@ function UnifiedGrantsDashboard() {
           },
         }),
       });
+
+      if (!res.ok) {
+        console.error("[Pipeline] DB persist failed:", res.status, await res.text());
+        // Revert optimistic update on failure
+        setPipelineGrants(prev => prev.filter(g => g.id !== grant.id));
+      }
     } catch (error) {
       console.error("[Pipeline] Failed to persist to DB:", error);
+      // Revert optimistic update on network error
+      setPipelineGrants(prev => prev.filter(g => g.id !== grant.id));
     }
   }
 
@@ -683,9 +691,9 @@ function UnifiedGrantsDashboard() {
         setPipelineGrants([...getInMemoryPipelineGrants()]);
       }
 
-      // Persist to DB in background
+      // Persist to DB
       try {
-        await fetch("/api/pipeline", {
+        const res = await fetch("/api/pipeline", {
           method: "PUT",
           headers: { ...tenantHeaders, "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -694,8 +702,18 @@ function UnifiedGrantsDashboard() {
             stage: newStage,
           }),
         });
+        if (!res.ok) {
+          console.error("[Pipeline] Stage move persist failed:", res.status);
+          // Revert optimistic update
+          setPipelineGrants(prev => prev.map(g =>
+            g.id === grant.id ? { ...g, stage: grant.stage } : g
+          ));
+        }
       } catch (error) {
         console.error("[Pipeline] Failed to persist stage move:", error);
+        setPipelineGrants(prev => prev.map(g =>
+          g.id === grant.id ? { ...g, stage: grant.stage } : g
+        ));
       }
     }
   }
@@ -719,9 +737,9 @@ function UnifiedGrantsDashboard() {
     setEditingNotes(null);
     setNotesText("");
 
-    // Persist to DB in background
+    // Persist to DB
     try {
-      await fetch("/api/pipeline", {
+      const res = await fetch("/api/pipeline", {
         method: "PUT",
         headers: { ...tenantHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -730,6 +748,9 @@ function UnifiedGrantsDashboard() {
           notes: savedNotes,
         }),
       });
+      if (!res.ok) {
+        console.error("[Pipeline] Notes persist failed:", res.status);
+      }
     } catch (error) {
       console.error("[Pipeline] Failed to persist notes:", error);
     }
@@ -747,12 +768,15 @@ function UnifiedGrantsDashboard() {
       setPipelineGrants([...getInMemoryPipelineGrants()]);
     }
 
-    // Persist to DB in background
+    // Persist to DB
     try {
-      await fetch(`/api/pipeline?grantId=${encodeURIComponent(grantId)}`, {
+      const res = await fetch(`/api/pipeline?grantId=${encodeURIComponent(grantId)}`, {
         method: "DELETE",
         headers: { ...tenantHeaders },
       });
+      if (!res.ok) {
+        console.error("[Pipeline] Removal persist failed:", res.status);
+      }
     } catch (error) {
       console.error("[Pipeline] Failed to persist removal:", error);
     }
@@ -1732,6 +1756,13 @@ function UnifiedGrantsDashboard() {
           {/* TAB 2: PIPELINE */}
           {activeTab === "pipeline" && (
             <div className="mt-2">
+            {pipelineLoading ? (
+              <div className="flex flex-col items-center justify-center py-16 gap-2">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Loading pipeline...</p>
+              </div>
+            ) : (
+            <>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               {(["eligible", "applied", "under_review", "awarded", "rejected"] as PipelineStage[]).map((stage) => {
                 const stageGrants = pipelineGrants.filter((g) => g.stage === stage);
@@ -1914,6 +1945,8 @@ function UnifiedGrantsDashboard() {
                   Search for grants in the Discover tab and add them to your pipeline
                 </p>
               </div>
+            )}
+            </>
             )}
             </div>
           )}

@@ -120,7 +120,7 @@ export async function addToPipeline(
 
   if (!uuidRegex.test(portProfileIdOrSlug)) {
     // Look up the port profile by portId
-    const portProfile = await prisma.demoPortProfile.findFirst({
+    let portProfile = await prisma.demoPortProfile.findFirst({
       where: { portId },
       select: { id: true },
     });
