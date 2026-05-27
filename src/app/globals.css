@@ -264,3 +264,40 @@
     color: hsl(var(--primary));
   }
 }
+
+/* ─── Print styles ─── */
+@media print {
+  /* Hide sidebar, header, nav, and action buttons */
+  [data-sidebar],
+  header,
+  nav,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Let the main content fill the page */
+  body,
+  main,
+  .min-h-screen {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Remove overflow constraints so all content prints */
+  .overflow-hidden,
+  .overflow-auto,
+  .overflow-y-auto {
+    overflow: visible !important;
+  }
+
+  /* Remove sidebar flex layout gap */
+  .min-h-screen.flex {
+    display: block !important;
+  }
+
+  /* Clean card borders for print */
+  [data-slot="card"] {
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+}

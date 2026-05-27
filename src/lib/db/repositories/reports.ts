@@ -376,6 +376,127 @@ export async function getAllCloseoutChecklists(): Promise<CloseoutChecklist[]> {
   return checklists.map(toCloseoutChecklist);
 }
 
+// ─── Report Generation for New Awards ───
+
+function generateQuarterlyDates(
+  start: Date,
+  end: Date
+): { periodStart: Date; periodEnd: Date; dueDate: Date }[] {
+  const dates: { periodStart: Date; periodEnd: Date; dueDate: Date }[] = [];
+  const quarterEnds = [
+    { month: 2, day: 31 }, // Q1: Jan-Mar
+    { month: 5, day: 30 }, // Q2: Apr-Jun
+    { month: 8, day: 30 }, // Q3: Jul-Sep
+    { month: 11, day: 31 }, // Q4: Oct-Dec
+  ];
+
+  for (let year = start.getFullYear(); year <= end.getFullYear(); year++) {
+    for (const q of quarterEnds) {
+      const periodEnd = new Date(year, q.month, q.day);
+      const periodStart = new Date(year, q.month - 2, 1);
+      const dueDate = new Date(year, q.month + 1, 30); // ~30 days after quarter end
+
+      if (periodEnd < start || periodStart > end) continue;
+
+      dates.push({ periodStart, periodEnd, dueDate });
+    }
+  }
+
+  return dates;
+}
+
+/**
+ * Generate compliance reports (SF-425 + Progress) for a newly created award.
+ * Called automatically when an award is created via the API.
+ */
+export async function generateReportsForAward(awardId: string): Promise<number> {
+  const award = await prisma.award.findUnique({
+    where: { id: awardId },
+    select: {
+      id: true,
+      title: true,
+      program: true,
+      cfda: true,
+      status: true,
+      performancePeriodStart: true,
+      performancePeriodEnd: true,
+    },
+  });
+  if (!award) return 0;
+
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const quarterlyDates = generateQuarterlyDates(
+    award.performancePeriodStart,
+    award.performancePeriodEnd
+  );
+
+  const reportsToCreate: Prisma.ScheduledReportCreateManyInput[] = [];
+
+  // SF-425 Federal Financial Reports (quarterly)
+  for (const qd of quarterlyDates) {
+    const isPast = qd.dueDate.toISOString().split("T")[0] < todayStr;
+    reportsToCreate.push({
+      awardId: award.id,
+      type: "sf425",
+      title: "SF-425 Federal Financial Report",
+      dueDate: qd.dueDate,
+      periodStart: qd.periodStart,
+      periodEnd: qd.periodEnd,
+      status: isPast ? "submitted" : "upcoming",
+      submittedDate: isPast ? qd.dueDate : null,
+      notes: "",
+    });
+  }
+
+  // Progress Reports (quarterly for PIDP, semi-annual otherwise)
+  const isQuarterly = award.program === "PIDP";
+  const progressDates = isQuarterly
+    ? quarterlyDates
+    : quarterlyDates.filter((_, i) => i % 2 === 1);
+
+  for (const pd of progressDates) {
+    const isPast = pd.dueDate.toISOString().split("T")[0] < todayStr;
+    reportsToCreate.push({
+      awardId: award.id,
+      type: "progress",
+      title: `${isQuarterly ? "Quarterly" : "Semi-Annual"} Progress Report`,
+      dueDate: pd.dueDate,
+      periodStart: pd.periodStart,
+      periodEnd: pd.periodEnd,
+      status: isPast ? "submitted" : "upcoming",
+      submittedDate: isPast ? pd.dueDate : null,
+      notes: "",
+    });
+  }
+
+  // Closeout report if applicable
+  if (award.status === "closeout_pending" || award.status === "closed") {
+    const closeoutDue = new Date(
+      award.performancePeriodEnd.getTime() + 120 * 24 * 60 * 60 * 1000
+    );
+    reportsToCreate.push({
+      awardId: award.id,
+      type: "closeout",
+      title: "Final Closeout Report",
+      dueDate: closeoutDue,
+      periodStart: award.performancePeriodStart,
+      periodEnd: award.performancePeriodEnd,
+      status: award.status === "closed" ? "submitted" : "in_progress",
+      notes: "Complete all closeout checklist items before submission.",
+    });
+  }
+
+  if (reportsToCreate.length === 0) return 0;
+
+  const result = await prisma.scheduledReport.createMany({
+    data: reportsToCreate,
+    skipDuplicates: true,
+  });
+
+  return result.count;
+}
+
 // ─── Auto-Seed ───
 
 export async function autoSeedIfEmpty(): Promise<void> {

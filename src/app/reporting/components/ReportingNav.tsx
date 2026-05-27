@@ -17,7 +17,7 @@ export default function ReportingNav() {
   const pathname = usePathname();
 
   return (
-    <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 no-print">
       <div className="flex items-center gap-1 px-6 pt-4 pb-0 overflow-x-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");

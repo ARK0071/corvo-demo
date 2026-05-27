@@ -228,7 +228,7 @@ export default function PPRFormView({
     <div className="flex-1 overflow-auto p-6 space-y-6">
       {/* Header */}
       <div>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3 no-print">
           <ArrowLeft className="h-4 w-4" /> Back to Report
         </button>
 
@@ -250,7 +250,7 @@ export default function PPRFormView({
               Period: {fmtDate(formData.reportingPeriod.start)} - {fmtDate(formData.reportingPeriod.end)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 no-print">
             <div className="text-right mr-2">
               {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
               {saveError && <span className="text-xs text-red-500">{saveError}</span>}

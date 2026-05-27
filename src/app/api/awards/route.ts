@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAuth } from "@/lib/auth/api-guard";
 import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
 import * as Awards from "@/lib/db/repositories/awards";
+import { generateReportsForAward } from "@/lib/db/repositories/reports";
 import type { AwardStatus } from "@/data/awards";
 
 // GET: List all awards or get by ID
@@ -53,7 +54,12 @@ export const POST = withAuth(async (request) => {
     }
 
     const award = await Awards.createAward(awardData, portProfileId);
-    return NextResponse.json(award, { status: 201 });
+
+    // Auto-generate compliance reports (SF-425, Progress, Closeout) for the new award
+    const reportsGenerated = await generateReportsForAward(award.id);
+    console.log(`[Awards POST] Generated ${reportsGenerated} compliance reports for award ${award.id}`);
+
+    return NextResponse.json({ ...award, reportsGenerated }, { status: 201 });
   } catch (error) {
     console.error("Awards POST error:", error);
     return NextResponse.json(

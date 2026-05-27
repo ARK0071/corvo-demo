@@ -245,7 +245,7 @@ export default function SF425FormView({
     <div className="flex-1 overflow-auto p-6 space-y-6">
       {/* Header */}
       <div>
-        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mb-3 no-print">
           <ArrowLeft className="h-4 w-4" /> Back to Report
         </button>
 
@@ -268,7 +268,7 @@ export default function SF425FormView({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 no-print">
             <div className="text-right mr-2">
               {saving && <span className="text-xs text-muted-foreground">Saving...</span>}
               {saveError && <span className="text-xs text-red-500">{saveError}</span>}
@@ -288,7 +288,7 @@ export default function SF425FormView({
               {editMode ? <Lock className="h-3.5 w-3.5 mr-1" /> : <Unlock className="h-3.5 w-3.5 mr-1" />}
               {editMode ? "Lock" : "Edit"}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Button variant="outline" size="sm" onClick={handleDownloadPDF}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print
             </Button>
           </div>
@@ -296,9 +296,9 @@ export default function SF425FormView({
 
         {/* Workflow Actions */}
         {actionError && (
-          <div className="mt-2 text-xs text-red-500 text-right">{actionError}</div>
+          <div className="mt-2 text-xs text-red-500 text-right no-print">{actionError}</div>
         )}
-        <div className="flex items-center gap-2 mt-2 justify-end flex-wrap">
+        <div className="flex items-center gap-2 mt-2 justify-end flex-wrap no-print">
           {reportStatus && (reportStatus === "upcoming" || reportStatus === "drafting") && currentUser?.role === "drafter" && (
             <Button size="sm" onClick={handleSubmitForReview} disabled={actionLoading}>
               <Send className="h-3.5 w-3.5 mr-1" />

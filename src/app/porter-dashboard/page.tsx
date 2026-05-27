@@ -126,9 +126,9 @@ export default function PorterDashboardPage() {
         .catch(() => setDbAwards([]));
 
       // Fetch upcoming reports for mini-table
-      fetch("/api/reports?upcoming=true&days=30", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+      fetch("/api/reports?upcoming=true&days=90", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
-        .then((data) => setUpcomingReports((data.reports || []).slice(0, 5)))
+        .then((data) => setUpcomingReports((data.reports || []).slice(0, 10)))
         .catch(() => setUpcomingReports([]));
 
       // Load news
@@ -152,16 +152,40 @@ export default function PorterDashboardPage() {
     total: pipeline.length,
   }), [pipeline]);
 
-  const upcoming = useMemo(() =>
-    pipeline
-      .filter((g) => {
-        const d = daysUntil(g.closeDate);
-        return d !== null && d >= 0 && d <= 30;
-      })
-      .sort((a, b) => new Date(a.closeDate).getTime() - new Date(b.closeDate).getTime())
-      .slice(0, 5),
-    [pipeline]
-  );
+  // Unified deadlines: pipeline grant close dates + upcoming report due dates
+  const deadlines = useMemo(() => {
+    const items: { id: string; title: string; subtitle: string; date: string; type: "grant" | "report"; reportType?: string }[] = [];
+
+    // Pipeline grant close dates (next 90 days)
+    for (const g of pipeline) {
+      const d = daysUntil(g.closeDate);
+      if (d !== null && d >= 0 && d <= 90) {
+        items.push({
+          id: `grant-${g.id}`,
+          title: g.title,
+          subtitle: g.agency,
+          date: g.closeDate,
+          type: "grant",
+        });
+      }
+    }
+
+    // Upcoming report due dates
+    for (const r of upcomingReports) {
+      items.push({
+        id: `report-${r.id}`,
+        title: r.awardTitle,
+        subtitle: r.program,
+        date: r.dueDate,
+        type: "report",
+        reportType: r.type,
+      });
+    }
+
+    // Sort by date, soonest first
+    items.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    return items.slice(0, 8);
+  }, [pipeline, upcomingReports]);
 
   const fundingStats = useMemo(() => {
     const potentialFunding = pipeline.reduce(
@@ -263,7 +287,7 @@ export default function PorterDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Upcoming Deadlines */}
+        {/* Upcoming Deadlines (unified: pipeline + reports) */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
@@ -271,7 +295,7 @@ export default function PorterDashboardPage() {
                 <Calendar className="h-4 w-4" /> Upcoming Deadlines
               </span>
               <Link
-                href="/grants?tab=pipeline"
+                href="/reporting"
                 className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
               >
                 View all <ArrowRight className="h-3 w-3" />
@@ -279,24 +303,36 @@ export default function PorterDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {upcoming.length === 0 ? (
+            {deadlines.length === 0 ? (
               <EmptyHint
-                text="No upcoming deadlines in the next 30 days."
+                text="No upcoming deadlines in the next 90 days."
                 linkLabel="Discover Grants"
                 href="/grants?tab=discover"
               />
             ) : (
               <div className="space-y-3">
-                {upcoming.map((g) => {
-                  const days = daysUntil(g.closeDate);
+                {deadlines.map((dl) => {
+                  const days = daysUntil(dl.date);
+                  const typeLabel: Record<string, string> = { sf425: "SF-425", sf270: "SF-270", progress: "PPR", closeout: "Closeout" };
                   return (
                     <div
-                      key={g.id}
+                      key={dl.id}
                       className="flex items-start justify-between gap-3 text-sm"
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">{g.title}</p>
-                        <p className="text-xs text-muted-foreground">{g.agency}</p>
+                        <div className="flex items-center gap-1.5">
+                          <Badge
+                            className={`text-[10px] shrink-0 ${
+                              dl.type === "grant"
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                            }`}
+                          >
+                            {dl.type === "grant" ? "Grant" : typeLabel[dl.reportType || ""] || "Report"}
+                          </Badge>
+                          <p className="font-medium truncate">{dl.title}</p>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{dl.subtitle}</p>
                       </div>
                       <Badge
                         variant="outline"
@@ -365,62 +401,6 @@ export default function PorterDashboardPage() {
                       <span className="text-xs font-bold tabular-nums text-[#3d8b8b] shrink-0">
                         {fmt(a.totalAmount)}
                       </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Upcoming Reports */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <FileText className="h-4 w-4" /> Upcoming Reports
-              </span>
-              <Link
-                href="/reporting/forms"
-                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
-              >
-                View all <ArrowRight className="h-3 w-3" />
-              </Link>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {upcomingReports.length === 0 ? (
-              <EmptyHint
-                text="No reports due in the next 30 days."
-                linkLabel="View Reports"
-                href="/reporting/forms"
-              />
-            ) : (
-              <div className="space-y-3">
-                {upcomingReports.map((r) => {
-                  const days = daysUntil(r.dueDate);
-                  const typeLabel: Record<string, string> = { sf425: "SF-425", sf270: "SF-270", progress: "PPR", closeout: "Closeout" };
-                  return (
-                    <div key={r.id} className="flex items-start justify-between gap-3 text-sm">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 text-[10px] shrink-0">
-                            {typeLabel[r.type] || r.type}
-                          </Badge>
-                          <p className="font-medium truncate">{r.program}</p>
-                        </div>
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">{r.awardTitle}</p>
-                      </div>
-                      <Badge
-                        variant="outline"
-                        className={`shrink-0 tabular-nums ${
-                          days !== null && days <= 7 ? "border-red-500/50 text-red-600 dark:text-red-400"
-                          : days !== null && days < 0 ? "border-red-500 text-red-600 dark:text-red-400 font-bold"
-                          : ""
-                        }`}
-                      >
-                        {days !== null ? (days < 0 ? `${Math.abs(days)}d overdue` : `${days}d`) : "-"}
-                      </Badge>
                     </div>
                   );
                 })}
