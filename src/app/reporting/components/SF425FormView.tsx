@@ -19,6 +19,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSF425FormData, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 import { getAgencyTemplate } from "@/data/agency-templates";
 import type { SF425FormData, SF425LineItem } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull } from "./helpers";
@@ -60,6 +61,7 @@ export default function SF425FormView({
   const [draftRestored, setDraftRestored] = useState(false);
 
   const { user: currentUser } = useCurrentUser();
+  const tenantHeaders = useTenantHeaders();
   const [showCertifyModal, setShowCertifyModal] = useState(false);
   const [certifying, setCertifying] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
@@ -208,9 +210,24 @@ export default function SF425FormView({
     setCertifying(false);
   }, [reportId, currentUser, onStatusChange]);
 
-  const handleDownloadPDF = useCallback(() => {
-    window.open(`/api/reports/${reportId}/pdf?form=sf425`, "_blank");
-  }, [reportId]);
+  const handleDownloadPDF = useCallback(async () => {
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/reports/${reportId}/pdf?form=sf425`, {
+        headers: tenantHeaders,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Failed to generate PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Failed to generate PDF");
+    }
+  }, [reportId, tenantHeaders]);
 
   if ((loading || draftLoading) && !formData) {
     return (

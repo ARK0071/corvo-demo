@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
+import { resolvePortProfileId } from "@/lib/db/tenant-config.server";
 import { renderSF425 } from "@/lib/pdf/render";
 import type { SF425Values } from "@/lib/pdf/render";
 import { computeIndirectCost } from "@/lib/reports/indirect-cost";
@@ -21,11 +21,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: reportId } = await params;
-  const { portId } = await resolveSecureTenant(request.headers);
+  const portProfileId = await resolvePortProfileId(request.headers);
 
   try {
+    if (!portProfileId) {
+      return NextResponse.json({ error: "Port profile not found" }, { status: 404 });
+    }
+
     const report = await prisma.scheduledReport.findFirst({
-      where: { id: reportId, award: { portProfile: { slug: portId } } },
+      where: { id: reportId, award: { portProfileId } },
       include: {
         award: {
           include: {
@@ -44,8 +48,8 @@ export async function GET(
 
     const award = report.award;
 
-    const profile = await prisma.portProfile.findFirst({
-      where: { slug: portId },
+    const profile = await prisma.portProfile.findUnique({
+      where: { id: portProfileId },
     });
 
     let cert = null;

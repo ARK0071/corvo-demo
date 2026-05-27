@@ -14,6 +14,7 @@ export function validateOrigin(request: Request): boolean {
     process.env.AUTH_URL,
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
     "http://localhost:3000",
+    "http://localhost:3300",
   ].filter(Boolean);
 
   // No origin header on mutating request = possible cross-site

@@ -34,6 +34,14 @@ const DEFAULT_CONFIG: StoredConfig = {
   portSlug: "port-freeport",
 };
 
+function syncTenantCookies(config: StoredConfig) {
+  const maxAge = 60 * 60 * 24 * 365;
+  const opts = `path=/; max-age=${maxAge}; SameSite=Lax`;
+  document.cookie = `corvo-port-id=${encodeURIComponent(config.portId)}; ${opts}`;
+  document.cookie = `corvo-port-slug=${encodeURIComponent(config.portSlug)}; ${opts}`;
+  document.cookie = `corvo-environment=${encodeURIComponent(config.environment)}; ${opts}`;
+}
+
 export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
   const [config, setConfig] = useState<StoredConfig>(DEFAULT_CONFIG);
@@ -74,10 +82,11 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     }
   }, [userPortId, isAdmin]);
 
-  // Save config to localStorage when it changes
+  // Save config to localStorage and cookies when it changes
   useEffect(() => {
     if (!isLoading) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+      syncTenantCookies(config);
     }
   }, [config, isLoading]);
 

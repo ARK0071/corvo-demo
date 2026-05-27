@@ -1,21 +1,41 @@
 import "server-only";
 
+import { cookies } from "next/headers";
 import { prisma } from "./client";
 import { auth } from "@/lib/auth/auth";
 import {
-  setTenantConfigFromHeaders,
   setTenantConfig,
   getTenantConfig,
+  getPortInfo,
   type TenantConfig,
+  type Environment,
 } from "./tenant-config";
 
 /**
  * Securely resolve tenant config from request headers.
- * Admins may switch ports/environments freely via headers.
+ * Falls back to tenant cookies (set by TenantProvider) for navigations
+ * like window.open that cannot send custom headers.
+ * Admins may switch ports/environments freely via headers/cookies.
  * Non-admin users are locked to their assigned portId from the session.
  */
 export async function resolveSecureTenant(headers: Headers): Promise<TenantConfig> {
-  setTenantConfigFromHeaders(headers);
+  const cookieStore = await cookies();
+  const portId =
+    headers.get("x-corvo-port-id") ??
+    cookieStore.get("corvo-port-id")?.value ??
+    "freeport";
+  const portInfo = getPortInfo(portId);
+
+  setTenantConfig({
+    environment: (headers.get("x-corvo-environment") ??
+      cookieStore.get("corvo-environment")?.value ??
+      "test") as Environment,
+    portId,
+    portSlug:
+      headers.get("x-corvo-port-slug") ??
+      cookieStore.get("corvo-port-slug")?.value ??
+      portInfo.slug,
+  });
   const config = getTenantConfig();
 
   const session = await auth();
@@ -26,6 +46,27 @@ export async function resolveSecureTenant(headers: Headers): Promise<TenantConfi
   }
 
   return config;
+}
+
+/** Resolve the PortProfile UUID for the current tenant request. */
+export async function resolvePortProfileId(headers: Headers): Promise<string | null> {
+  const { portId } = await resolveSecureTenant(headers);
+  const profile = await prisma.portProfile.findFirst({
+    where: { slug: portId },
+    select: { id: true },
+  });
+  if (profile) return profile.id;
+
+  const portInfo = getPortInfo(portId);
+  if (portInfo.slug !== portId) {
+    const bySlug = await prisma.portProfile.findFirst({
+      where: { slug: portInfo.slug },
+      select: { id: true },
+    });
+    if (bySlug) return bySlug.id;
+  }
+
+  return null;
 }
 
 /**
