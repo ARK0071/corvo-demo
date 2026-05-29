@@ -19,6 +19,7 @@ interface UserContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isModerator: boolean;
   logout: () => void;
 }
 
@@ -48,6 +49,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       isAuthenticated: !!session?.user,
       isAdmin: session?.user?.role === "admin",
+      isModerator: session?.user?.role === "moderator",
       logout: () => signOut({ callbackUrl: "/login" }),
     }),
     [user, isLoading, session?.user]

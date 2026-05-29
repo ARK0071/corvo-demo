@@ -15,11 +15,12 @@ const ROLE_LABELS: Record<string, string> = {
   drafter: "Drafter",
   reviewer: "Reviewer",
   certifying_official: "Certifying Official",
+  moderator: "Moderator",
   admin: "Admin",
 };
 
 function UserMenu() {
-  const { user, isLoading, logout, isAdmin } = useCurrentUser();
+  const { user, isLoading, logout, isAdmin, isModerator } = useCurrentUser();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -58,14 +59,14 @@ function UserMenu() {
             <p className="text-[10px] text-muted-foreground">{user.title}</p>
           </div>
           <div className="py-1">
-            {isAdmin && (
+            {(isAdmin || isModerator) && (
               <Link
                 href="/admin"
                 onClick={() => setOpen(false)}
                 className="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors flex items-center gap-2"
               >
                 <Shield className="h-3.5 w-3.5" />
-                Admin Panel
+                {isModerator ? "User Management" : "Admin Panel"}
               </Link>
             )}
             <button
@@ -82,46 +83,62 @@ function UserMenu() {
   );
 }
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
+  const { isAuthenticated, isLoading } = useCurrentUser();
   const upcomingCount = useMemo(() => getUpcomingDeadlineCount(), []);
 
+  // Show minimal layout while loading auth or when not signed in
+  if (isLoading || !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex w-full bg-background">
+        <main className="flex-1 flex flex-col">{children}</main>
+      </div>
+    );
+  }
+
+  return (
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AppSidebar />
+        <div className="flex-1 flex flex-col">
+          <header className="h-12 border-b flex items-center justify-between px-4">
+            <div className="flex items-center gap-3">
+              <SidebarTrigger aria-label="Toggle navigation" />
+              <span className="font-semibold">Corvo</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <UserMenu />
+              <Link
+                href="/grants?tab=pipeline"
+                className="relative flex items-center justify-center h-8 w-8 rounded-full hover:bg-muted transition-colors"
+                aria-label={upcomingCount > 0 ? `${upcomingCount} upcoming deadlines` : "Pipeline"}
+              >
+                <Calendar className="h-4 w-4 text-muted-foreground" />
+                {upcomingCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-black text-[10px] font-bold text-white dark:bg-white dark:text-black">
+                    {upcomingCount > 99 ? "99+" : upcomingCount}
+                  </span>
+                )}
+              </Link>
+              <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8">
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
+            </div>
+          </header>
+          <main className="flex-1 flex flex-col">
+            {children}
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
+  );
+}
+
+export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <UserProvider>
-      <SidebarProvider>
-        <div className="min-h-screen flex w-full bg-background">
-          <AppSidebar />
-          <div className="flex-1 flex flex-col">
-            <header className="h-12 border-b flex items-center justify-between px-4">
-              <div className="flex items-center gap-3">
-                <SidebarTrigger aria-label="Toggle navigation" />
-                <span className="font-semibold">Corvo</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <UserMenu />
-                <Link
-                  href="/grants?tab=pipeline"
-                  className="relative flex items-center justify-center h-8 w-8 rounded-full hover:bg-muted transition-colors"
-                  aria-label={upcomingCount > 0 ? `${upcomingCount} upcoming deadlines` : "Pipeline"}
-                >
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  {upcomingCount > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 min-w-4 items-center justify-center rounded-full bg-black text-[10px] font-bold text-white dark:bg-white dark:text-black">
-                      {upcomingCount > 99 ? "99+" : upcomingCount}
-                    </span>
-                  )}
-                </Link>
-                <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8">
-                  {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-                </Button>
-              </div>
-            </header>
-            <main className="flex-1 flex flex-col">
-              {children}
-            </main>
-          </div>
-        </div>
-      </SidebarProvider>
+      <AppLayoutInner>{children}</AppLayoutInner>
     </UserProvider>
   );
 }

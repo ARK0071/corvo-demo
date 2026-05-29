@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useCurrentUser } from "@/contexts/user-context";
 
 interface AdminUser {
   id: string;
@@ -17,7 +18,7 @@ interface AdminUser {
   createdAt: string;
 }
 
-const ROLES = ["drafter", "reviewer", "certifying_official", "admin"];
+const ROLES = ["drafter", "reviewer", "certifying_official", "moderator", "admin"];
 const PORTS = [
   { id: "freeport", name: "Port Freeport" },
   { id: "lawa", name: "Los Angeles World Airports" },
@@ -118,15 +119,21 @@ export default function AdminUsersPage() {
 }
 
 function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+  const { user, isModerator } = useCurrentUser();
   const [form, setForm] = useState({
     email: "",
     name: "",
     title: "",
-    portId: "freeport",
+    portId: isModerator && user ? user.portId : "freeport",
     role: "drafter",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Moderators can only assign non-privileged roles
+  const availableRoles = isModerator
+    ? ROLES.filter((r) => r !== "admin" && r !== "moderator")
+    : ROLES;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -180,18 +187,27 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-medium">Port *</label>
-          <select
-            value={form.portId}
-            onChange={(e) => setForm((f) => ({ ...f, portId: e.target.value }))}
-            className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
-          >
-            {PORTS.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </div>
+        {isModerator ? (
+          <div>
+            <label className="text-xs font-medium">Entity</label>
+            <p className="mt-1 px-3 py-1.5 border rounded-md text-sm bg-muted text-muted-foreground">
+              {user?.portId || "—"}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <label className="text-xs font-medium">Port *</label>
+            <select
+              value={form.portId}
+              onChange={(e) => setForm((f) => ({ ...f, portId: e.target.value }))}
+              className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
+            >
+              {PORTS.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label className="text-xs font-medium">Role *</label>
           <select
@@ -199,7 +215,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
             className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
           >
-            {ROLES.map((r) => (
+            {availableRoles.map((r) => (
               <option key={r} value={r}>{r}</option>
             ))}
           </select>

@@ -7,21 +7,26 @@ const updateUserSchema = z.object({
   name: z.string().min(1).optional(),
   title: z.string().optional(),
   portId: z.string().min(1).optional(),
-  role: z.enum(["drafter", "reviewer", "certifying_official", "admin"]).optional(),
+  role: z.enum(["drafter", "reviewer", "certifying_official", "moderator", "admin"]).optional(),
   active: z.boolean().optional(),
 });
 
-export const GET = withRole(["admin"], async (request, { params }) => {
+export const GET = withRole(["admin", "moderator"], async (request, { user: caller, params }) => {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Missing user ID" }, { status: 400 });
 
   const user = await prisma.user.findUnique({ where: { id } });
   if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+  // Moderators can only view users in their own entity
+  if (caller.role === "moderator" && user.portId !== caller.portId) {
+    return NextResponse.json({ error: "Access denied" }, { status: 403 });
+  }
+
   return NextResponse.json({ user });
 });
 
-export const PUT = withRole(["admin"], async (request, { user: adminUser, params }) => {
+export const PUT = withRole(["admin", "moderator"], async (request, { user: adminUser, params }) => {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Missing user ID" }, { status: 400 });
 
@@ -37,6 +42,19 @@ export const PUT = withRole(["admin"], async (request, { user: adminUser, params
 
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  // Moderators: can only modify users in their own entity, cannot change roles to admin/moderator
+  if (adminUser.role === "moderator") {
+    if (existing.portId !== adminUser.portId) {
+      return NextResponse.json({ error: "Moderators can only manage users in their own entity" }, { status: 403 });
+    }
+    if (parsed.data.role && (parsed.data.role === "admin" || parsed.data.role === "moderator")) {
+      return NextResponse.json({ error: "Moderators cannot assign admin or moderator roles" }, { status: 403 });
+    }
+    if (parsed.data.portId && parsed.data.portId !== adminUser.portId) {
+      return NextResponse.json({ error: "Moderators cannot move users to another entity" }, { status: 403 });
+    }
+  }
 
   const updated = await prisma.user.update({
     where: { id },
@@ -59,9 +77,17 @@ export const PUT = withRole(["admin"], async (request, { user: adminUser, params
   return NextResponse.json({ user: updated });
 });
 
-export const DELETE = withRole(["admin"], async (request, { user: adminUser, params }) => {
+export const DELETE = withRole(["admin", "moderator"], async (request, { user: adminUser, params }) => {
   const id = params?.id;
   if (!id) return NextResponse.json({ error: "Missing user ID" }, { status: 400 });
+
+  const existing = await prisma.user.findUnique({ where: { id } });
+  if (!existing) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+  // Moderators can only deactivate users in their own entity
+  if (adminUser.role === "moderator" && existing.portId !== adminUser.portId) {
+    return NextResponse.json({ error: "Moderators can only manage users in their own entity" }, { status: 403 });
+  }
 
   // Deactivate rather than delete
   await prisma.user.update({

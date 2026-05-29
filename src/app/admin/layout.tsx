@@ -3,23 +3,29 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Users, FileText, Key, Settings, LayoutDashboard, Building2 } from "lucide-react";
+import { useCurrentUser } from "@/contexts/user-context";
 
-const adminNav = [
-  { title: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { title: "Entities", href: "/admin/entities", icon: Building2 },
-  { title: "Users", href: "/admin/users", icon: Users },
-  { title: "Audit Logs", href: "/admin/audit-logs", icon: FileText },
-  { title: "API Keys", href: "/admin/api-keys", icon: Key },
-  { title: "System", href: "/admin/system", icon: Settings },
+const allAdminNav = [
+  { title: "Dashboard", href: "/admin", icon: LayoutDashboard, moderatorVisible: true },
+  { title: "Entities", href: "/admin/entities", icon: Building2, moderatorVisible: false },
+  { title: "Users", href: "/admin/users", icon: Users, moderatorVisible: true },
+  { title: "Audit Logs", href: "/admin/audit-logs", icon: FileText, moderatorVisible: false },
+  { title: "API Keys", href: "/admin/api-keys", icon: Key, moderatorVisible: false },
+  { title: "System", href: "/admin/system", icon: Settings, moderatorVisible: false },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { isModerator } = useCurrentUser();
+
+  const adminNav = isModerator
+    ? allAdminNav.filter((item) => item.moderatorVisible)
+    : allAdminNav;
 
   return (
     <div className="flex flex-col h-full">
       <div className="border-b px-6 py-3">
-        <h1 className="text-lg font-semibold">Admin Panel</h1>
+        <h1 className="text-lg font-semibold">{isModerator ? "User Management" : "Admin Panel"}</h1>
       </div>
       <div className="flex flex-1 overflow-hidden">
         <nav className="w-52 border-r p-3 space-y-1 shrink-0">

@@ -10,8 +10,8 @@ import AppLayout from "@/components/app-layout";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Corvo – Corvus",
-  description: "Procurement analyst with access to 20 specialized tools for spend analysis, benchmarking, and savings identification.",
+  title: "Corvo – Grant Intelligence",
+  description: "Grant intelligence platform with AI-powered tools for grant discovery, drafting, award management, and compliance reporting.",
 };
 
 export default function RootLayout({

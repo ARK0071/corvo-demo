@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Send, Loader2, RotateCcw, Anchor, AlertCircle } from "lucide-react";
+import { Send, Loader2, RotateCcw, Anchor, AlertCircle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MessageBubble } from "../chat/message-bubble";
 import { GrantMatchSuggestions } from "./grant-match-suggestions";
@@ -114,6 +114,14 @@ export function GrantMatchChat() {
             New conversation
           </Button>
         )}
+      </div>
+
+      {/* Beta Banner */}
+      <div className="mx-auto max-w-3xl w-full px-4 pt-3">
+        <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          <span><strong>Beta:</strong> Porter AI may produce inaccurate information. Please double-check important facts.</span>
+        </div>
       </div>
 
       {/* Messages Area */}

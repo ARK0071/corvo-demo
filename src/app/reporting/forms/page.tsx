@@ -25,6 +25,7 @@ interface Report {
   awardId: string;
   awardTitle: string;
   program: string;
+  fain?: string;
   type: string;
   title: string;
   dueDate: string;
@@ -306,7 +307,9 @@ function FormSection({ icon, title, reports, onSelect, labelOverride }: {
                     {isOverdue ? "overdue" : r.status.replace("_", " ")}
                   </Badge>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{r.program} &mdash; {labelOverride || reportTypeLabel(r.type)}</p>
+                    <p className="text-sm font-medium truncate">
+                      {r.program}{r.fain ? ` (${r.fain})` : ""} &mdash; {labelOverride || reportTypeLabel(r.type)}
+                    </p>
                     <p className="text-xs text-muted-foreground truncate">{r.awardTitle}</p>
                   </div>
                 </div>

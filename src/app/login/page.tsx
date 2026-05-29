@@ -19,7 +19,7 @@ function LoginContent() {
             CORVO
           </h1>
           <p className="text-sm text-muted-foreground">
-            Procurement intelligence platform
+            Grant Intelligence Platform
           </p>
         </div>
 

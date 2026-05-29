@@ -159,12 +159,27 @@ function SectionContent({
   if (looksLikeHtml(content)) {
     return (
       <div
-        className={`text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none ${className}`}
+        className={`text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none [&_p]:mb-4 [&_p]:mt-0 ${className}`}
         style={fontStyle}
         dangerouslySetInnerHTML={{ __html: annotateHtmlGaps(content, previewMode) }}
       />
     );
   }
+
+  // For preview mode, split on double newlines to create properly spaced paragraphs
+  if (previewMode) {
+    const paragraphs = content.split(/\n{2,}/);
+    return (
+      <div className={`text-sm leading-relaxed space-y-4 ${className}`} style={fontStyle}>
+        {paragraphs.map((para, i) => (
+          <p key={i} className="whitespace-pre-wrap">
+            {highlightGapAnnotations(para.trim(), previewMode)}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`text-sm leading-relaxed whitespace-pre-wrap ${className}`}
@@ -2097,6 +2112,27 @@ function ReviewView({
           </div>
         </Card>
 
+        {/* Optional Supporting Document */}
+        <Card className="overflow-hidden">
+          <button
+            className="w-full flex items-center gap-3 p-4 hover:bg-muted/30 transition-colors text-left"
+            onClick={() => setExpandedPanel(expandedPanel === "extra" ? null : "extra")}
+          >
+            {expandedPanel === "extra" ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+            <Plus className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="font-semibold text-sm flex-1">Additional Supporting Document</span>
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">Optional</Badge>
+          </button>
+          {expandedPanel === "extra" && (
+            <div className="border-t px-4 pb-4 pt-3">
+              <p className="text-xs text-muted-foreground mb-3">
+                Upload any additional document (e.g., strategic plan, needs assessment, letters of support) to provide extra context for the draft.
+              </p>
+              <ExtraFileUpload />
+            </div>
+          )}
+        </Card>
+
         {/* Grant Requirements */}
         <Card className="overflow-hidden">
           <button
@@ -2767,6 +2803,52 @@ function DraftView({
         )}
       </div>
     </>
+  );
+}
+
+// ─── Extra File Upload ───
+
+function ExtraFileUpload() {
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  return (
+    <div className="flex items-center gap-3">
+      <label className="cursor-pointer inline-flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm hover:bg-muted/50 transition-colors">
+        <Upload className="h-4 w-4" />
+        {uploading ? "Uploading..." : "Choose File"}
+        <input
+          type="file"
+          accept=".pdf,.doc,.docx,.txt"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) {
+              setUploading(true);
+              // Store file name for display; actual processing can be added later
+              setTimeout(() => {
+                setFileName(f.name);
+                setUploading(false);
+              }, 500);
+            }
+          }}
+          disabled={uploading}
+        />
+      </label>
+      {uploading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+      {fileName && !uploading && (
+        <div className="flex items-center gap-2">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-xs text-muted-foreground truncate max-w-[200px]">{fileName}</span>
+          <button
+            onClick={() => setFileName(null)}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -14,10 +14,12 @@ import {
   Banknote,
   ShieldCheck,
   CalendarDays,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
 
 // ─── Types ───
@@ -98,6 +100,18 @@ function reportTypeLabel(type: string): string {
 }
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+  const csv = [headers.map(escape).join(","), ...rows.map((r) => r.map(escape).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 // ─── Data Hook ───
 
@@ -238,27 +252,52 @@ export default function ReportingOverviewPage() {
             {awardStats?.activeCount || 0} active awards &middot; {fmt(awardStats?.totalAwarded || 0)} total
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={refresh}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              downloadCsv(
+                "reports.csv",
+                ["Award", "Program", "Report Type", "Due Date", "Period Start", "Period End", "Status"],
+                allReports.map((r) => [r.awardTitle, r.program, reportTypeLabel(r.type), r.dueDate, r.periodStart, r.periodEnd, r.status])
+              );
+            }}
+            disabled={allReports.length === 0}
+          >
+            <Download className="h-3.5 w-3.5 mr-1" /> Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={refresh}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Refresh
+          </Button>
+        </div>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex items-center gap-2 mb-1">
-              <ShieldCheck className={`h-4 w-4 ${complianceHealth === "green" ? "text-emerald-500" : complianceHealth === "yellow" ? "text-amber-500" : "text-red-500"}`} />
-              <span className="text-xs text-muted-foreground uppercase tracking-wider">Compliance</span>
-            </div>
-            <p className={`text-xl font-bold ${complianceHealth === "green" ? "text-emerald-600" : complianceHealth === "yellow" ? "text-amber-600" : "text-red-600"}`}>
-              {complianceLabel}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Card className="cursor-help">
+              <CardContent className="pt-4 pb-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShieldCheck className={`h-4 w-4 ${complianceHealth === "green" ? "text-emerald-500" : complianceHealth === "yellow" ? "text-amber-500" : "text-red-500"}`} />
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Compliance</span>
+                </div>
+                <p className={`text-xl font-bold ${complianceHealth === "green" ? "text-emerald-600" : complianceHealth === "yellow" ? "text-amber-600" : "text-red-600"}`}>
+                  {complianceLabel}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {overdueCount === 0 ? "No overdue reports" : `${overdueCount} overdue`}
+                </p>
+              </CardContent>
+            </Card>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="max-w-xs">
+            <p className="text-xs">
+              {complianceHealth === "green" ? "All reports are filed on time." : complianceHealth === "yellow" ? "1-2 reports are past due. Submit soon to stay compliant." : "3+ overdue reports. Risk of audit findings or funding suspension."}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {overdueCount === 0 ? "No overdue reports" : `${overdueCount} overdue`}
-            </p>
-          </CardContent>
-        </Card>
+          </TooltipContent>
+        </Tooltip>
 
         <Card>
           <CardContent className="pt-4 pb-4">
@@ -310,10 +349,17 @@ export default function ReportingOverviewPage() {
         <Card className={overdueReports.length > 0 ? "border-red-200 dark:border-red-800" : ""}>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className={`h-4 w-4 ${overdueReports.length > 0 ? "text-red-500" : "text-muted-foreground"}`} />
-                Overdue
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-2 cursor-help">
+                    <AlertTriangle className={`h-4 w-4 ${overdueReports.length > 0 ? "text-red-500" : "text-muted-foreground"}`} />
+                    Overdue
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p className="text-xs">Reports past their due date that have not been submitted. Overdue reports may trigger audit findings.</p>
+                </TooltipContent>
+              </Tooltip>
               {overdueReports.length > 0 && (
                 <Badge className="bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">{overdueReports.length}</Badge>
               )}

@@ -20,6 +20,7 @@ export interface ScheduledReport {
   awardId: string;
   awardTitle: string;
   program: string;
+  fain?: string;
   type: ReportType;
   title: string;
   dueDate: string;

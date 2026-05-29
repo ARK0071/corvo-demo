@@ -28,12 +28,16 @@ import {
   Loader2,
   Database,
   Upload,
+  Download,
+  Edit as EditIcon,
+  Save,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import {
   getAwardById,
@@ -87,6 +91,20 @@ function daysUntil(dateStr: string): number {
 
 function pctOf(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0;
+}
+
+// ─── CSV Export ───
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+  const csv = [headers.map(escape).join(","), ...rows.map((r) => r.map(escape).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // ─── Status Colors ───
@@ -157,6 +175,7 @@ export default function AwardsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [dataSource, setDataSource] = useState<"db" | "memory">("memory");
+  const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
 
   // Fetch awards from the database API
   const fetchFromDB = useCallback(async () => {
@@ -198,6 +217,18 @@ export default function AwardsPage() {
         setAwards([]);
         setDataSource("db");
       }
+
+      // Fetch all expenses for alert computation
+      try {
+        const expRes = await fetch("/api/awards/expenses", {
+          headers: { ...tenantHeaders, "Content-Type": "application/json" },
+        });
+        if (expRes.ok) {
+          const expData = await expRes.json();
+          setAllExpenses(expData.expenses || []);
+        }
+      } catch { /* ignore */ }
+
       setIsLoading(false);
     };
 
@@ -237,6 +268,7 @@ export default function AwardsPage() {
     if (awards.length === 0) return [];
     const items: AttentionItem[] = [];
     for (const award of awards) {
+      // Budget ceiling alerts
       for (const cat of award.budgetCategories) {
         if (cat.ceiling <= 0) continue;
         const pct = (cat.spent / cat.ceiling) * 100;
@@ -249,9 +281,72 @@ export default function AwardsPage() {
           items.push({ id: `${award.id}-${cat.id}-over`, awardId: award.id, awardTitle: award.title, type: "budget", severity: "critical", title: `${cat.name} over budget`, description: `${cat.name} exceeded ceiling by $${(cat.spent - cat.ceiling).toLocaleString()}.` });
         }
       }
+
+      // Flagged expense alerts
+      const awardFlagged = allExpenses.filter((e) => e.awardId === award.id && e.status === "flagged");
+      if (awardFlagged.length > 0) {
+        const total = awardFlagged.reduce((s, e) => s + e.amount, 0);
+        items.push({
+          id: `${award.id}-flagged`,
+          awardId: award.id,
+          awardTitle: award.title,
+          type: "budget",
+          severity: "critical",
+          title: `${awardFlagged.length} flagged expense${awardFlagged.length !== 1 ? "s" : ""}`,
+          description: `Flagged expenses totaling $${total.toLocaleString()} need review.`,
+        });
+      }
+
+      // Match tracking alerts
+      const ms = getMatchStatus(award.id);
+      if (ms.status === "shortfall") {
+        items.push({
+          id: `${award.id}-match-shortfall`,
+          awardId: award.id,
+          awardTitle: award.title,
+          type: "budget",
+          severity: "critical",
+          title: `Match shortfall — ${Math.round(ms.percentage)}% of ${ms.target}%`,
+          description: `Match commitment is significantly behind schedule. $${ms.committed.toLocaleString()} committed of $${ms.required.toLocaleString()} required.`,
+        });
+      } else if (ms.status === "at_risk") {
+        items.push({
+          id: `${award.id}-match-risk`,
+          awardId: award.id,
+          awardTitle: award.title,
+          type: "budget",
+          severity: "warning",
+          title: `Match at risk — ${Math.round(ms.percentage)}% of ${ms.target}%`,
+          description: `Match commitment may fall behind. $${ms.committed.toLocaleString()} committed of $${ms.required.toLocaleString()} required.`,
+        });
+      }
+
+      // Performance period alerts
+      const dLeft = daysUntil(award.performancePeriod.end);
+      if (dLeft <= 0 && award.status === "active") {
+        items.push({
+          id: `${award.id}-period-expired`,
+          awardId: award.id,
+          awardTitle: award.title,
+          type: "budget",
+          severity: "critical",
+          title: "Performance period expired",
+          description: `Period ended ${Math.abs(dLeft)} day${Math.abs(dLeft) !== 1 ? "s" : ""} ago but award is still active.`,
+        });
+      } else if (dLeft > 0 && dLeft <= 30 && award.status === "active") {
+        items.push({
+          id: `${award.id}-period-ending`,
+          awardId: award.id,
+          awardTitle: award.title,
+          type: "budget",
+          severity: "warning",
+          title: `Performance period ends in ${dLeft} days`,
+          description: `Award period ends ${fmtDate(award.performancePeriod.end)}.`,
+        });
+      }
     }
     return items;
-  }, [awards]);
+  }, [awards, allExpenses]);
 
   const [showFlaggedOnly, setShowFlaggedOnly] = useState(false);
   const filteredAwards = useMemo(() => {
@@ -327,6 +422,24 @@ export default function AwardsPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => {
+              downloadCsv(
+                "awards.csv",
+                ["Program", "Title", "FAIN", "Status", "Total Amount", "Spent", "Remaining", "Period Start", "Period End"],
+                awards.map((a) => {
+                  const spent = a.budgetCategories.reduce((s, c) => s + c.spent, 0);
+                  return [a.program, a.title, a.fain, a.status, String(a.totalAmount), String(spent), String(a.totalAmount - spent), a.performancePeriod.start, a.performancePeriod.end];
+                })
+              );
+            }}
+            className="gap-1.5"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
             className="gap-1.5"
@@ -370,18 +483,30 @@ export default function AwardsPage() {
               <span className="font-bold tabular-nums">{fmt(stats.totalRemaining)}</span>
             </div>
             {criticalItems.length > 0 && (
-              <>
-                <div className="ml-auto flex items-center gap-1.5 text-red-600 dark:text-red-400">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  <span className="font-medium text-xs">{criticalItems.length} critical</span>
-                </div>
-              </>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="ml-auto flex items-center gap-1.5 text-red-600 dark:text-red-400 cursor-help">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span className="font-medium text-xs">{criticalItems.length} critical</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="text-xs">Budget categories at 95%+ of ceiling or over budget. Immediate action needed to avoid disallowed costs.</p>
+                </TooltipContent>
+              </Tooltip>
             )}
             {warningItems.length > 0 && (
-              <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                <AlertCircle className="h-3.5 w-3.5" />
-                <span className="font-medium text-xs">{warningItems.length} warning{warningItems.length !== 1 ? "s" : ""}</span>
-              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 cursor-help">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    <span className="font-medium text-xs">{warningItems.length} warning{warningItems.length !== 1 ? "s" : ""}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="text-xs">Budget categories at 80-95% of ceiling. Monitor spending to avoid overruns.</p>
+                </TooltipContent>
+              </Tooltip>
             )}
           </div>
 
@@ -512,6 +637,29 @@ export default function AwardsPage() {
                       {extra > 0 && (
                         <span className="text-[10px] text-muted-foreground">+{extra} more</span>
                       )}
+                    </div>
+                  );
+                })()}
+
+                {/* Non-budget alerts: flagged expenses, match, period */}
+                {(() => {
+                  const otherAlerts = awardAttention.filter((a) => !a.id.includes("-crit") && !a.id.includes("-warn") && !a.id.includes("-over"));
+                  if (otherAlerts.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                      {otherAlerts.map((alert) => (
+                        <span
+                          key={alert.id}
+                          className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                            alert.severity === "critical"
+                              ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                          }`}
+                        >
+                          {alert.severity === "critical" ? <AlertTriangle className="h-2.5 w-2.5" /> : <AlertCircle className="h-2.5 w-2.5" />}
+                          {alert.title}
+                        </span>
+                      ))}
                     </div>
                   );
                 })()}
@@ -777,9 +925,29 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
           <div className="mt-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Expense Ledger</h3>
-              <Button size="sm" onClick={() => setShowExpenseForm(true)} disabled={award.status === "closed"}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Log Expense
-              </Button>
+              <div className="flex items-center gap-2">
+                {expenses.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      downloadCsv(
+                        `expenses-${award.program}.csv`,
+                        ["Date", "Description", "Vendor", "Category", "Amount", "Status", "Flag Reason"],
+                        expenses.map((exp) => {
+                          const cat = award.budgetCategories.find((c) => c.id === exp.categoryId);
+                          return [exp.date, exp.description, exp.vendor, cat?.name || "", String(exp.amount), exp.status, exp.flagReason || ""];
+                        })
+                      );
+                    }}
+                  >
+                    <Download className="h-3.5 w-3.5 mr-1" /> Export CSV
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => setShowExpenseForm(true)} disabled={award.status === "closed"}>
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Log Expense
+                </Button>
+              </div>
             </div>
 
             {showExpenseForm && (
@@ -789,6 +957,26 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
                 onSave={() => { setShowExpenseForm(false); refresh(); }}
               />
             )}
+
+            {(() => {
+              const flagged = expenses.filter((e) => e.status === "flagged");
+              if (flagged.length > 0) {
+                return (
+                  <div className="flex items-start gap-3 p-3 rounded-lg border border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20">
+                    <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                        {flagged.length} flagged expense{flagged.length !== 1 ? "s" : ""} require{flagged.length === 1 ? "s" : ""} attention
+                      </p>
+                      <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-0.5">
+                        Flagged expenses totaling {fmtFull(flagged.reduce((s, e) => s + e.amount, 0))} need review before they can be included in drawdowns.
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {expenses.length === 0 ? (
               <Card><CardContent className="py-8 text-center text-sm text-muted-foreground">No expenses logged yet.</CardContent></Card>
@@ -1035,11 +1223,20 @@ function AwardDetailView({ awardId, onBack, onRefresh }: { awardId: string; onBa
 function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: AwardType; onRefresh: () => void }) {
   const headers = useTenantHeaders();
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editDesc, setEditDesc] = useState(expense.description);
+  const [editVendor, setEditVendor] = useState(expense.vendor);
+  const [editAmount, setEditAmount] = useState(String(expense.amount));
+  const [editDate, setEditDate] = useState(expense.date);
+  const [editCategory, setEditCategory] = useState(expense.categoryId);
+  const [saving, setSaving] = useState(false);
   const cat = award.budgetCategories.find((c) => c.id === expense.categoryId);
 
-  const canApprove = expense.status === "logged";
+  const canApprove = expense.status === "logged" || expense.status === "flagged";
   const canFlag = expense.status === "logged" || expense.status === "approved";
+  const canUnflag = expense.status === "flagged";
   const canDelete = expense.status !== "drawn";
+  const canEdit = expense.status !== "drawn";
 
   const handleStatusChange = async (status: string) => {
     await fetch("/api/awards/expenses", {
@@ -1058,6 +1255,26 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ id: expense.id }),
     });
+    onRefresh();
+  };
+
+  const handleSaveEdit = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSaving(true);
+    await fetch("/api/awards/expenses", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        expenseId: expense.id,
+        description: editDesc,
+        vendor: editVendor,
+        amount: parseFloat(editAmount) || expense.amount,
+        date: editDate,
+        categoryId: editCategory,
+      }),
+    });
+    setSaving(false);
+    setEditing(false);
     onRefresh();
   };
 
@@ -1086,27 +1303,73 @@ function ExpenseRow({ expense, award, onRefresh }: { expense: Expense; award: Aw
 
       {expanded && (
         <div className="px-3 pb-3 space-y-2 text-xs">
-          {expense.flagReason && (
-            <div className="flex items-start gap-2 p-2 bg-red-50 dark:bg-red-950/30 rounded text-red-700 dark:text-red-400">
-              <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-              <span>{expense.flagReason}</span>
+          {editing ? (
+            <div className="space-y-2 p-2 border rounded bg-muted/20" onClick={(e) => e.stopPropagation()}>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase">Description</label>
+                  <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className="h-7 text-xs mt-0.5" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase">Vendor</label>
+                  <Input value={editVendor} onChange={(e) => setEditVendor(e.target.value)} className="h-7 text-xs mt-0.5" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase">Amount ($)</label>
+                  <Input type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} className="h-7 text-xs mt-0.5" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase">Date</label>
+                  <Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="h-7 text-xs mt-0.5" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase">Category</label>
+                  <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className="mt-0.5 w-full rounded-md border bg-background px-2 py-1 text-xs h-7">
+                    {award.budgetCategories.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <Button size="sm" className="h-7 text-xs gap-1" onClick={handleSaveEdit} disabled={saving}>
+                  {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />} Save
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); setEditing(false); setEditDesc(expense.description); setEditVendor(expense.vendor); setEditAmount(String(expense.amount)); setEditDate(expense.date); setEditCategory(expense.categoryId); }}>Cancel</Button>
+              </div>
             </div>
+          ) : (
+            <>
+              {expense.flagReason && (
+                <div className="flex items-start gap-2 p-2 bg-red-50 dark:bg-red-950/30 rounded text-red-700 dark:text-red-400">
+                  <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>{expense.flagReason}</span>
+                </div>
+              )}
+              {expense.overrideJustification && (
+                <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/30 rounded">
+                  <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
+                  <span>Override: {expense.overrideJustification}</span>
+                </div>
+              )}
+              {expense.attachments.length > 0 && (
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Paperclip className="h-3 w-3" />
+                  {expense.attachments.join(", ")}
+                </div>
+              )}
+            </>
           )}
-          {expense.overrideJustification && (
-            <div className="flex items-start gap-2 p-2 bg-amber-50 dark:bg-amber-950/30 rounded">
-              <ShieldCheck className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
-              <span>Override: {expense.overrideJustification}</span>
-            </div>
-          )}
-          {expense.attachments.length > 0 && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Paperclip className="h-3 w-3" />
-              {expense.attachments.join(", ")}
-            </div>
-          )}
-          {/* Workflow actions */}
-          {(canApprove || canFlag) && (
+          {!editing && (canApprove || canFlag || canUnflag || canEdit) && (
             <div className="flex items-center gap-2 pt-1">
+              {canEdit && (
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); setEditing(true); }}>
+                  <EditIcon className="h-3 w-3 mr-1" /> Edit
+                </Button>
+              )}
+              {canUnflag && (
+                <Button size="sm" variant="outline" className="h-7 text-xs text-emerald-600 hover:text-emerald-700" onClick={(e) => { e.stopPropagation(); handleStatusChange("logged"); }}>
+                  <ShieldCheck className="h-3 w-3 mr-1" /> Mark as Reviewed
+                </Button>
+              )}
               {canApprove && (
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={(e) => { e.stopPropagation(); handleStatusChange("approved"); }}>
                   <CheckCircle2 className="h-3 w-3 mr-1" /> Approve

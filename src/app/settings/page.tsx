@@ -4,7 +4,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe, Lock } from "lucide-react";
+import { useState } from "react";
+import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe, Lock, Mail } from "lucide-react";
 import { useProfile } from "@/components/profile-provider";
 import { useTenant } from "@/contexts/tenant-context";
 import { useSession } from "next-auth/react";
@@ -290,21 +291,8 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          {/* Notifications */}
-          <Card className="p-5">
-            <div className="flex items-center gap-2 mb-4">
-              <Bell className="h-4 w-4 text-muted-foreground" />
-              <h2 className="text-sm font-semibold">Notifications</h2>
-            </div>
-            <div className="space-y-3">
-              {["Contract expiration alerts", "Spending anomaly detection", "Price benchmark updates", "HITL queue assignments"].map((item) => (
-                <div key={item} className="flex items-center justify-between">
-                  <span className="text-sm">{item}</span>
-                  <Badge variant="secondary" className="text-[10px]">Enabled</Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
+          {/* Email Alerts */}
+          <EmailAlertsCard />
 
           {/* Security */}
           <Card className="p-5">
@@ -330,5 +318,70 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+const EMAIL_ALERT_OPTIONS = [
+  { key: "reportDeadlines", label: "Report deadline reminders", description: "Get notified 7 and 3 days before SF-425 and other report due dates" },
+  { key: "grantDeadlines", label: "Grant application deadlines", description: "Alerts for upcoming grant submission deadlines in your pipeline" },
+  { key: "budgetAlerts", label: "Budget threshold alerts", description: "Notify when a budget category exceeds 80% or 95% of its ceiling" },
+  { key: "drawdownReminders", label: "Drawdown reminders", description: "Periodic reminders to submit drawdown requests for eligible expenses" },
+  { key: "matchTracking", label: "Match requirement alerts", description: "Alerts when cost-share match falls behind pace" },
+];
+
+function EmailAlertsCard() {
+  const [alerts, setAlerts] = useState<Record<string, boolean>>({
+    reportDeadlines: true,
+    grantDeadlines: true,
+    budgetAlerts: true,
+    drawdownReminders: false,
+    matchTracking: false,
+  });
+  const [saved, setSaved] = useState(false);
+
+  const toggle = (key: string) => {
+    setAlerts((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSaved(false);
+  };
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Mail className="h-4 w-4 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Email Alerts</h2>
+      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        Configure which deadline and compliance notifications you receive via email.
+      </p>
+      <div className="space-y-3">
+        {EMAIL_ALERT_OPTIONS.map((opt) => (
+          <div key={opt.key} className="flex items-start justify-between gap-4">
+            <div>
+              <span className="text-sm">{opt.label}</span>
+              <p className="text-xs text-muted-foreground">{opt.description}</p>
+            </div>
+            <button
+              onClick={() => toggle(opt.key)}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${alerts[opt.key] ? "bg-[#3d8b8b]" : "bg-muted"}`}
+            >
+              <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${alerts[opt.key] ? "translate-x-4.5" : "translate-x-0.5"}`} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 pt-3 border-t flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          Alerts sent to your account email address.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setSaved(true)}
+          className="text-xs"
+        >
+          {saved ? "Saved" : "Save Preferences"}
+        </Button>
+      </div>
+    </Card>
   );
 }

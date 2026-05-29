@@ -32,12 +32,13 @@ async function getPortProfileId(): Promise<string> {
 // ─── Scheduled Reports ───
 
 // Convert Prisma model to application type
-function toScheduledReport(report: PrismaScheduledReport & { award: { title: string; program: string } }): ScheduledReport {
+function toScheduledReport(report: PrismaScheduledReport & { award: { title: string; program: string; fain?: string } }): ScheduledReport {
   return {
     id: report.id,
     awardId: report.awardId,
     awardTitle: report.award.title,
     program: report.award.program,
+    fain: report.award.fain ?? undefined,
     type: report.type as ReportType,
     title: report.title,
     dueDate: report.dueDate.toISOString().split("T")[0],
@@ -63,7 +64,7 @@ export async function getAllReports(): Promise<ScheduledReport[]> {
   const portProfileId = await getPortProfileId();
   const reports = await prisma.scheduledReport.findMany({
     where: { award: { portProfileId } },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
     orderBy: { dueDate: "asc" },
   });
   return reports.map(toScheduledReport);
@@ -74,7 +75,7 @@ export async function getReportsForAward(awardId: string): Promise<ScheduledRepo
   const portProfileId = await getPortProfileId();
   const reports = await prisma.scheduledReport.findMany({
     where: { awardId, award: { portProfileId } },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
     orderBy: { dueDate: "asc" },
   });
   return reports.map(toScheduledReport);
@@ -92,7 +93,7 @@ export async function getUpcomingReports(days: number = 90): Promise<ScheduledRe
       status: { not: "submitted" },
       dueDate: { gte: now, lte: cutoff },
     },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
     orderBy: { dueDate: "asc" },
   });
   return reports.map(toScheduledReport);
@@ -109,7 +110,7 @@ export async function getOverdueReports(): Promise<ScheduledReport[]> {
       status: { not: "submitted" },
       dueDate: { lt: today },
     },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
     orderBy: { dueDate: "asc" },
   });
   return reports.map(toScheduledReport);
@@ -120,7 +121,7 @@ export async function getReportById(id: string): Promise<ScheduledReport | null>
   const portProfileId = await getPortProfileId();
   const report = await prisma.scheduledReport.findFirst({
     where: { id, award: { portProfileId } },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
   });
   return report ? toScheduledReport(report) : null;
 }
@@ -149,7 +150,7 @@ export async function createReport(input: CreateReportInput): Promise<ScheduledR
       status: input.status || "upcoming",
       notes: input.notes || "",
     },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
   });
 
   return toScheduledReport(report);
@@ -174,7 +175,7 @@ export async function updateReportStatus(
       submittedDate: status === "submitted" ? new Date() : existing.submittedDate,
       notes: notes !== undefined ? notes : existing.notes,
     },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
   });
 
   return toScheduledReport(report);
@@ -198,7 +199,7 @@ export async function updateReportContent(
       generatedContent: content as unknown as Prisma.JsonObject,
       narrativeDraft: narrativeDraft ?? existing.narrativeDraft,
     },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
   });
 
   return toScheduledReport(report);
@@ -281,7 +282,7 @@ export async function getReportingStats() {
 
   const nextDue = await prisma.scheduledReport.findFirst({
     where: { ...portFilter, status: { not: "submitted" }, dueDate: { gte: today } },
-    include: { award: { select: { title: true, program: true } } },
+    include: { award: { select: { title: true, program: true, fain: true } } },
     orderBy: { dueDate: "asc" },
   });
 

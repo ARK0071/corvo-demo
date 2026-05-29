@@ -69,8 +69,8 @@ export default function AppSidebar() {
 }
 
 function AdminNavItem({ collapsed, isActive }: { collapsed: boolean; isActive: boolean }) {
-  const { isAdmin } = useCurrentUser();
-  if (!isAdmin) return null;
+  const { isAdmin, isModerator } = useCurrentUser();
+  if (!isAdmin && !isModerator) return null;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild>
