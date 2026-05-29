@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProfile } from "@/data/profiles";
+import { getProfile, ensureProfilesLoaded } from "@/data/profiles";
 import { loadStateLocalGrantsFromDisk, getStateLocalGrantsFilePath } from "@/lib/state-local-grants/load-from-disk";
 
 export const dynamic = "force-dynamic";
@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
  * Loads `data/state-local-grants/<profileId>.csv` from the filesystem (demo only).
  */
 export async function GET(req: NextRequest) {
+  await ensureProfilesLoaded();
+
   const profileId = req.nextUrl.searchParams.get("profileId")?.trim() ?? "";
   if (!profileId) {
     return NextResponse.json(

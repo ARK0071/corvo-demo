@@ -19,16 +19,12 @@ interface AdminUser {
 }
 
 const ROLES = ["drafter", "reviewer", "certifying_official", "moderator", "admin"];
-const PORTS = [
-  { id: "freeport", name: "Port Freeport" },
-  { id: "lawa", name: "Los Angeles World Airports" },
-  { id: "louisiana-gateway", name: "Louisiana Gateway" },
-];
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [ports, setPorts] = useState<{ id: string; name: string }[]>([]);
 
   const fetchUsers = useCallback(async () => {
     try {
@@ -41,7 +37,17 @@ export default function AdminUsersPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  const fetchPorts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ports");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ports?.length) setPorts(data.ports);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { fetchUsers(); fetchPorts(); }, [fetchUsers, fetchPorts]);
 
   const toggleActive = async (userId: string, active: boolean) => {
     const res = await fetch(`/api/admin/users/${userId}`, {
@@ -62,7 +68,7 @@ export default function AdminUsersPage() {
       </div>
 
       {showCreate && (
-        <CreateUserForm onCreated={() => { setShowCreate(false); fetchUsers(); }} />
+        <CreateUserForm ports={ports} onCreated={() => { setShowCreate(false); fetchUsers(); }} />
       )}
 
       {loading ? (
@@ -118,7 +124,7 @@ export default function AdminUsersPage() {
   );
 }
 
-function CreateUserForm({ onCreated }: { onCreated: () => void }) {
+function CreateUserForm({ ports, onCreated }: { ports: { id: string; name: string }[]; onCreated: () => void }) {
   const { user, isModerator } = useCurrentUser();
   const [form, setForm] = useState({
     email: "",
@@ -202,7 +208,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
               onChange={(e) => setForm((f) => ({ ...f, portId: e.target.value }))}
               className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
             >
-              {PORTS.map((p) => (
+              {ports.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>

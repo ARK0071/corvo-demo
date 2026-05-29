@@ -7,8 +7,10 @@ import {
   registerProfile,
   unregisterProfile,
   isStaticProfile,
+  ensureProfilesLoaded,
 } from "@/data/profiles";
-import { registerPort } from "@/lib/db/tenant-config";
+import { registerPort, unregisterPort } from "@/lib/db/tenant-config";
+import { prisma } from "@/lib/db/client";
 import type { PortProfile } from "@/data/port-profile";
 
 const createEntitySchema = z.object({
@@ -41,8 +43,41 @@ const createEntitySchema = z.object({
 });
 
 export const GET = withRole(["admin"], async () => {
-  const profiles = getAllProfiles();
-  const entities = profiles.map(({ id, profile }) => ({
+  await ensureProfilesLoaded();
+
+  // Merge in-memory profiles with DB-persisted entities
+  const inMemory = getAllProfiles();
+  const inMemoryIds = new Set(inMemory.map(({ id }) => id));
+
+  // Load dynamic entities from DB
+  const dbProfiles = await prisma.portProfile.findMany({
+    select: { slug: true, name: true, entityType: true, classification: true, location: true },
+    orderBy: { name: "asc" },
+  });
+
+  // Re-register DB profiles in memory (in case server restarted)
+  for (const p of dbProfiles) {
+    if (!inMemoryIds.has(p.slug)) {
+      registerPort({ id: p.slug, name: p.name, slug: p.slug });
+      registerProfile(p.slug, {
+        name: p.name,
+        entityType: p.entityType,
+        classification: p.classification || "",
+        location: (p.location as PortProfile["location"]) || { city: "", state: "", stateCode: "", county: "", region: "" },
+        characteristics: { cargoTypes: [], annualTonnage: 0, employeeCount: 0, operatingBudget: 0 },
+        priorities: [],
+        capabilities: [],
+        needs: [],
+        certifications: [],
+        environmentalGoals: [],
+        communityImpact: [],
+      });
+    }
+  }
+
+  // Re-fetch after hydration
+  const allProfiles = getAllProfiles();
+  const entities = allProfiles.map(({ id, profile }) => ({
     id,
     name: profile.name,
     entityType: profile.entityType,
@@ -88,7 +123,34 @@ export const POST = withRole(["admin"], async (request) => {
     communityImpact: profileData.communityImpact,
   };
 
-  // Register in profile system
+  // Persist to database
+  try {
+    await prisma.portProfile.create({
+      data: {
+        slug: id,
+        name: profileData.name,
+        entityType: profileData.entityType,
+        classification: profileData.classification,
+        location: profileData.location as object,
+        characteristics: profileData.characteristics as object,
+        priorities: profileData.priorities,
+        capabilities: profileData.capabilities,
+        needs: profileData.needs,
+        certifications: profileData.certifications,
+        environmentalGoals: profileData.environmentalGoals,
+        communityImpact: profileData.communityImpact,
+      },
+    });
+  } catch (dbErr) {
+    // slug unique constraint => already exists in DB
+    if ((dbErr as { code?: string }).code === "P2002") {
+      return NextResponse.json({ error: "An entity with this ID already exists in the database" }, { status: 409 });
+    }
+    console.error("[entities] DB persist error:", dbErr);
+    // Continue — in-memory registration still works
+  }
+
+  // Register in-memory profile system
   registerProfile(id, profile);
 
   // Register in tenant config (port system)
@@ -113,6 +175,15 @@ export const DELETE = withRole(["admin"], async (request) => {
   }
 
   const removed = unregisterProfile(id);
+  unregisterPort(id);
+
+  // Also remove from DB
+  try {
+    await prisma.portProfile.deleteMany({ where: { slug: id } });
+  } catch {
+    // Ignore DB errors — might not have been persisted
+  }
+
   if (!removed) {
     return NextResponse.json({ error: "Entity not found" }, { status: 404 });
   }

@@ -3,7 +3,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import type { Environment } from "@/lib/db/tenant-config";
-import { AVAILABLE_PORTS, EMBEDDING_DIMENSIONS, EMBEDDING_SERVICE } from "@/lib/db/tenant-config";
+import { EMBEDDING_DIMENSIONS, EMBEDDING_SERVICE } from "@/lib/db/tenant-config";
+
+type PortEntry = { id: string; name: string; slug: string };
 
 export interface TenantContextValue {
   environment: Environment;
@@ -14,8 +16,9 @@ export interface TenantContextValue {
   embeddingService: "openai" | "ec2";
   setEnvironment: (env: Environment) => void;
   setPort: (portId: string) => void;
-  availablePorts: typeof AVAILABLE_PORTS;
+  availablePorts: PortEntry[];
   isLoading: boolean;
+  refreshPorts: () => void;
 }
 
 const TenantContext = createContext<TenantContextValue | null>(null);
@@ -46,9 +49,23 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession();
   const [config, setConfig] = useState<StoredConfig>(DEFAULT_CONFIG);
   const [isLoading, setIsLoading] = useState(true);
+  const [ports, setPorts] = useState<PortEntry[]>([]);
 
   const isAdmin = session?.user?.role === "admin";
   const userPortId = session?.user?.portId;
+
+  // Fetch ports from API (includes DB-persisted dynamic entities)
+  const refreshPorts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/ports");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ports?.length) setPorts(data.ports);
+      }
+    } catch {
+      // Fall back to static ports
+    }
+  }, []);
 
   // Load config from localStorage on mount (for admin env preference)
   useEffect(() => {
@@ -66,21 +83,29 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       // Ignore parse errors, use defaults
     }
     setIsLoading(false);
-  }, []);
+    refreshPorts();
+  }, [refreshPorts]);
 
   // Non-admin users: force port from session assignment
   useEffect(() => {
     if (userPortId && !isAdmin) {
-      const port = AVAILABLE_PORTS.find((p) => p.id === userPortId);
+      const port = ports.find((p) => p.id === userPortId);
       if (port) {
         setConfig((prev) => ({
           ...prev,
           portId: port.id,
           portSlug: port.slug,
         }));
+      } else {
+        // Port might be a dynamic one not yet in the static list — use portId directly
+        setConfig((prev) => ({
+          ...prev,
+          portId: userPortId,
+          portSlug: userPortId,
+        }));
       }
     }
-  }, [userPortId, isAdmin]);
+  }, [userPortId, isAdmin, ports]);
 
   // Save config to localStorage and cookies when it changes
   useEffect(() => {
@@ -97,7 +122,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
 
   const setPort = useCallback((portId: string) => {
     if (!isAdmin) return; // Only admins can switch ports
-    const port = AVAILABLE_PORTS.find((p) => p.id === portId);
+    const port = ports.find((p) => p.id === portId);
     if (port) {
       setConfig((prev) => ({
         ...prev,
@@ -105,22 +130,23 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         portSlug: port.slug,
       }));
     }
-  }, [isAdmin]);
+  }, [isAdmin, ports]);
 
-  const portInfo = AVAILABLE_PORTS.find((p) => p.id === config.portId) || AVAILABLE_PORTS[0];
+  const portInfo = ports.find((p) => p.id === config.portId) || ports[0];
 
   const value: TenantContextValue = useMemo(() => ({
     environment: config.environment,
     portId: config.portId,
     portSlug: config.portSlug,
-    portName: portInfo.name,
+    portName: portInfo?.name || config.portId,
     embeddingDimensions: EMBEDDING_DIMENSIONS[config.environment],
     embeddingService: EMBEDDING_SERVICE[config.environment],
     setEnvironment,
     setPort,
-    availablePorts: AVAILABLE_PORTS,
+    availablePorts: ports,
     isLoading,
-  }), [config, portInfo, setEnvironment, setPort, isLoading]);
+    refreshPorts,
+  }), [config, portInfo, setEnvironment, setPort, ports, isLoading, refreshPorts]);
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>;
 }

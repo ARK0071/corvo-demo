@@ -2,7 +2,8 @@
  * Port Profile Registry
  *
  * Central registry for all client port profiles.
- * Supports both static (built-in) and dynamic (runtime-added) profiles.
+ * Profiles are loaded from the database via ensureProfilesLoaded().
+ * Static profiles are kept as fallbacks until DB is available.
  */
 
 import type { PortProfile } from "../port-profile";
@@ -11,7 +12,7 @@ import { portOfLosAngelesProfile } from "./port-of-los-angeles";
 import { lawaProfile } from "./lawa";
 import { louisianaGatewayPortProfile } from "./louisiana-gateway-port";
 
-// Static (built-in) profiles
+// Static (built-in) profiles — used as fallback until DB is loaded
 const STATIC_PROFILES: Record<string, PortProfile> = {
   "port-freeport": portFreeportProfile,
   "louisiana-gateway-port": louisianaGatewayPortProfile,
@@ -19,31 +20,63 @@ const STATIC_PROFILES: Record<string, PortProfile> = {
   "lawa": lawaProfile,
 };
 
-// Dynamic profiles added at runtime via admin
+// Dynamic profiles added at runtime (from DB or admin)
 const dynamicProfiles: Record<string, PortProfile> = {};
 
-// Combined view of all profiles
-export const AVAILABLE_PROFILES: Record<string, PortProfile> = new Proxy(
-  {},
-  {
-    get(_target, prop: string) {
-      return STATIC_PROFILES[prop] ?? dynamicProfiles[prop];
-    },
-    has(_target, prop: string) {
-      return prop in STATIC_PROFILES || prop in dynamicProfiles;
-    },
-    ownKeys() {
-      return [...Object.keys(STATIC_PROFILES), ...Object.keys(dynamicProfiles)];
-    },
-    getOwnPropertyDescriptor(_target, prop: string) {
-      const value = STATIC_PROFILES[prop] ?? dynamicProfiles[prop];
-      if (value) {
-        return { configurable: true, enumerable: true, value };
-      }
-      return undefined;
-    },
+// Track which profile IDs came from DB (vs admin runtime)
+const dbProfileIds = new Set<string>();
+
+// Whether DB profiles have been loaded
+let dbLoaded = false;
+
+/**
+ * Load all profiles from the database into the in-memory registry.
+ * Call this from API routes before using getProfile() to ensure
+ * DB-persisted entities (like admin-created ones) are available.
+ */
+export async function ensureProfilesLoaded(): Promise<void> {
+  if (dbLoaded) return;
+  // Only run on server side
+  if (typeof window !== "undefined") return;
+
+  try {
+    // Dynamic import to avoid bundling prisma client-side
+    const { prisma } = await import("@/lib/db/client");
+    const dbRecords = await prisma.portProfile.findMany({
+      orderBy: { name: "asc" },
+    });
+
+    for (const p of dbRecords) {
+      const profile: PortProfile = {
+        name: p.name,
+        entityType: p.entityType,
+        classification: p.classification || "",
+        location: (p.location as PortProfile["location"]) || {
+          city: "",
+          state: "",
+          stateCode: "",
+          county: "",
+          region: "",
+        },
+        characteristics: (p.characteristics as PortProfile["characteristics"]) || {
+          cargoTypes: [],
+        },
+        priorities: (p.priorities as string[]) || [],
+        capabilities: (p.capabilities as string[]) || [],
+        needs: (p.needs as string[]) || [],
+        certifications: (p.certifications as string[]) || [],
+        environmentalGoals: (p.environmentalGoals as string[]) || [],
+        communityImpact: (p.communityImpact as string[]) || [],
+      };
+      dynamicProfiles[p.slug] = profile;
+      dbProfileIds.add(p.slug);
+    }
+
+    dbLoaded = true;
+  } catch {
+    // DB unavailable — rely on static profiles
   }
-);
+}
 
 // Add a profile at runtime
 export function registerProfile(id: string, profile: PortProfile): void {
@@ -52,27 +85,29 @@ export function registerProfile(id: string, profile: PortProfile): void {
 
 // Remove a dynamic profile
 export function unregisterProfile(id: string): boolean {
-  if (id in STATIC_PROFILES) return false; // Cannot remove built-in profiles
+  if (id in STATIC_PROFILES && !dbProfileIds.has(id)) return false;
   if (id in dynamicProfiles) {
     delete dynamicProfiles[id];
+    dbProfileIds.delete(id);
     return true;
   }
   return false;
 }
 
-// Check if a profile is built-in
+// Check if a profile is built-in (exists in static data and NOT overridden by DB)
 export function isStaticProfile(id: string): boolean {
-  return id in STATIC_PROFILES;
+  return id in STATIC_PROFILES && !dbProfileIds.has(id);
 }
 
 // Get profile by ID
 export function getProfile(profileId: string): PortProfile | undefined {
-  return STATIC_PROFILES[profileId] ?? dynamicProfiles[profileId];
+  return dynamicProfiles[profileId] ?? STATIC_PROFILES[profileId];
 }
 
 // Get all profile IDs
 export function getAllProfileIds(): string[] {
-  return [...Object.keys(STATIC_PROFILES), ...Object.keys(dynamicProfiles)];
+  const ids = new Set([...Object.keys(STATIC_PROFILES), ...Object.keys(dynamicProfiles)]);
+  return Array.from(ids);
 }
 
 // Get all profiles
@@ -88,5 +123,5 @@ export const DEFAULT_PROFILE_ID = "port-freeport";
 
 // Get default profile
 export function getDefaultProfile(): PortProfile {
-  return STATIC_PROFILES[DEFAULT_PROFILE_ID];
+  return getProfile(DEFAULT_PROFILE_ID) ?? STATIC_PROFILES[DEFAULT_PROFILE_ID];
 }

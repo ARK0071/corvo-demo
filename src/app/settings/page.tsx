@@ -78,7 +78,8 @@ export default function SettingsPage() {
                         )}
                       </div>
                       <span className="text-xs text-muted-foreground">
-                        {p.classification} &middot; {p.location.city}, {p.location.stateCode}
+                        {p.classification || p.entityType}
+                        {p.location?.city ? ` \u00b7 ${p.location.city}, ${p.location.stateCode}` : ""}
                       </span>
                     </div>
                     <span className="text-xs text-muted-foreground">{p.entityType}</span>
@@ -195,14 +196,18 @@ export default function SettingsPage() {
                 <span className="text-sm">Entity</span>
                 <span className="text-sm text-muted-foreground">{profile.name}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Location</span>
-                <span className="text-sm text-muted-foreground">{profile.location.city}, {profile.location.state}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm">Region</span>
-                <span className="text-sm text-muted-foreground">{profile.location.region}</span>
-              </div>
+              {profile.location?.city && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Location</span>
+                  <span className="text-sm text-muted-foreground">{profile.location.city}, {profile.location.state}</span>
+                </div>
+              )}
+              {profile.location?.region && (
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Region</span>
+                  <span className="text-sm text-muted-foreground">{profile.location.region}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-sm">Operating Budget</span>
                 <span className="text-sm text-muted-foreground">

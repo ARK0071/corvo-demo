@@ -9,7 +9,7 @@ const allAdminNav = [
   { title: "Dashboard", href: "/admin", icon: LayoutDashboard, moderatorVisible: true },
   { title: "Entities", href: "/admin/entities", icon: Building2, moderatorVisible: false },
   { title: "Users", href: "/admin/users", icon: Users, moderatorVisible: true },
-  { title: "Audit Logs", href: "/admin/audit-logs", icon: FileText, moderatorVisible: false },
+  { title: "Audit Logs", href: "/admin/audit-logs", icon: FileText, moderatorVisible: true },
   { title: "API Keys", href: "/admin/api-keys", icon: Key, moderatorVisible: false },
   { title: "System", href: "/admin/system", icon: Settings, moderatorVisible: false },
 ];

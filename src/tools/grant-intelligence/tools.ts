@@ -9,7 +9,7 @@ import {
 } from "@/data/grant-pipeline";
 import { fetchGrantDetails, type DiscoveredGrant } from "@/lib/grants-gov";
 import { scoreGrantsServer } from "@/lib/score-grants-server";
-import { getProfile, getDefaultProfile } from "@/data/profiles";
+import { getProfile, getDefaultProfile, ensureProfilesLoaded } from "@/data/profiles";
 import { getRequestProfileId } from "@/lib/profile-request-context";
 import type { GrantScore } from "@/data/grant-scoring";
 import { getAllProjects, getProjectById } from "@/data/projects";
@@ -24,7 +24,8 @@ function scoreCacheKey(grantId: string): string {
   return `${getRequestProfileId()}:${grantId}`;
 }
 
-function activeProfile() {
+async function activeProfile() {
+  await ensureProfilesLoaded();
   return getProfile(getRequestProfileId()) ?? getDefaultProfile();
 }
 
@@ -221,7 +222,7 @@ export async function calculateFinancialScenario(params: {
   const bondInterest = totalBondCost - grantAmount;
 
   // Operating budget affordability
-  const operatingBudget = activeProfile().characteristics.operatingBudget || 50_000_000;
+  const operatingBudget = (await activeProfile()).characteristics.operatingBudget || 50_000_000;
   const matchAsPercentOfBudget = (localMatch / operatingBudget) * 100;
 
   return {
@@ -661,7 +662,7 @@ export async function buildGrantApplication(params: {
   portName?: string;
   projectId?: string;
 }): Promise<string> {
-  const profile = activeProfile();
+  const profile = await activeProfile();
   const portName = params.portName ?? profile.name;
 
   // Fetch grant details

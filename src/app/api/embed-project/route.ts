@@ -10,7 +10,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { embedText, buildProjectEmbeddingText } from "@/lib/embeddings";
 import type { Project } from "@/data/projects";
-import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { getProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "@/data/profiles";
 
 export const maxDuration = 30;
 
@@ -18,6 +18,7 @@ const EMBEDDINGS_DIR = path.join(process.cwd(), "src/data/embeddings");
 
 export async function POST(req: Request) {
   try {
+    await ensureProfilesLoaded();
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json(
         { error: "OPENAI_API_KEY is not configured. Run npm run generate-embeddings after adding your key." },

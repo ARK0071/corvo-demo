@@ -41,7 +41,7 @@ export interface PortProfile {
 }
 
 // Re-export profile registry
-export { AVAILABLE_PROFILES, getProfile, getAllProfiles, getAllProfileIds, getDefaultProfile, DEFAULT_PROFILE_ID } from "./profiles";
+export { getProfile, getAllProfiles, getAllProfileIds, getDefaultProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "./profiles";
 
 // Export default profile (for backward compatibility)
 export { getDefaultProfile as getCurrentProfile };

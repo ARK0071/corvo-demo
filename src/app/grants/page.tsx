@@ -52,11 +52,9 @@ import { useProfile } from "@/components/profile-provider";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
 import {
-  getAllProjects as getInMemoryProjects,
   createProject as createProjectLocal,
   updateProject as updateProjectLocal,
   deleteProject as deleteProjectLocal,
-  initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
 import { ProjectForm } from "@/components/projects/project-form";
@@ -232,12 +230,9 @@ function UnifiedGrantsDashboard() {
       });
       if (!res.ok) throw new Error("Failed to fetch projects");
       const data = await res.json();
-      if (data.projects && data.projects.length > 0) {
-        setProjects(data.projects);
-        setProjectsDataSource("db");
-        return true;
-      }
-      return false;
+      setProjects(data.projects || []);
+      setProjectsDataSource("db");
+      return true;
     } catch (error) {
       console.error("[Grants] Projects DB fetch error:", error);
       return false;
@@ -260,13 +255,8 @@ function UnifiedGrantsDashboard() {
       }
       setPipelineLoading(false);
 
-      // Load projects
-      const projectsSuccess = await fetchProjectsFromDB();
-      if (!projectsSuccess) {
-        initializeProjectsForProfile(profileId);
-        setProjects(getInMemoryProjects());
-        setProjectsDataSource("memory");
-      }
+      // Load projects from DB
+      await fetchProjectsFromDB();
       setProjectsLoading(false);
     };
 
@@ -393,10 +383,8 @@ function UnifiedGrantsDashboard() {
     });
   }, [slGrants, slScores, slSortBy, slSearch]);
 
-  // Initialize projects for the active profile; on profile switch, clear scores and re-score current results
+  // On profile switch, clear scores and re-score current results
   useEffect(() => {
-    initializeProjectsForProfile(profileId);
-    setProjects([...getAllProjects()]);
     const switched = prevProfileIdRef.current !== null && prevProfileIdRef.current !== profileId;
     prevProfileIdRef.current = profileId;
     if (switched) {

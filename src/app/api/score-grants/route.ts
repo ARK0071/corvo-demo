@@ -6,13 +6,14 @@
 
 import { NextResponse } from "next/server";
 import { scoreGrantsServer } from "@/lib/score-grants-server";
-import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { getProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "@/data/profiles";
 import { runWithProfileIdAsync } from "@/lib/profile-request-context";
 
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
+    await ensureProfilesLoaded();
     const body = await req.json();
     const grants = Array.isArray(body.grants) ? body.grants : [];
     const rawId = body.profileId;

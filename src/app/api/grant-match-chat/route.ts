@@ -2,7 +2,7 @@ import { streamText, stepCountIs, convertToModelMessages } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { GRANT_MATCH_SYSTEM_PROMPT } from "@/lib/grant-match-system-prompt";
 import { grantIntelligenceTools } from "@/tools/grant-intelligence/definitions";
-import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { getProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "@/data/profiles";
 import { initializeProjectsForProfile } from "@/data/projects";
 import { runWithProfileIdAsync } from "@/lib/profile-request-context";
 
@@ -62,6 +62,8 @@ export async function POST(req: Request) {
   }
 
   try {
+    await ensureProfilesLoaded();
+
     const body = await req.json();
     const { messages } = body;
 

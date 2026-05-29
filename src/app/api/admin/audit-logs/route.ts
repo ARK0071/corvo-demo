@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withRole } from "@/lib/auth/api-guard";
 import { prisma } from "@/lib/db/client";
 
-export const GET = withRole(["admin"], async (request) => {
+export const GET = withRole(["admin", "moderator"], async (request, { user }) => {
   const { searchParams } = new URL(request.url);
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const limit = Math.min(100, parseInt(searchParams.get("limit") || "50"));
@@ -13,7 +13,13 @@ export const GET = withRole(["admin"], async (request) => {
   const where: Record<string, unknown> = {};
   if (action) where.action = { contains: action };
   if (userId) where.userId = userId;
-  if (portId) where.portId = portId;
+
+  // Moderators can only see audit logs for their own entity
+  if (user.role === "moderator") {
+    where.portId = user.portId;
+  } else if (portId) {
+    where.portId = portId;
+  }
 
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({

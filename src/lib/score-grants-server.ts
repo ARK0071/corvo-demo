@@ -26,7 +26,7 @@ import {
   type TopProjectMatch,
   type TopDomainMatch,
 } from "@/data/grant-scoring";
-import { getProfile, DEFAULT_PROFILE_ID } from "@/data/profiles";
+import { getProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "@/data/profiles";
 import { initializeProjectsForProfile } from "@/data/projects";
 import domainEmbeddingsData from "@/data/embeddings/funding-domain-embeddings.json";
 import { getTenantConfig } from "@/lib/db/tenant-config";
@@ -188,6 +188,7 @@ export async function scoreGrantsServer(
 ): Promise<GrantScore[]> {
   if (grants.length === 0) return [];
 
+  await ensureProfilesLoaded();
   const resolvedProfileId = getProfile(profileId) ? profileId : DEFAULT_PROFILE_ID;
   initializeProjectsForProfile(resolvedProfileId);
 

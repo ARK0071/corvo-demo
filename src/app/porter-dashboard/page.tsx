@@ -22,8 +22,6 @@ import {
   type PipelineGrant,
 } from "@/data/grant-pipeline";
 import {
-  getAllProjects,
-  initializeProjectsForProfile,
   type Project,
 } from "@/data/projects";
 import { getAwardStats as getInMemoryAwardStats } from "@/data/awards";
@@ -103,9 +101,11 @@ export default function PorterDashboardPage() {
       }
       setPipelineLoading(false);
 
-      // Load other data
-      initializeProjectsForProfile(profileId);
-      setProjects(getAllProjects());
+      // Load projects from DB
+      fetch("/api/projects", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setProjects(data.projects || []))
+        .catch(() => setProjects([]));
 
       // Fetch award stats from DB, fallback to in-memory
       fetch("/api/awards/stats", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
