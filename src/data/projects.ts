@@ -119,10 +119,8 @@ export function initializeProjectsForProfile(profileId: string): void {
     louisianaGatewayProjects.forEach((p) => createProject(p));
   } else if (profileId === "port-freeport") {
     initializePortFreeportDefaults();
-  } else {
-    // Demo fallback: Port of LA and other profiles reuse Freeport project set until dedicated data exists
-    initializePortFreeportDefaults();
   }
+  // Other profiles (e.g. DB-created entities) start with no projects
 }
 
 /**

@@ -168,26 +168,13 @@ export async function getActiveGrants(
 export async function upsertGrant(grant: DiscoveredGrant): Promise<DiscoveredGrant> {
   const portId = getPortId();
   const data = toPrismaCreate(grant, portId);
+  const { id: _id, portId: _portId, ...updateData } = data;
 
-  // Check if exists for this port
-  const existing = await prisma.demoDiscoveredGrant.findFirst({
-    where: { id: grant.id, portId },
+  const result = await prisma.demoDiscoveredGrant.upsert({
+    where: { id_portId: { id: grant.id, portId } },
+    create: data,
+    update: { ...updateData, lastSyncedAt: new Date() },
   });
-
-  let result: PrismaGrant;
-  if (existing) {
-    result = await prisma.demoDiscoveredGrant.update({
-      where: { id_portId: { id: grant.id, portId } },
-      data: {
-        ...data,
-        id: undefined,
-        portId: undefined,
-        lastSyncedAt: new Date(),
-      },
-    });
-  } else {
-    result = await prisma.demoDiscoveredGrant.create({ data });
-  }
 
   return toDiscoveredGrant(result);
 }
@@ -202,25 +189,22 @@ export async function upsertGrants(
 
   for (const grant of grants) {
     const data = toPrismaCreate(grant, portId);
+    const { id: _id, portId: _portId, ...updateData } = data;
 
     const existing = await prisma.demoDiscoveredGrant.findFirst({
       where: { id: grant.id, portId },
       select: { id: true },
     });
 
+    await prisma.demoDiscoveredGrant.upsert({
+      where: { id_portId: { id: grant.id, portId } },
+      create: data,
+      update: { ...updateData, lastSyncedAt: new Date() },
+    });
+
     if (existing) {
-      await prisma.demoDiscoveredGrant.update({
-        where: { id_portId: { id: grant.id, portId } },
-        data: {
-          ...data,
-          id: undefined,
-          portId: undefined,
-          lastSyncedAt: new Date(),
-        },
-      });
       updated++;
     } else {
-      await prisma.demoDiscoveredGrant.create({ data });
       created++;
     }
   }
