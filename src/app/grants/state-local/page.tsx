@@ -16,7 +16,6 @@ import {
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { GrantScore } from "@/data/grant-scoring";
 import { useProfile } from "@/components/profile-provider";
-import { initializeProjectsForProfile } from "@/data/projects";
 
 function formatCurrency(n: number) {
   if (n >= 1_000_000_000) return `$${(n / 1_000_000_000).toFixed(1)}B`;
@@ -104,7 +103,6 @@ function StateLocalGrantsInner() {
     setError(null);
     setMissingFile(false);
     setExpectedPath(null);
-    initializeProjectsForProfile(profileId);
     try {
       const res = await fetch(`/api/state-local-grants?profileId=${encodeURIComponent(profileId)}`);
       const data = await res.json();

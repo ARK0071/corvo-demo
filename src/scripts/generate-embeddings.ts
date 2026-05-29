@@ -14,7 +14,7 @@ import * as fs from "fs";
 import { config } from "dotenv";
 import { SPEND_CATEGORIES } from "@/data/spend-mapping";
 import { initializeProjectsForProfile, getAllProjects } from "@/data/projects";
-import { getProfile } from "@/data/profiles";
+import { getProfile, ensureProfilesLoaded } from "@/data/profiles";
 import {
   embedText,
   embedTexts,
@@ -36,32 +36,46 @@ async function writeProfileEmbeddings(profileId: string) {
     return;
   }
 
-  initializeProjectsForProfile(profileId);
-  const projects = getAllProjects();
-  if (projects.length === 0) {
-    console.warn(`   Skip ${profileId}: no projects after initialize`);
-    return;
-  }
-
-  const projectTexts = projects.map((p) => buildProjectEmbeddingText(p));
-  const projectVectors = await embedTexts(projectTexts);
-  const projectEmbeddings: Record<string, { name: string; text: string; vector: number[] }> = {};
-  for (let i = 0; i < projects.length; i++) {
-    const p = projects[i];
-    projectEmbeddings[p.id] = {
-      name: p.name,
-      text: projectTexts[i],
-      vector: projectVectors[i] ?? [],
-    };
-  }
-
   const profileDir = path.join(EMBEDDINGS_DIR, "profiles", profileId);
   fs.mkdirSync(profileDir, { recursive: true });
-  const projectPath = path.join(profileDir, "project-embeddings.json");
-  fs.writeFileSync(projectPath, JSON.stringify(projectEmbeddings, null, 2));
-  console.log(`   Wrote ${projectPath} (${projects.length} projects)`);
 
+  // Generate project embeddings (from in-memory project data, if any)
+  initializeProjectsForProfile(profileId);
+  const projects = getAllProjects();
+  if (projects.length > 0) {
+    const projectTexts = projects.map((p) => buildProjectEmbeddingText(p));
+    const projectVectors = await embedTexts(projectTexts);
+    const projectEmbeddings: Record<string, { name: string; text: string; vector: number[] }> = {};
+    for (let i = 0; i < projects.length; i++) {
+      const p = projects[i];
+      projectEmbeddings[p.id] = {
+        name: p.name,
+        text: projectTexts[i],
+        vector: projectVectors[i] ?? [],
+      };
+    }
+
+    const projectPath = path.join(profileDir, "project-embeddings.json");
+    fs.writeFileSync(projectPath, JSON.stringify(projectEmbeddings, null, 2));
+    console.log(`   Wrote ${projectPath} (${projects.length} projects)`);
+
+    if (profileId === "port-freeport") {
+      fs.writeFileSync(
+        path.join(EMBEDDINGS_DIR, "project-embeddings.json"),
+        JSON.stringify(projectEmbeddings, null, 2)
+      );
+      console.log("   Updated legacy project-embeddings.json (port-freeport)");
+    }
+  } else {
+    console.log(`   No in-memory projects for ${profileId}, skipping project embeddings`);
+  }
+
+  // Always generate profile embedding (uses profile priorities/needs/capabilities)
   const profileText = buildProfileEmbeddingText(profile);
+  if (!profileText.trim()) {
+    console.warn(`   Skip profile embedding for ${profileId}: no profile text (empty priorities/needs/capabilities)`);
+    return;
+  }
   const profileVector = await embedText(profileText);
   const profileEmbedding = {
     profileId,
@@ -74,14 +88,10 @@ async function writeProfileEmbeddings(profileId: string) {
 
   if (profileId === "port-freeport") {
     fs.writeFileSync(
-      path.join(EMBEDDINGS_DIR, "project-embeddings.json"),
-      JSON.stringify(projectEmbeddings, null, 2)
-    );
-    fs.writeFileSync(
       path.join(EMBEDDINGS_DIR, "profile-embedding.json"),
       JSON.stringify(profileEmbedding, null, 2)
     );
-    console.log("   Updated legacy project-embeddings.json + profile-embedding.json (port-freeport)");
+    console.log("   Updated legacy profile-embedding.json (port-freeport)");
   }
 }
 
@@ -93,6 +103,9 @@ async function main() {
   }
 
   fs.mkdirSync(EMBEDDINGS_DIR, { recursive: true });
+
+  // Load DB-persisted profiles (e.g. admin-created entities)
+  await ensureProfilesLoaded();
 
   const argProfile = process.argv[2];
   const profileIds = argProfile

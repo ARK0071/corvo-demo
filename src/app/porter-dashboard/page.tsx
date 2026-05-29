@@ -17,15 +17,8 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  getAllPipelineGrants as getInMemoryPipelineGrants,
-  type PipelineGrant,
-} from "@/data/grant-pipeline";
-import {
-  type Project,
-} from "@/data/projects";
-import { getAwardStats as getInMemoryAwardStats } from "@/data/awards";
-import { getReportingStats as getInMemoryReportingStats } from "@/data/reporting";
+import type { PipelineGrant } from "@/data/grant-pipeline";
+import type { Project } from "@/data/projects";
 import { useProfile } from "@/components/profile-provider";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 
@@ -68,8 +61,8 @@ export default function PorterDashboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [newsLoading, setNewsLoading] = useState(true);
-  const [awardStats, setAwardStats] = useState<ReturnType<typeof getInMemoryAwardStats> | null>(null);
-  const [reportingStats, setReportingStats] = useState<ReturnType<typeof getInMemoryReportingStats> | null>(null);
+  const [awardStats, setAwardStats] = useState<{ activeCount: number; totalAwarded: number } | null>(null);
+  const [reportingStats, setReportingStats] = useState<{ dueNext30Days: number } | null>(null);
   const [dbAwards, setDbAwards] = useState<{ id: string; title: string; program: string; totalAmount: number; budgetCategories: { name: string; ceiling: number; spent: number }[]; status: string }[]>([]);
   const [upcomingReports, setUpcomingReports] = useState<{ id: string; awardTitle: string; program: string; type: string; dueDate: string; status: string }[]>([]);
 
@@ -93,12 +86,9 @@ export default function PorterDashboardPage() {
     if (tenant.isLoading) return;
 
     const loadData = async () => {
-      // Load pipeline from DB, fallback to in-memory
+      // Load pipeline from DB
       setPipelineLoading(true);
-      const pipelineSuccess = await fetchPipelineFromDB();
-      if (!pipelineSuccess) {
-        setPipeline(getInMemoryPipelineGrants());
-      }
+      await fetchPipelineFromDB();
       setPipelineLoading(false);
 
       // Load projects from DB
@@ -107,17 +97,17 @@ export default function PorterDashboardPage() {
         .then((data) => setProjects(data.projects || []))
         .catch(() => setProjects([]));
 
-      // Fetch award stats from DB, fallback to in-memory
+      // Fetch award stats from DB
       fetch("/api/awards/stats", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((data) => setAwardStats(data))
-        .catch(() => setAwardStats(getInMemoryAwardStats()));
+        .catch(() => setAwardStats(null));
 
-      // Fetch reporting stats from DB, fallback to in-memory
+      // Fetch reporting stats from DB
       fetch("/api/reports?stats=true", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
         .then((data) => setReportingStats(data))
-        .catch(() => setReportingStats(getInMemoryReportingStats()));
+        .catch(() => setReportingStats(null));
 
       // Fetch awards list for mini-table
       fetch("/api/awards", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })

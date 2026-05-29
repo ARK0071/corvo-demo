@@ -12,6 +12,9 @@ import {
 import { registerPort, unregisterPort } from "@/lib/db/tenant-config";
 import { prisma } from "@/lib/db/client";
 import type { PortProfile } from "@/data/port-profile";
+import { embedText, buildProfileEmbeddingText } from "@/lib/embeddings";
+import * as fs from "fs";
+import * as path from "path";
 
 const createEntitySchema = z.object({
   id: z
@@ -155,6 +158,26 @@ export const POST = withRole(["admin"], async (request) => {
 
   // Register in tenant config (port system)
   registerPort({ id, name: profileData.name, slug: id });
+
+  // Generate profile embedding in background (non-blocking)
+  if (process.env.OPENAI_API_KEY) {
+    const embeddingsDir = path.join(process.cwd(), "src/data/embeddings/profiles", id);
+    const profileText = buildProfileEmbeddingText(profile);
+    if (profileText.trim()) {
+      embedText(profileText)
+        .then((vector) => {
+          fs.mkdirSync(embeddingsDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(embeddingsDir, "profile-embedding.json"),
+            JSON.stringify({ profileId: id, text: profileText, vector }, null, 2)
+          );
+          console.log(`[entities] Generated profile embedding for ${id}`);
+        })
+        .catch((err) => {
+          console.error(`[entities] Failed to generate profile embedding for ${id}:`, err);
+        });
+    }
+  }
 
   return NextResponse.json({ id, profile }, { status: 201 });
 });

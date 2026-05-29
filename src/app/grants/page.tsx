@@ -32,15 +32,6 @@ import {
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
-import {
-  getAllPipelineGrants as getInMemoryPipelineGrants,
-  addToPipeline as addToPipelineLocal,
-  moveGrantToStage as moveGrantToStageLocal,
-  updateGrantNotes as updateGrantNotesLocal,
-  removeFromPipeline as removeFromPipelineLocal,
-  getStageCount as getStageCountLocal,
-  isInPipeline as isInPipelineLocal,
-} from "@/data/grant-pipeline";
 import { VendorSearch } from "@/components/vendor-search/vendor-search";
 import {
   GrantDiscoveryFilters,
@@ -51,12 +42,7 @@ import { getEmbeddingSimilarityForProject, type GrantScore } from "@/data/grant-
 import { useProfile } from "@/components/profile-provider";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
 import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-chat";
-import {
-  createProject as createProjectLocal,
-  updateProject as updateProjectLocal,
-  deleteProject as deleteProjectLocal,
-  type Project,
-} from "@/data/projects";
+import type { Project } from "@/data/projects";
 import { ProjectForm } from "@/components/projects/project-form";
 import { Edit, Trash2, SlidersHorizontal } from "lucide-react";
 import { FUNDING_DOMAINS } from "@/data/funding-domains";
@@ -172,20 +158,18 @@ function UnifiedGrantsDashboard() {
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
 
-  // Pipeline tab state - DB-first with in-memory fallback
+  // Pipeline tab state - always from DB
   const [pipelineGrants, setPipelineGrants] = useState<PipelineGrant[]>([]);
   const [pipelineLoading, setPipelineLoading] = useState(true);
-  const [pipelineDataSource, setPipelineDataSource] = useState<"db" | "memory">("memory");
   const [expandedPipeline, setExpandedPipeline] = useState<Set<string>>(new Set());
   const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const [notesText, setNotesText] = useState("");
 
   // (Vendor search now handled by VendorSearch component)
 
-  // Projects tab state - DB-first with in-memory fallback
+  // Projects tab state - always from DB
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
-  const [projectsDataSource, setProjectsDataSource] = useState<"db" | "memory">("memory");
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
@@ -214,7 +198,6 @@ function UnifiedGrantsDashboard() {
       if (!res.ok) throw new Error("Failed to fetch pipeline");
       const data = await res.json();
       setPipelineGrants(data.grants || []);
-      setPipelineDataSource("db");
       return true;
     } catch (error) {
       console.error("[Grants] Pipeline DB fetch error:", error);
@@ -231,7 +214,6 @@ function UnifiedGrantsDashboard() {
       if (!res.ok) throw new Error("Failed to fetch projects");
       const data = await res.json();
       setProjects(data.projects || []);
-      setProjectsDataSource("db");
       return true;
     } catch (error) {
       console.error("[Grants] Projects DB fetch error:", error);
@@ -248,11 +230,7 @@ function UnifiedGrantsDashboard() {
       setProjectsLoading(true);
 
       // Load pipeline
-      const pipelineSuccess = await fetchPipelineFromDB();
-      if (!pipelineSuccess) {
-        setPipelineGrants(getInMemoryPipelineGrants());
-        setPipelineDataSource("memory");
-      }
+      await fetchPipelineFromDB();
       setPipelineLoading(false);
 
       // Load projects from DB
@@ -263,34 +241,22 @@ function UnifiedGrantsDashboard() {
     loadData();
   }, [tenant.isLoading, tenant.environment, tenant.portId, profileId, fetchPipelineFromDB, fetchProjectsFromDB]);
 
-  // Helper functions that use the appropriate data source
+  // Helper functions
   const isInPipeline = useCallback((grantId: string) => {
-    if (pipelineDataSource === "db") {
-      return pipelineGrants.some(g => g.id === grantId);
-    }
-    return isInPipelineLocal(grantId);
-  }, [pipelineGrants, pipelineDataSource]);
+    return pipelineGrants.some(g => g.id === grantId);
+  }, [pipelineGrants]);
 
   const getStageCount = useCallback((stage: PipelineStage) => {
-    if (pipelineDataSource === "db") {
-      return pipelineGrants.filter(g => g.stage === stage).length;
-    }
-    return getStageCountLocal(stage);
-  }, [pipelineGrants, pipelineDataSource]);
+    return pipelineGrants.filter(g => g.stage === stage).length;
+  }, [pipelineGrants]);
 
   const getAllPipelineGrants = useCallback(() => {
-    if (pipelineDataSource === "db") {
-      return pipelineGrants;
-    }
-    return getInMemoryPipelineGrants();
-  }, [pipelineGrants, pipelineDataSource]);
+    return pipelineGrants;
+  }, [pipelineGrants]);
 
   const getAllProjects = useCallback(() => {
-    if (projectsDataSource === "db") {
-      return projects;
-    }
-    return getInMemoryProjects();
-  }, [projects, projectsDataSource]);
+    return projects;
+  }, [projects]);
 
   // Score grants (embedding + rules) for the active Client Profile
   const scoreGrants = useCallback(async (grants: DiscoveredGrant[]) => {
@@ -594,15 +560,8 @@ function UnifiedGrantsDashboard() {
       notes: "",
     };
 
-    // Optimistic update - update state immediately based on data source
-    if (pipelineDataSource === "db") {
-      // Update React state directly for DB-sourced data
-      setPipelineGrants(prev => [...prev, newPipelineGrant]);
-    } else {
-      // Update in-memory store for memory-sourced data
-      addToPipelineLocal(newPipelineGrant);
-      setPipelineGrants([...getInMemoryPipelineGrants()]);
-    }
+    // Optimistic update
+    setPipelineGrants(prev => [...prev, newPipelineGrant]);
     setActiveTab("pipeline");
 
     // Persist to DB
@@ -667,17 +626,10 @@ function UnifiedGrantsDashboard() {
     if (newIndex >= 0 && newIndex < stages.length) {
       const newStage = stages[newIndex];
 
-      // Optimistic update - update state immediately based on data source
-      if (pipelineDataSource === "db") {
-        // Update React state directly for DB-sourced data
-        setPipelineGrants(prev => prev.map(g =>
-          g.id === grant.id ? { ...g, stage: newStage } : g
-        ));
-      } else {
-        // Update in-memory store for memory-sourced data
-        moveGrantToStageLocal(grant.id, newStage);
-        setPipelineGrants([...getInMemoryPipelineGrants()]);
-      }
+      // Optimistic update
+      setPipelineGrants(prev => prev.map(g =>
+        g.id === grant.id ? { ...g, stage: newStage } : g
+      ));
 
       // Persist to DB
       try {
@@ -710,17 +662,10 @@ function UnifiedGrantsDashboard() {
   async function handleSaveNotes(grantId: string) {
     const savedNotes = notesText;
 
-    // Optimistic update - update state immediately based on data source
-    if (pipelineDataSource === "db") {
-      // Update React state directly for DB-sourced data
-      setPipelineGrants(prev => prev.map(g =>
-        g.id === grantId ? { ...g, notes: savedNotes } : g
-      ));
-    } else {
-      // Update in-memory store for memory-sourced data
-      updateGrantNotesLocal(grantId, savedNotes);
-      setPipelineGrants([...getInMemoryPipelineGrants()]);
-    }
+    // Optimistic update
+    setPipelineGrants(prev => prev.map(g =>
+      g.id === grantId ? { ...g, notes: savedNotes } : g
+    ));
 
     setEditingNotes(null);
     setNotesText("");
@@ -746,15 +691,8 @@ function UnifiedGrantsDashboard() {
 
   // Remove grant from pipeline
   async function handleRemoveFromPipeline(grantId: string) {
-    // Optimistic update - update state immediately based on data source
-    if (pipelineDataSource === "db") {
-      // Update React state directly for DB-sourced data
-      setPipelineGrants(prev => prev.filter(g => g.id !== grantId));
-    } else {
-      // Update in-memory store for memory-sourced data
-      removeFromPipelineLocal(grantId);
-      setPipelineGrants([...getInMemoryPipelineGrants()]);
-    }
+    // Optimistic update
+    setPipelineGrants(prev => prev.filter(g => g.id !== grantId));
 
     // Persist to DB
     try {
@@ -1248,8 +1186,12 @@ function UnifiedGrantsDashboard() {
                   // If we never scored it (e.g. hard-negative filtered out), don't show it
                   if (!score) return false;
 
-                  // When embeddings are available, exclude grants with 0 profile alignment
-                  if (score.embeddingScoresAvailable && score.profileAlignmentScore <= 0) {
+                  // When embeddings are available, exclude grants with no meaningful
+                  // embedding signal at all (profile, project, AND domain all zero)
+                  if (score.embeddingScoresAvailable &&
+                    score.profileAlignmentScore <= 0 &&
+                    score.projectSimilarityScore <= 0 &&
+                    score.fundingDomainSimilarityScore <= 0) {
                     return false;
                   }
 
@@ -2077,8 +2019,7 @@ function UnifiedGrantsDashboard() {
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 if (confirm(`Delete project "${project.name}"?`)) {
-                                  // Update local state immediately (filter from current state)
-                                  deleteProjectLocal(project.id);
+                                  // Optimistic update
                                   setProjects((prev) => prev.filter((p) => p.id !== project.id));
 
                                   // Persist to DB in background
@@ -2223,8 +2164,7 @@ function UnifiedGrantsDashboard() {
                 project={editingProject}
                 onSave={async (projectData) => {
                   if (editingProject) {
-                    // Update existing project in local state
-                    updateProjectLocal(editingProject.id, projectData);
+                    // Optimistic update
                     setProjects((prev) =>
                       prev.map((p) =>
                         p.id === editingProject.id ? { ...p, ...projectData } : p
@@ -2242,10 +2182,8 @@ function UnifiedGrantsDashboard() {
                       console.error("[Projects] Failed to persist update:", error);
                     }
                   } else {
-                    // Create new project
-                    const created = createProjectLocal(projectData);
-
-                    // Add to current projects state (preserving DB-loaded projects)
+                    // Create new project — optimistic with temp ID
+                    const created = { ...projectData, id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` } as Project;
                     setProjects((prev) => [...prev, created]);
 
                     // Persist to DB and generate embedding in background

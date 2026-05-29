@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import type { PortProfile } from "@/data/port-profile";
 import { getAllProfiles, DEFAULT_PROFILE_ID, getDefaultProfile } from "@/data/profiles";
 
@@ -25,6 +26,11 @@ export function useProfile() {
 }
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
+  const { data: session, status: sessionStatus } = useSession();
+  const userPortId = session?.user?.portId;
+  const userRole = session?.user?.role;
+  const isAdmin = userRole === "admin";
+
   const [profileId, setProfileIdState] = useState(DEFAULT_PROFILE_ID);
   // Start with static profiles as fallback, then load from API
   const [allProfiles, setAllProfiles] = useState<Array<{ id: string; profile: PortProfile }>>(
@@ -52,15 +58,27 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     fetchProfiles();
   }, [fetchProfiles]);
 
-  // Restore stored profile ID from localStorage
+  // Set profile based on user's entity (portId) from session.
+  // Admins can override via localStorage; non-admins are always locked to their portId.
   useEffect(() => {
-    const stored = localStorage.getItem("corvo-profile-id");
-    if (stored) {
-      setProfileIdState(stored);
+    if (sessionStatus === "loading") return;
+
+    if (userPortId && !isAdmin) {
+      // Non-admin: always use their assigned entity
+      setProfileIdState(userPortId);
+    } else if (isAdmin) {
+      // Admin: restore from localStorage, or fall back to their portId
+      const stored = localStorage.getItem("corvo-profile-id");
+      if (stored) {
+        setProfileIdState(stored);
+      } else if (userPortId) {
+        setProfileIdState(userPortId);
+      }
     }
-  }, []);
+  }, [sessionStatus, userPortId, isAdmin]);
 
   function setProfileId(id: string) {
+    if (!isAdmin) return; // Non-admins cannot switch profiles
     const resolved = allProfiles.find((p) => p.id === id);
     if (resolved) {
       setProfileIdState(id);

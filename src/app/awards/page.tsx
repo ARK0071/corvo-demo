@@ -174,7 +174,6 @@ export default function AwardsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [dataSource, setDataSource] = useState<"db" | "memory">("memory");
   const [allExpenses, setAllExpenses] = useState<Expense[]>([]);
 
   // Fetch awards from the database API
@@ -194,7 +193,6 @@ export default function AwardsPage() {
       const data = await res.json();
       if (data.awards && data.awards.length > 0) {
         setAwards(data.awards);
-        setDataSource("db");
         setLastSynced(new Date());
         return true;
       }
@@ -215,7 +213,6 @@ export default function AwardsPage() {
 
       if (!dbSuccess) {
         setAwards([]);
-        setDataSource("db");
       }
 
       // Fetch all expenses for alert computation
@@ -409,7 +406,7 @@ export default function AwardsPage() {
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline" className="text-[10px] gap-1">
               <Database className="h-2.5 w-2.5" />
-              {dataSource === "db" ? "Database" : "Demo Data"}
+              Database
             </Badge>
             {lastSynced && (
               <span className="text-[10px] text-muted-foreground">
