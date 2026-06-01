@@ -15,7 +15,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     MicrosoftEntraID({
       clientId: process.env.MICROSOFT_CLIENT_ID!,
       clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
-      issuer: "https://login.microsoftonline.com/common/v2.0",
+      issuer: `https://login.microsoftonline.com/${process.env.MICROSOFT_TENANT_ID}/v2.0`,
+      authorization: {
+        url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        params: { scope: "openid profile email User.Read" },
+      },
+      token: {
+        url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      },
       allowDangerousEmailAccountLinking: true,
     }),
   ],
