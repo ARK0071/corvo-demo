@@ -314,7 +314,7 @@ function UnifiedGrantsDashboard() {
       setSlGrants(data.grants ?? []);
       setSlMissingFile(Boolean(data.missingFile));
       if (typeof data.expectedPath === "string") setSlExpectedPath(data.expectedPath);
-      if ((data.grants ?? []).length > 0) await scoreSlGrants(data.grants);
+      if ((data.grants ?? []).length > 0) void scoreSlGrants(data.grants);
       else setSlScores(new Map());
     } catch (e) {
       setSlError(e instanceof Error ? e.message : "Failed to load");
@@ -332,17 +332,18 @@ function UnifiedGrantsDashboard() {
   }, [discoverSource, slLoaded, loadSlGrants]);
 
   const sortedSlGrants = useMemo(() => {
-    const withScores = slGrants.filter(g => slScores.has(g.id));
     const q = slSearch.trim().toLowerCase();
     const filtered = q
-      ? withScores.filter(g =>
+      ? slGrants.filter(g =>
           g.title.toLowerCase().includes(q) ||
           g.agency.toLowerCase().includes(q) ||
           g.description.toLowerCase().includes(q) ||
           g.fundingCategories.some(c => c.toLowerCase().includes(q)) ||
           g.eligibility.some(e => e.toLowerCase().includes(q))
         )
-      : withScores;
+      : slGrants;
+    const hasAnyScores = slScores.size > 0;
+    if (!hasAnyScores) return filtered;
     return [...filtered].sort((a, b) => {
       if (slSortBy === "deadline") return (a.closeDate || "9999").localeCompare(b.closeDate || "9999");
       return (slScores.get(b.id)?.overallScore ?? 0) - (slScores.get(a.id)?.overallScore ?? 0);
