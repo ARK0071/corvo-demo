@@ -11,6 +11,7 @@ import { portFreeportProfile } from "./port-freeport";
 import { portOfLosAngelesProfile } from "./port-of-los-angeles";
 import { lawaProfile } from "./lawa";
 import { louisianaGatewayPortProfile } from "./louisiana-gateway-port";
+import { burnsEngineeringProfile } from "./burns-engineering";
 
 // Static (built-in) profiles — used as fallback until DB is loaded
 const STATIC_PROFILES: Record<string, PortProfile> = {
@@ -18,6 +19,7 @@ const STATIC_PROFILES: Record<string, PortProfile> = {
   "louisiana-gateway-port": louisianaGatewayPortProfile,
   "port-of-los-angeles": portOfLosAngelesProfile,
   "lawa": lawaProfile,
+  "burns-engineering": burnsEngineeringProfile,
 };
 
 // Dynamic profiles added at runtime (from DB or admin)

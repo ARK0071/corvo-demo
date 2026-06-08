@@ -24,7 +24,9 @@
       "Bash(curl -s \"https://api.grants.gov/v1/api/fetchOpportunity\" -X POST -H \"Content-Type: application/json\" -d '{\"\"\"\"opportunityId\"\"\"\": 361059}')",
       "Bash(npx next:*)",
       "Bash(npx shadcn@latest add dialog select dropdown-menu popover calendar textarea label --yes --overwrite)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/scripts/seed-burns-demo.ts'', ''utf8''\\); console.log\\(''File reads OK''\\)\")",
+      "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/data/profiles/burns-engineering.ts'', ''utf8''\\); console.log\\(''Profile reads OK''\\)\")"
     ]
   }
 }
