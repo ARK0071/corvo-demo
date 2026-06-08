@@ -53,6 +53,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { PipelineGanttChart } from "@/components/pipeline/gantt-chart";
 
 const statusColors: Record<string, string> = {
   posted: "bg-green-500/10 text-green-600 dark:text-green-400",
@@ -63,17 +64,23 @@ const statusColors: Record<string, string> = {
 
 const stageColors: Record<PipelineStage, string> = {
   eligible: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+  drafting: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",
   applied: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
   under_review: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
   awarded: "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20",
+  reporting: "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+  closeout: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
   rejected: "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20",
 };
 
 const stageLabels: Record<PipelineStage, string> = {
   eligible: "Eligible",
+  drafting: "Drafting",
   applied: "Applied",
   under_review: "Under Review",
   awarded: "Awarded",
+  reporting: "Reporting",
+  closeout: "Closeout",
   rejected: "Rejected",
 };
 
@@ -614,7 +621,7 @@ function UnifiedGrantsDashboard() {
 
   // Move grant between pipeline stages
   async function handleMoveStage(grant: PipelineGrant, direction: "forward" | "backward") {
-    const stages: PipelineStage[] = ["eligible", "applied", "under_review", "awarded", "rejected"];
+    const stages: PipelineStage[] = ["eligible", "drafting", "applied", "under_review", "awarded", "reporting", "closeout", "rejected"];
     const currentIndex = stages.indexOf(grant.stage);
 
     let newIndex: number;
@@ -722,7 +729,7 @@ function UnifiedGrantsDashboard() {
       <div className="flex-1 overflow-y-auto">
         <div
           className={`mx-auto px-6 py-8 ${
-            activeTab === "outreach" || activeTab === "discover" ? "max-w-[90rem]" : "max-w-6xl"
+            activeTab === "outreach" || activeTab === "discover" || activeTab === "pipeline" ? "max-w-[90rem]" : "max-w-6xl"
           }`}
         >
         {/* Header */}
@@ -1686,200 +1693,17 @@ function UnifiedGrantsDashboard() {
 
           {/* TAB 2: PIPELINE */}
           {activeTab === "pipeline" && (
-            <div className="mt-2">
-            {pipelineLoading ? (
-              <div className="flex flex-col items-center justify-center py-16 gap-2">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">Loading pipeline...</p>
-              </div>
-            ) : (
-            <>
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {(["eligible", "applied", "under_review", "awarded", "rejected"] as PipelineStage[]).map((stage) => {
-                const stageGrants = pipelineGrants.filter((g) => g.stage === stage);
-                const count = getStageCount(stage);
-
-                return (
-                  <div key={stage} className="flex flex-col">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold">{stageLabels[stage]}</h3>
-                      <Badge variant="secondary" className="text-[10px]">{count}</Badge>
-                    </div>
-
-                    <div className="space-y-2 flex-1">
-                      {stageGrants.map((grant) => {
-                        const isExpanded = expandedPipeline.has(grant.id);
-                        const isEditingThis = editingNotes === grant.id;
-
-                        return (
-                          <Card key={grant.id} className={`overflow-hidden ${stageColors[stage]}`}>
-                            <div className="p-3">
-                              <button
-                                onClick={() => {
-                                  if (isExpanded) {
-                                    setExpandedPipeline(new Set([...expandedPipeline].filter((id) => id !== grant.id)));
-                                  } else {
-                                    setExpandedPipeline(new Set([...expandedPipeline, grant.id]));
-                                  }
-                                }}
-                                className="w-full text-left"
-                              >
-                                <div className="flex items-start gap-2">
-                                  {isExpanded ? (
-                                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                                  ) : (
-                                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-                                  )}
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium line-clamp-2">{grant.title}</p>
-                                    <p className="text-[10px] text-muted-foreground truncate">{grant.agency}</p>
-                                    <p className="text-[10px] font-mono mt-1">
-                                      {grant.awardCeiling > 0 ? formatCurrency(grant.awardCeiling) : "TBD"}
-                                    </p>
-                                  </div>
-                                </div>
-                              </button>
-
-                              {isExpanded && (
-                                <div className="mt-3 pt-3 border-t space-y-2">
-                                  <div>
-                                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Deadline</p>
-                                    <p className="text-[11px]">{grant.closeDate || "No deadline"}</p>
-                                  </div>
-
-                                  {grant.notes && !isEditingThis && (
-                                    <div>
-                                      <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Notes</p>
-                                      <p className="text-[11px] whitespace-pre-wrap">{grant.notes}</p>
-                                    </div>
-                                  )}
-
-                                  {isEditingThis && (
-                                    <div>
-                                      <p className="text-[9px] text-muted-foreground uppercase tracking-wider mb-1">Notes</p>
-                                      <textarea
-                                        value={notesText}
-                                        onChange={(e) => setNotesText(e.target.value)}
-                                        rows={3}
-                                        className="w-full text-[11px] rounded border border-input bg-background px-2 py-1 resize-none"
-                                        placeholder="Add notes..."
-                                      />
-                                      <div className="flex gap-1 mt-1">
-                                        <Button
-                                          size="sm"
-                                          onClick={() => handleSaveNotes(grant.id)}
-                                          className="h-6 text-[10px] px-2"
-                                        >
-                                          Save
-                                        </Button>
-                                        <Button
-                                          size="sm"
-                                          variant="ghost"
-                                          onClick={() => {
-                                            setEditingNotes(null);
-                                            setNotesText("");
-                                          }}
-                                          className="h-6 text-[10px] px-2"
-                                        >
-                                          Cancel
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {!isEditingThis && (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => {
-                                        setEditingNotes(grant.id);
-                                        setNotesText(grant.notes || "");
-                                      }}
-                                      className="h-6 text-[10px] px-2 w-full"
-                                    >
-                                      {grant.notes ? "Edit Notes" : "Add Notes"}
-                                    </Button>
-                                  )}
-
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleDraftGrant(grant)}
-                                    className="h-6 text-[10px] px-2 w-full gap-1"
-                                  >
-                                    <FileText className="h-3 w-3" />
-                                    Draft Grant
-                                  </Button>
-
-                                  <div className="flex gap-1 pt-2 border-t">
-                                    {stage !== "eligible" && (
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => handleMoveStage(grant, "backward")}
-                                        className="h-6 text-[10px] px-2 flex-1"
-                                      >
-                                        <ArrowLeft className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                    {stage !== "rejected" && stage !== "awarded" && (
-                                      <Button
-                                        size="sm"
-                                        onClick={() => handleMoveStage(grant, "forward")}
-                                        className="h-6 text-[10px] px-2 flex-1"
-                                      >
-                                        <ArrowRight className="h-3 w-3" />
-                                      </Button>
-                                    )}
-                                    {stage === "awarded" && (
-                                      <Button
-                                        size="sm"
-                                        onClick={() => setActiveTab("outreach")}
-                                        className="h-6 text-[10px] px-2 flex-1 gap-1"
-                                      >
-                                        <Users className="h-3 w-3" />
-                                        Find Vendors
-                                      </Button>
-                                    )}
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={() => handleRemoveFromPipeline(grant.id)}
-                                      className="h-6 text-[10px] px-2"
-                                    >
-                                      <X className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </Card>
-                        );
-                      })}
-
-                      {stageGrants.length === 0 && (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <p className="text-xs">No grants</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {pipelineGrants.length === 0 && (
-              <div className="text-center py-16 text-muted-foreground">
-                <Award className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                <p className="text-sm">No grants in the pipeline yet</p>
-                <p className="text-xs mt-1">
-                  Search for grants in the Discover tab and add them to your pipeline
-                </p>
-              </div>
-            )}
-            </>
-            )}
-            </div>
+            <PipelineGanttChart
+              pipelineGrants={pipelineGrants.map(g => ({
+                id: (g as any).pipelineId || g.id,
+                grantId: g.id,
+                title: g.title,
+                agency: g.agency,
+                stage: g.stage,
+                awardCeiling: g.awardCeiling,
+              }))}
+              onRefreshPipeline={fetchPipelineFromDB}
+            />
           )}
 
           {/* TAB 3: PROJECTS */}

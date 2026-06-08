@@ -4,9 +4,12 @@ import { PipelineGrant as PrismaPipeline, Prisma } from "@/generated/prisma";
 // Pipeline stages
 export type PipelineStage =
   | "eligible"
+  | "drafting"
   | "applied"
   | "under_review"
   | "awarded"
+  | "reporting"
+  | "closeout"
   | "rejected";
 
 // Application-level pipeline grant type (similar to existing interface)
@@ -330,9 +333,12 @@ export async function isInPipeline(
 export async function getPipelineStats(portProfileId: string): Promise<{
   total: number;
   eligible: number;
+  drafting: number;
   applied: number;
   underReview: number;
   awarded: number;
+  reporting: number;
+  closeout: number;
   rejected: number;
 }> {
   const counts = await prisma.pipelineGrant.groupBy({
@@ -349,9 +355,12 @@ export async function getPipelineStats(portProfileId: string): Promise<{
   return {
     total: counts.reduce((sum: number, c: typeof counts[number]) => sum + c._count, 0),
     eligible: stageCounts["eligible"] || 0,
+    drafting: stageCounts["drafting"] || 0,
     applied: stageCounts["applied"] || 0,
     underReview: stageCounts["under_review"] || 0,
     awarded: stageCounts["awarded"] || 0,
+    reporting: stageCounts["reporting"] || 0,
+    closeout: stageCounts["closeout"] || 0,
     rejected: stageCounts["rejected"] || 0,
   };
 }

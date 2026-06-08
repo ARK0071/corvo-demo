@@ -14,6 +14,7 @@ import {
   Newspaper,
   FileText,
   AlertTriangle,
+  CheckSquare,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -65,6 +66,7 @@ export default function PorterDashboardPage() {
   const [reportingStats, setReportingStats] = useState<{ dueNext30Days: number } | null>(null);
   const [dbAwards, setDbAwards] = useState<{ id: string; title: string; program: string; totalAmount: number; budgetCategories: { name: string; ceiling: number; spent: number }[]; status: string }[]>([]);
   const [upcomingReports, setUpcomingReports] = useState<{ id: string; awardTitle: string; program: string; type: string; dueDate: string; status: string }[]>([]);
+  const [myTasks, setMyTasks] = useState<{ id: string; title: string; status: string; priority: string; dueDate: string | null; phase: string | null; awardTitle: string | null; pipelineGrantId: string | null }[]>([]);
 
   // Fetch pipeline from database
   const fetchPipelineFromDB = useCallback(async () => {
@@ -121,6 +123,12 @@ export default function PorterDashboardPage() {
         .then((data) => setUpcomingReports((data.reports || []).slice(0, 10)))
         .catch(() => setUpcomingReports([]));
 
+      // Fetch my tasks
+      fetch("/api/tasks?myTasks=true", { headers: { ...tenantHeaders, "Content-Type": "application/json" } })
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => setMyTasks((data.tasks || []).slice(0, 8)))
+        .catch(() => setMyTasks([]));
+
       // Load news
       fetch("/api/newsroom", { headers: tenantHeaders })
         .then((r) => (r.ok ? r.json() : Promise.reject()))
@@ -135,9 +143,12 @@ export default function PorterDashboardPage() {
   // Calculate stage counts from the pipeline state
   const stageCounts = useMemo(() => ({
     eligible: pipeline.filter(g => g.stage === "eligible").length,
+    drafting: pipeline.filter(g => g.stage === "drafting").length,
     applied: pipeline.filter(g => g.stage === "applied").length,
     underReview: pipeline.filter(g => g.stage === "under_review").length,
     awarded: pipeline.filter(g => g.stage === "awarded").length,
+    reporting: pipeline.filter(g => g.stage === "reporting").length,
+    closeout: pipeline.filter(g => g.stage === "closeout").length,
     rejected: pipeline.filter(g => g.stage === "rejected").length,
     total: pipeline.length,
   }), [pipeline]);
@@ -239,7 +250,7 @@ export default function PorterDashboardPage() {
 
       {/* ── Main Content: 2-column ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pipeline Funnel */}
+        {/* Row 1: Pipeline Funnel + My Tasks */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
@@ -268,16 +279,83 @@ export default function PorterDashboardPage() {
             ) : (
               <div className="space-y-2">
                 <FunnelRow label="Eligible" count={stageCounts.eligible} total={stageCounts.total} color="bg-blue-500" />
+                <FunnelRow label="Drafting" count={stageCounts.drafting} total={stageCounts.total} color="bg-indigo-500" />
                 <FunnelRow label="Applied" count={stageCounts.applied} total={stageCounts.total} color="bg-purple-500" />
                 <FunnelRow label="Under Review" count={stageCounts.underReview} total={stageCounts.total} color="bg-amber-500" />
                 <FunnelRow label="Awarded" count={stageCounts.awarded} total={stageCounts.total} color="bg-emerald-500" />
+                <FunnelRow label="Reporting" count={stageCounts.reporting} total={stageCounts.total} color="bg-teal-500" />
+                <FunnelRow label="Closeout" count={stageCounts.closeout} total={stageCounts.total} color="bg-slate-500" />
                 <FunnelRow label="Rejected" count={stageCounts.rejected} total={stageCounts.total} color="bg-red-500" />
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* Upcoming Deadlines (unified: pipeline + reports) */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <CheckSquare className="h-4 w-4" /> My Tasks
+              </span>
+              <Link
+                href="/grants?tab=pipeline"
+                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
+              >
+                Pipeline <ArrowRight className="h-3 w-3" />
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {myTasks.length === 0 ? (
+              <EmptyHint
+                text="No tasks assigned to you."
+                linkLabel="View Pipeline"
+                href="/grants?tab=pipeline"
+              />
+            ) : (
+              <div className="space-y-2">
+                {myTasks.map((t) => {
+                  const isOverdue = t.dueDate && t.status !== "done" && t.status !== "submitted" && new Date(t.dueDate) < new Date();
+                  return (
+                    <div key={t.id} className="flex items-center gap-2.5 text-sm">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        t.priority === "urgent" ? "bg-red-500" :
+                        t.priority === "high" ? "bg-orange-500" :
+                        t.priority === "medium" ? "bg-yellow-500" : "bg-slate-400"
+                      }`} />
+                      <div className="min-w-0 flex-1">
+                        <p className={`font-medium truncate ${t.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                          {t.title}
+                        </p>
+                        {t.phase && (
+                          <span className="text-[10px] text-muted-foreground capitalize">{t.phase.replace(/_/g, " ")}</span>
+                        )}
+                      </div>
+                      <Badge className={`text-[10px] px-1.5 py-0 shrink-0 ${
+                        t.status === "done" ? "bg-emerald-100 text-emerald-700" :
+                        t.status === "in_progress" ? "bg-blue-100 text-blue-700" :
+                        t.status === "blocked" ? "bg-red-100 text-red-700" :
+                        "bg-slate-100 text-slate-700"
+                      }`}>
+                        {t.status === "not_started" ? "To Do" :
+                         t.status === "in_progress" ? "Active" :
+                         t.status.replace(/_/g, " ")}
+                      </Badge>
+                      {t.dueDate && (
+                        <span className={`text-[11px] shrink-0 tabular-nums ${isOverdue ? "text-red-600 font-medium" : "text-muted-foreground"}`}>
+                          {isOverdue && "! "}
+                          {new Date(t.dueDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Row 2: Upcoming Deadlines + Latest News */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
@@ -285,7 +363,7 @@ export default function PorterDashboardPage() {
                 <Calendar className="h-4 w-4" /> Upcoming Deadlines
               </span>
               <Link
-                href="/reporting"
+                href="/calendar"
                 className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
               >
                 View all <ArrowRight className="h-3 w-3" />
@@ -342,7 +420,52 @@ export default function PorterDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Awards Summary */}
+        {/* Latest News */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Newspaper className="h-4 w-4" /> Latest News
+              </span>
+              <Link
+                href="/newsroom"
+                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
+              >
+                View all <ArrowRight className="h-3 w-3" />
+              </Link>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {newsLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : news.length === 0 ? (
+              <EmptyHint
+                text="No news available. Configure BRAVE_SEARCH_API_KEY or TAVILY_API_KEY."
+                linkLabel="Open Newsroom"
+                href="/newsroom"
+              />
+            ) : (
+              <div className="space-y-3">
+                {news.map((a) => (
+                  <a
+                    key={a.id}
+                    href={a.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-sm hover:bg-muted/50 rounded -mx-2 px-2 py-1 transition-colors"
+                  >
+                    <p className="font-medium line-clamp-1">{a.title}</p>
+                    <p className="text-xs text-muted-foreground">{a.source}</p>
+                  </a>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Row 3: Awards + Projects */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
@@ -399,7 +522,6 @@ export default function PorterDashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Projects Summary */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center justify-between">
@@ -448,51 +570,6 @@ export default function PorterDashboardPage() {
                     + {projects.length - 5} more
                   </p>
                 )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Latest News */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Newspaper className="h-4 w-4" /> Latest News
-              </span>
-              <Link
-                href="/newsroom"
-                className="text-xs text-[#3d8b8b] hover:underline flex items-center gap-1"
-              >
-                View all <ArrowRight className="h-3 w-3" />
-              </Link>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {newsLoading ? (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : news.length === 0 ? (
-              <EmptyHint
-                text="No news available. Configure BRAVE_SEARCH_API_KEY or TAVILY_API_KEY."
-                linkLabel="Open Newsroom"
-                href="/newsroom"
-              />
-            ) : (
-              <div className="space-y-3">
-                {news.map((a) => (
-                  <a
-                    key={a.id}
-                    href={a.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-sm hover:bg-muted/50 rounded -mx-2 px-2 py-1 transition-colors"
-                  >
-                    <p className="font-medium line-clamp-1">{a.title}</p>
-                    <p className="text-xs text-muted-foreground">{a.source}</p>
-                  </a>
-                ))}
               </div>
             )}
           </CardContent>

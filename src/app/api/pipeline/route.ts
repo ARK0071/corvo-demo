@@ -6,6 +6,8 @@ import * as Grants from "@/lib/db/repositories/grants";
 import { prisma } from "@/lib/db/client";
 import type { PipelineStage } from "@/data/grant-pipeline";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
+import { PHASE_TASK_TEMPLATES, PIPELINE_PHASES } from "@/lib/pipeline-tasks";
+import type { PipelinePhase } from "@/lib/pipeline-tasks";
 
 /**
  * Resolve the portProfileId (UUID) for the current user.
@@ -84,6 +86,7 @@ async function getPortCandidates(
 function toClientGrant(grant: Pipeline.PipelineGrant) {
   return {
     ...grant,
+    pipelineId: grant.id, // Original DB UUID for task linking
     id: grant.grantId, // Client expects id = opportunity ID
   };
 }
@@ -204,6 +207,55 @@ export async function POST(request: NextRequest) {
       grantId,
       portProfileId
     );
+
+    // Auto-generate pipeline phase tasks
+    const existingTaskCount = await prisma.task.count({
+      where: { pipelineGrantId: pipelineGrant.id, parentTaskId: null },
+    });
+    if (existingTaskCount === 0) {
+      const session = await auth();
+      const userId = session?.user?.id;
+      for (let i = 0; i < PIPELINE_PHASES.length; i++) {
+        const phase: PipelinePhase = PIPELINE_PHASES[i];
+        const template = PHASE_TASK_TEMPLATES[phase];
+        if (!template) continue;
+
+        const parentTask = await prisma.task.create({
+          data: {
+            portProfileId,
+            pipelineGrantId: pipelineGrant.id,
+            title: template.title,
+            description: template.description,
+            status: "not_started",
+            priority: template.priority,
+            phase,
+            source: "template",
+            sortOrder: i,
+            createdBy: userId || null,
+          },
+        });
+
+        for (let j = 0; j < template.subtasks.length; j++) {
+          const sub = template.subtasks[j];
+          await prisma.task.create({
+            data: {
+              portProfileId,
+              pipelineGrantId: pipelineGrant.id,
+              title: sub.title,
+              description: sub.description,
+              status: "not_started",
+              priority: sub.priority,
+              phase,
+              parentTaskId: parentTask.id,
+              source: "template",
+              sortOrder: j,
+              createdBy: userId || null,
+            },
+          });
+        }
+      }
+    }
+
     return NextResponse.json(toClientGrant(pipelineGrant), { status: 201 });
   } catch (error) {
     console.error("Pipeline POST error:", error);

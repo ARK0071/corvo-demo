@@ -5,7 +5,7 @@
  * Eligible → Applied → Under Review → Awarded → Rejected
  */
 
-export type PipelineStage = "eligible" | "applied" | "under_review" | "awarded" | "rejected";
+export type PipelineStage = "eligible" | "drafting" | "applied" | "under_review" | "awarded" | "reporting" | "closeout" | "rejected";
 
 export interface PipelineGrant {
   id: string;                    // Grants.gov opportunity ID
@@ -157,9 +157,12 @@ export function getPipelineStats() {
   return {
     total: pipelineGrants.length,
     eligible: getStageCount("eligible"),
+    drafting: getStageCount("drafting"),
     applied: getStageCount("applied"),
     underReview: getStageCount("under_review"),
     awarded: getStageCount("awarded"),
+    reporting: getStageCount("reporting"),
+    closeout: getStageCount("closeout"),
     rejected: getStageCount("rejected"),
   };
 }

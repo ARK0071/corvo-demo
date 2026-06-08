@@ -10,6 +10,7 @@ import {
   Users,
   ShieldCheck,
   ClipboardList,
+  CheckSquare,
   Loader2,
   RefreshCw,
   AlertTriangle,
@@ -20,6 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
+import { AwardTasksTab } from "@/components/tasks/award-tasks-tab";
 
 // ─── Types ───
 
@@ -106,6 +108,7 @@ function fmtDate(d: string | null | undefined): string {
 // ─── Tab definitions ───
 
 const TABS = [
+  { key: "tasks", label: "Tasks", icon: CheckSquare },
   { key: "budget", label: "Budget", icon: DollarSign },
   { key: "expenses", label: "Expenses", icon: ClipboardList },
   { key: "reports", label: "Reports", icon: FileText },
@@ -131,7 +134,7 @@ export default function AwardDetailPage() {
   const [subs, setSubs] = useState<Subrecipient[]>([]);
   const [checklists, setChecklists] = useState<ComplianceChecklist[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<TabKey>("budget");
+  const [tab, setTab] = useState<TabKey>("tasks");
 
   const fetchAll = useCallback(async () => {
     if (tenant.isLoading || !awardId) return;
@@ -225,6 +228,11 @@ export default function AwardDetailPage() {
           </button>
         ))}
       </div>
+
+      {/* Tasks Tab */}
+      {tab === "tasks" && (
+        <AwardTasksTab awardId={awardId} tenantHeaders={headers} />
+      )}
 
       {/* Budget Tab */}
       {tab === "budget" && (

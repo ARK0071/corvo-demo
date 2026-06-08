@@ -3,7 +3,7 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool, Radar } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool, Radar, Calendar } from "lucide-react";
 import { useCurrentUser } from "@/contexts/user-context";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import { useTenant } from "@/contexts/tenant-context";
@@ -37,6 +37,7 @@ import {
 
 const grantMatchItems = [
   { title: "Dashboard", url: "/porter-dashboard", icon: LayoutDashboard },
+  { title: "Calendar", url: "/calendar", icon: Calendar },
   { title: "Discover", url: "/grants?tab=discover", icon: Search },
   { title: "Pipeline", url: "/grants?tab=pipeline", icon: Layers },
   { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },

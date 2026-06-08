@@ -29,9 +29,14 @@ model User {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  accounts      Account[]
-  sessions      Session[]
-  apiKeys       ApiKey[]
+  accounts         Account[]
+  sessions         Session[]
+  apiKeys          ApiKey[]
+  assignedTasks    Task[]            @relation("TaskAssignee")
+  createdTasks     Task[]            @relation("TaskCreator")
+  taskComments     TaskComment[]
+  grantAssignments GrantAssignment[]
+  notifications    Notification[]
 
   @@index([portId])
   @@map("users")
@@ -178,6 +183,8 @@ model PortProfile {
   projects           Project[]
   awards             Award[]
   grantDrafts        GrantDraft[]
+  tasks              Task[]
+  grantAssignments   GrantAssignment[]
 
   @@map("port_profiles")
 }
@@ -272,6 +279,8 @@ model PipelineGrant {
   updatedAt            DateTime        @updatedAt @map("updated_at")
   grant                DiscoveredGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
   portProfile          PortProfile     @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+
+  tasks              Task[]
 
   @@unique([grantId, portProfileId])
   @@index([portProfileId])
@@ -396,6 +405,8 @@ model Award {
   subrecipients          Subrecipient[]
   complianceChecklists   ComplianceChecklist[]
   auditFindings          AuditFinding[]
+  tasks                  Task[]
+  grantAssignments       GrantAssignment[]
 
   @@index([portProfileId])
   @@index([status])
@@ -760,6 +771,146 @@ model ApiSyncLog {
   completedAt    DateTime? @map("completed_at")
 
   @@map("api_sync_log")
+}
+
+// =============================================================================
+// TASK MANAGEMENT - Assignment, tasks, playbooks, comments, notifications
+// =============================================================================
+
+model Task {
+  id              String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portProfileId   String         @map("port_profile_id") @db.Uuid
+  awardId         String?        @map("award_id") @db.Uuid
+  pipelineGrantId String?        @map("pipeline_grant_id") @db.Uuid
+  title           String         @db.VarChar(500)
+  description     String         @default("")
+  status          String         @default("not_started") @db.VarChar(30)
+  priority        String         @default("medium") @db.VarChar(20)
+  startDate       DateTime?      @map("start_date") @db.Date
+  dueDate         DateTime?      @map("due_date") @db.Date
+  assigneeId      String?        @map("assignee_id") @db.Uuid
+  area            String?        @db.VarChar(50)
+  phase           String?        @db.VarChar(30)
+  parentTaskId    String?        @map("parent_task_id") @db.Uuid
+  source          String         @default("manual") @db.VarChar(20)
+  deliverableRef  String?        @map("deliverable_ref") @db.VarChar(500)
+  deliverableType String?        @map("deliverable_type") @db.VarChar(50)
+  deliverableId   String?        @map("deliverable_id") @db.Uuid
+  sortOrder       Int            @default(0) @map("sort_order")
+  createdBy       String?        @map("created_by") @db.Uuid
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  portProfile     PortProfile    @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+  award           Award?         @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  pipelineGrant   PipelineGrant? @relation(fields: [pipelineGrantId], references: [id], onDelete: Cascade)
+  assignee        User?          @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  creator         User?          @relation("TaskCreator", fields: [createdBy], references: [id])
+  parentTask      Task?          @relation("Subtasks", fields: [parentTaskId], references: [id])
+  subtasks        Task[]         @relation("Subtasks")
+  comments        TaskComment[]
+
+  @@index([portProfileId])
+  @@index([awardId])
+  @@index([pipelineGrantId])
+  @@index([assigneeId])
+  @@index([status])
+  @@index([phase])
+  @@index([dueDate])
+  @@index([parentTaskId])
+  @@map("tasks")
+}
+
+model GrantAssignment {
+  id            String      @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portProfileId String      @map("port_profile_id") @db.Uuid
+  awardId       String      @map("award_id") @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  role          String      @db.VarChar(30)
+  area          String?     @db.VarChar(50)
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  portProfile   PortProfile @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+  award         Award       @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([awardId, userId, role, area])
+  @@index([portProfileId])
+  @@index([awardId])
+  @@index([userId])
+  @@map("grant_assignments")
+}
+
+model TaskTemplate {
+  id          String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  program     String             @db.VarChar(255)
+  name        String             @db.VarChar(255)
+  description String             @default("")
+  active      Boolean            @default(true)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  items       TaskTemplateItem[]
+
+  @@index([program])
+  @@map("task_templates")
+}
+
+model TaskTemplateItem {
+  id              String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  templateId      String       @map("template_id") @db.Uuid
+  title           String       @db.VarChar(500)
+  description     String       @default("")
+  area            String?      @db.VarChar(50)
+  priority        String       @default("medium") @db.VarChar(20)
+  dueRule         String?      @map("due_rule") @db.VarChar(255)
+  dueOffsetDays   Int?         @map("due_offset_days")
+  dueReference    String?      @map("due_reference") @db.VarChar(50)
+  deliverableType String?      @map("deliverable_type") @db.VarChar(50)
+  sortOrder       Int          @default(0) @map("sort_order")
+  recurring       Boolean      @default(false)
+  recurrenceRule  String?      @map("recurrence_rule") @db.VarChar(50)
+  parentItemId    String?      @map("parent_item_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  template        TaskTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+  @@map("task_template_items")
+}
+
+model TaskComment {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_comments")
+}
+
+model Notification {
+  id        String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  taskId    String?  @map("task_id") @db.Uuid
+  type      String   @db.VarChar(50)
+  title     String   @db.VarChar(500)
+  body      String   @default("")
+  read      Boolean  @default(false)
+  emailSent Boolean  @default(false) @map("email_sent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
+  @@map("notifications")
 }
 
 // =============================================================================
