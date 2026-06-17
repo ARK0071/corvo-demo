@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
-import { Settings, Key, Database, Bell, Shield, Building2, Server, Globe, Lock, Mail } from "lucide-react";
+import { Settings, Key, Database, Bell, Shield, Building2, Server, Lock, Mail } from "lucide-react";
 import { useProfile } from "@/components/profile-provider";
 import { useTenant } from "@/contexts/tenant-context";
 import { useSession } from "next-auth/react";
@@ -144,46 +144,6 @@ export default function SettingsPage() {
             </Card>
           )}
 
-          {/* Port selector — only when using Demo DB (demo_* tables). Production/Test resolve the same port list via API headers. */}
-          {isAdmin && tenant.environment === "demo" && (
-            <Card className="p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Globe className="h-4 w-4 text-muted-foreground" />
-                <h2 className="text-sm font-semibold">Demo session port</h2>
-                <Badge className="bg-amber-500/10 text-amber-600 text-[10px] ml-auto">Admin</Badge>
-              </div>
-              <p className="text-xs text-muted-foreground mb-4">
-                Only applies when Environment is <span className="font-medium text-foreground">Demo</span>. This sets which port’s rows are loaded from the demo tables (filtered by port ID).{" "}
-                <span className="font-medium text-foreground">Client Profile</span> above is separate—it drives static profile content for scoring and UI. For production-style data (shared{" "}
-                <code className="text-[10px]">port_profiles</code> tables), switch Environment to Production and ensure your tenant port ID matches the profile (e.g.{" "}
-                <code className="text-[10px]">freeport-mock</code>).
-              </p>
-              <div className="space-y-2">
-                {tenant.availablePorts.map((port) => (
-                  <button
-                    key={port.id}
-                    onClick={() => tenant.setPort(port.id)}
-                    className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                      port.id === tenant.portId
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{port.name}</span>
-                        {port.id === tenant.portId && (
-                          <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
-                        )}
-                      </div>
-                      <span className="text-xs text-muted-foreground">{port.slug}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Card>
-          )}
-
           {/* Active Profile Details */}
           <Card className="p-5">
             <div className="flex items-center gap-2 mb-4">
@@ -287,10 +247,10 @@ export default function SettingsPage() {
                 <span className="text-sm">Embedding Dimensions</span>
                 <span className="text-sm text-muted-foreground">{tenant.embeddingDimensions}</span>
               </div>
-              {tenant.environment === "demo" && (
+              {isAdmin && (
                 <div className="flex items-center justify-between">
-                  <span className="text-sm">Port ID</span>
-                  <span className="text-sm text-muted-foreground">{tenant.portId}</span>
+                  <span className="text-sm">Active Entity</span>
+                  <span className="text-sm text-muted-foreground">{tenant.portName}</span>
                 </div>
               )}
             </div>

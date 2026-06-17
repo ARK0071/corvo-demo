@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import { useSession } from "next-auth/react";
 import type { PortProfile } from "@/data/port-profile";
 import { getAllProfiles, DEFAULT_PROFILE_ID, getDefaultProfile } from "@/data/profiles";
+import { useTenant } from "@/contexts/tenant-context";
 
 interface ProfileContextValue {
   profile: PortProfile;
@@ -27,6 +28,7 @@ export function useProfile() {
 
 export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const { data: session, status: sessionStatus } = useSession();
+  const tenant = useTenant();
   const userPortId = session?.user?.portId;
   const userRole = session?.user?.role;
   const isAdmin = userRole === "admin";
@@ -83,8 +85,17 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     if (resolved) {
       setProfileIdState(id);
       localStorage.setItem("corvo-profile-id", id);
+      // Sync tenant context so API calls use the new entity
+      tenant.setPort(id);
     }
   }
+
+  // Keep tenant port in sync with profileId (covers initial load from localStorage)
+  useEffect(() => {
+    if (isAdmin && profileId && tenant.portId !== profileId) {
+      tenant.setPort(profileId);
+    }
+  }, [isAdmin, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const profile =
     allProfiles.find((p) => p.id === profileId)?.profile ??

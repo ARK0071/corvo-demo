@@ -64,13 +64,21 @@ async function getPortCandidates(
   const session = await auth();
 
   const candidates: string[] = [];
-  // Session portId is most authoritative for non-admin users
-  if (session?.user?.portId) candidates.push(session.user.portId);
-  // Header values
+  const isAdmin = session?.user?.role === "admin";
+  // Header values from tenant context (reflect admin's entity selection)
   const headerSlug = request.headers.get("x-corvo-port-slug");
   const headerPortId = request.headers.get("x-corvo-port-id");
-  if (headerSlug) candidates.push(headerSlug);
-  if (headerPortId) candidates.push(headerPortId);
+  if (isAdmin) {
+    // Admins: headers take priority (they reflect the selected entity)
+    if (headerSlug) candidates.push(headerSlug);
+    if (headerPortId) candidates.push(headerPortId);
+    if (session?.user?.portId) candidates.push(session.user.portId);
+  } else {
+    // Non-admins: session portId is most authoritative
+    if (session?.user?.portId) candidates.push(session.user.portId);
+    if (headerSlug) candidates.push(headerSlug);
+    if (headerPortId) candidates.push(headerPortId);
+  }
   // Tenant config fallback
   if (tenant.portSlug) candidates.push(tenant.portSlug);
   if (tenant.portId) candidates.push(tenant.portId);

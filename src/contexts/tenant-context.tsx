@@ -123,13 +123,12 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const setPort = useCallback((portId: string) => {
     if (!isAdmin) return; // Only admins can switch ports
     const port = ports.find((p) => p.id === portId);
-    if (port) {
-      setConfig((prev) => ({
-        ...prev,
-        portId: port.id,
-        portSlug: port.slug,
-      }));
-    }
+    // Use the port's slug if found, otherwise use portId as the slug (they match for DB-sourced ports)
+    setConfig((prev) => ({
+      ...prev,
+      portId: port?.id || portId,
+      portSlug: port?.slug || portId,
+    }));
   }, [isAdmin, ports]);
 
   const portInfo = ports.find((p) => p.id === config.portId) || ports[0];

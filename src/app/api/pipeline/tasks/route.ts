@@ -35,11 +35,18 @@ async function getPortCandidates(request: NextRequest) {
   const tenant = await resolveSecureTenant(request.headers);
   const session = await auth();
   const candidates: string[] = [];
-  if (session?.user?.portId) candidates.push(session.user.portId);
+  const isAdmin = session?.user?.role === "admin";
   const headerSlug = request.headers.get("x-corvo-port-slug");
   const headerPortId = request.headers.get("x-corvo-port-id");
-  if (headerSlug) candidates.push(headerSlug);
-  if (headerPortId) candidates.push(headerPortId);
+  if (isAdmin) {
+    if (headerSlug) candidates.push(headerSlug);
+    if (headerPortId) candidates.push(headerPortId);
+    if (session?.user?.portId) candidates.push(session.user.portId);
+  } else {
+    if (session?.user?.portId) candidates.push(session.user.portId);
+    if (headerSlug) candidates.push(headerSlug);
+    if (headerPortId) candidates.push(headerPortId);
+  }
   if (tenant.portSlug) candidates.push(tenant.portSlug);
   if (tenant.portId) candidates.push(tenant.portId);
   return { candidates, tenant, session };
