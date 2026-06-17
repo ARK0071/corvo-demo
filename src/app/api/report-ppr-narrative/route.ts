@@ -50,7 +50,7 @@ Instructions:
 - Do not include section headers — just the narrative content.`;
 
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-4-6"),
       prompt,
       maxOutputTokens: 800,
     });

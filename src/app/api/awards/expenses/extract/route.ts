@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     const categoryList = categories.map((c: { name: string }) => c.name).join(", ");
 
     const result = await generateObject({
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-4-6"),
       schema: z.object({
         vendor: z.string().describe("The vendor/supplier name from the invoice"),
         amount: z.number().describe("The total amount due or paid"),

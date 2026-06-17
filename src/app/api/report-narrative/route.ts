@@ -48,7 +48,7 @@ Instructions:
 - Do not include headers or section labels - just narrative paragraphs.`;
 
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-4-6"),
       prompt,
       maxOutputTokens: 1000,
     });

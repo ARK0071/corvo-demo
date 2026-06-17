@@ -70,7 +70,7 @@ export async function POST(req: Request) {
     }
 
     const { object } = await generateObject({
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-4-6"),
       system: grantExtractPrompt,
       prompt: `Extract structured grant information from the following text:\n\n${text}`,
       schema: grantSchema,

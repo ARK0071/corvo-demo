@@ -29,7 +29,7 @@ import type {
   SectionConfidenceDetail,
 } from "./types";
 
-const MODEL = "claude-sonnet-4-20250514";
+const MODEL = "claude-sonnet-4-6";
 
 // ─── Prompt Builders ───
 

@@ -39,7 +39,7 @@ export async function buildGrantApplication(params: BuildGrantApplicationParams)
   const systemPrompt = customPrompt ?? GRANT_APPLICATION_SYSTEM_PROMPT;
 
   const { text } = await generateText({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     system: systemPrompt,
     prompt: userPrompt,
   });
@@ -63,7 +63,7 @@ async function buildSectionBySection(
   // Step 1: Generate the forms/attachments section
   const formsPrompt = buildFormsOnlyPrompt(grant, requirements);
   const formsResult = await generateText({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     system: systemPrompt,
     prompt: formsPrompt,
   });
@@ -73,7 +73,7 @@ async function buildSectionBySection(
   for (const section of requirements.sections) {
     const sectionPrompt = buildSectionPrompt(grant, portName, portProfile, project, requirements, section);
     const result = await generateText({
-      model: anthropic("claude-sonnet-4-20250514"),
+      model: anthropic("claude-sonnet-4-6"),
       system: systemPrompt,
       prompt: sectionPrompt,
     });
@@ -83,7 +83,7 @@ async function buildSectionBySection(
   // Step 3: Generate the "Before You Submit" checklist
   const checklistPrompt = buildChecklistPrompt(grant, portName, project, requirements);
   const checklistResult = await generateText({
-    model: anthropic("claude-sonnet-4-20250514"),
+    model: anthropic("claude-sonnet-4-6"),
     system: systemPrompt,
     prompt: checklistPrompt,
   });
