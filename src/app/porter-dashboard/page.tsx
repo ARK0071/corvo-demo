@@ -208,7 +208,7 @@ export default function PorterDashboardPage() {
           Porter Dashboard
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Port Freeport grant pipeline, awards, and compliance at a glance.
+          {tenant.portName} grant pipeline, awards, and compliance at a glance.
         </p>
       </div>
 
