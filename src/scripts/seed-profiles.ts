@@ -11,6 +11,7 @@ import { lawaProfile } from "../data/profiles/lawa";
 import { louisianaGatewayPortProfile } from "../data/profiles/louisiana-gateway-port";
 import { portOfLosAngelesProfile } from "../data/profiles/port-of-los-angeles";
 import { burnsEngineeringProfile } from "../data/profiles/burns-engineering";
+import { cteProfile } from "../data/profiles/cte";
 import type { PortProfile } from "../data/port-profile";
 
 const PROFILES_TO_SEED: Array<{ slug: string; profile: PortProfile }> = [
@@ -19,6 +20,7 @@ const PROFILES_TO_SEED: Array<{ slug: string; profile: PortProfile }> = [
   { slug: "louisiana-gateway-port", profile: louisianaGatewayPortProfile },
   { slug: "port-of-los-angeles", profile: portOfLosAngelesProfile },
   { slug: "burns-engineering", profile: burnsEngineeringProfile },
+  { slug: "cte", profile: cteProfile },
 ];
 
 // Port-only entries (no full profile data but need to exist as ports)

@@ -36,6 +36,7 @@ export function reportTypeLabel(type: string): string {
   const map: Record<string, string> = {
     sf425: "SF-425",
     sf270: "SF-270",
+    baba: "BABA Compliance",
     progress: "Progress Report",
     ppr: "SF-PPR",
     sefa: "SEFA",

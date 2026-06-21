@@ -99,8 +99,8 @@ interface TeamMember {
 
 interface GanttChartProps {
   pipelineGrants: Array<{
-    id: string;       // DB UUID (pipeline_grants.id)
-    grantId: string;  // Grants.gov opportunity ID
+    id: string;
+    grantId: string;
     title: string;
     agency: string;
     stage: string;
@@ -109,9 +109,13 @@ interface GanttChartProps {
   onRefreshPipeline: () => void;
 }
 
-function formatShortDate(dateStr: string): string {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+function getInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 }
 
 // ── Component ──
@@ -122,16 +126,15 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedGrants, setExpandedGrants] = useState<Set<string>>(new Set());
-  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
   const [editingTask, setEditingTask] = useState<GanttTask | GanttSubtask | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editStartDate, setEditStartDate] = useState("");
   const [editDueDate, setEditDueDate] = useState("");
-  const [addingSubtask, setAddingSubtask] = useState<string | null>(null);
+  const [addingSubtask, setAddingSubtask] = useState<{ parentId: string; phase: string; grantId: string } | null>(null);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [generatingGrantId, setGeneratingGrantId] = useState<string | null>(null);
 
-  // Build a color map for assignees
   const assigneeColorMap = useMemo(() => {
     const map = new Map<string, ReturnType<typeof getAssigneeColor>>();
     const allAssignees = new Set<string>();
@@ -183,21 +186,26 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
     load();
   }, [fetchTasks, fetchTeam]);
 
-  // Generate tasks for a pipeline grant that doesn't have any
   const generateTasks = useCallback(async (pipelineGrantId: string) => {
+    setGeneratingGrantId(pipelineGrantId);
     try {
-      await fetch("/api/pipeline/tasks", {
+      const res = await fetch("/api/pipeline/tasks", {
         method: "POST",
         headers: { ...tenantHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({ pipelineGrantId }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error("Failed to generate tasks:", res.status, data.error || res.statusText);
+      }
       await fetchTasks();
     } catch (error) {
       console.error("Failed to generate tasks:", error);
+    } finally {
+      setGeneratingGrantId(null);
     }
   }, [tenantHeaders, fetchTasks]);
 
-  // Update a task (status, assignee, etc.)
   const updateTask = useCallback(async (taskId: string, updates: Record<string, unknown>) => {
     try {
       await fetch("/api/pipeline/tasks", {
@@ -212,7 +220,6 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
     }
   }, [tenantHeaders, fetchTasks, onRefreshPipeline]);
 
-  // Add a subtask
   const addSubtask = useCallback(async (parentTaskId: string, pipelineGrantId: string, phase: string) => {
     if (!newSubtaskTitle.trim()) return;
     try {
@@ -251,9 +258,7 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
     const map = new Map<string, GanttTask[]>();
     for (const task of tasks) {
       if (!task.pipelineGrantId || task.phase === null) continue;
-      // Only top-level tasks (subtasks are nested)
       if (tasks.some(t => t.subtasks.some(s => s.id === task.id))) continue;
-
       const list = map.get(task.pipelineGrantId) || [];
       list.push(task);
       map.set(task.pipelineGrantId, list);
@@ -261,8 +266,6 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
     return map;
   }, [tasks]);
 
-  // Use pipeline grants from props as the single source of truth
-  // Tasks are linked via pipelineGrantId (DB UUID = pg.id)
   const grantRows = useMemo(() => {
     return pipelineGrants.map((pg) => ({
       id: pg.id,
@@ -274,15 +277,6 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
 
   const toggleGrant = (id: string) => {
     setExpandedGrants(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleTask = (id: string) => {
-    setExpandedTasks(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -310,6 +304,8 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
     );
   }
 
+  const gridCols = `240px repeat(${PIPELINE_PHASES.length}, 1fr)`;
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="mt-2">
@@ -333,10 +329,10 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
 
         {/* Gantt Chart */}
         <div className="border rounded-lg overflow-hidden overflow-x-auto">
-          {/* Header: phases */}
-          <div className="grid" style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}>
+          {/* Header */}
+          <div className="grid" style={{ gridTemplateColumns: gridCols }}>
             <div className="bg-muted/50 border-b border-r px-3 py-2 text-xs font-semibold text-muted-foreground">
-              Grants / Tasks
+              Grants
             </div>
             {PIPELINE_PHASES.map((phase) => (
               <div
@@ -357,10 +353,10 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
 
             return (
               <div key={grant.id}>
-                {/* Grant header row */}
+                {/* Grant summary row */}
                 <div
                   className="grid group hover:bg-muted/30 transition-colors"
-                  style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}
+                  style={{ gridTemplateColumns: gridCols }}
                 >
                   <div className="border-b border-r px-3 py-2 flex items-center gap-2">
                     <button
@@ -382,284 +378,245 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
                         size="sm"
                         variant="ghost"
                         className="h-6 text-[10px] px-2 shrink-0"
+                        disabled={generatingGrantId === grant.id}
                         onClick={() => generateTasks(grant.id)}
                       >
-                        <Plus className="h-3 w-3 mr-1" />
-                        Generate
+                        {generatingGrantId === grant.id ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Plus className="h-3 w-3 mr-1" />
+                        )}
+                        {generatingGrantId === grant.id ? "Generating..." : "Generate"}
                       </Button>
                     )}
                   </div>
 
-                  {/* Phase cells - show progress bar for grant */}
+                  {/* Phase summary cells */}
                   {PIPELINE_PHASES.map((phase, phaseIdx) => {
                     const phaseTasks = grantTasks.filter(t => t.phase === phase);
-                    const totalInPhase = phaseTasks.length;
-                    const doneInPhase = phaseTasks.filter(t => t.status === "done").length;
+                    const allSubs = phaseTasks.flatMap(t => t.subtasks);
+                    const totalItems = allSubs.length || phaseTasks.length;
+                    const doneItems = allSubs.length > 0
+                      ? allSubs.filter(s => s.status === "done").length
+                      : phaseTasks.filter(t => t.status === "done").length;
                     const isCurrentPhase = phase === grant.stage;
                     const isPastPhase = phaseIdx < currentPhaseIndex;
-                    const isFuturePhase = phaseIdx > currentPhaseIndex;
 
                     return (
                       <div
                         key={phase}
-                        className={`border-b px-1 py-2 flex items-center justify-center ${
+                        className={`border-b border-l px-2 py-2 flex items-center justify-center ${
                           isCurrentPhase ? "bg-muted/40" : ""
                         }`}
                       >
-                        {totalInPhase > 0 && (
+                        {totalItems > 0 && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <div className="flex items-center gap-1">
-                                <div className={`h-2 rounded-full overflow-hidden ${
-                                  isFuturePhase ? "bg-muted w-12" : "bg-muted w-12"
-                                }`}>
+                              <div className="flex items-center gap-1.5">
+                                <div className="h-2 rounded-full overflow-hidden bg-muted w-12">
                                   <div
                                     className={`h-full rounded-full transition-all ${
-                                      isPastPhase || doneInPhase === totalInPhase
+                                      isPastPhase || doneItems === totalItems
                                         ? "bg-green-500"
                                         : PHASE_COLORS[phase]
                                     }`}
                                     style={{
-                                      width: `${totalInPhase > 0 ? (doneInPhase / totalInPhase) * 100 : 0}%`,
+                                      width: `${totalItems > 0 ? (doneItems / totalItems) * 100 : 0}%`,
                                     }}
                                   />
                                 </div>
-                                <span className="text-[9px] tabular-nums text-muted-foreground">
-                                  {doneInPhase}/{totalInPhase}
+                                <span className="text-[10px] tabular-nums text-muted-foreground">
+                                  {doneItems}/{totalItems}
                                 </span>
                               </div>
                             </TooltipTrigger>
                             <TooltipContent side="top" className="text-xs">
-                              {PHASE_LABELS[phase]}: {doneInPhase} of {totalInPhase} tasks done
+                              {PHASE_LABELS[phase]}: {doneItems} of {totalItems} done
                             </TooltipContent>
                           </Tooltip>
                         )}
-                        {totalInPhase === 0 && isPastPhase && (
-                          <Check className="h-3 w-3 text-green-500" />
+                        {totalItems === 0 && isPastPhase && (
+                          <Check className="h-3.5 w-3.5 text-green-500" />
                         )}
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Expanded: show tasks under each phase */}
-                {isExpanded && grantTasks.length > 0 && (
-                  <>
-                    {PIPELINE_PHASES.map((phase) => {
-                      const phaseTasks = grantTasks.filter(t => t.phase === phase);
-                      if (phaseTasks.length === 0) return null;
-
-                      return phaseTasks.map((task) => {
-                        const isTaskExpanded = expandedTasks.has(task.id);
-                        const taskColor = task.assigneeId
-                          ? assigneeColorMap.get(task.assigneeId) || UNASSIGNED_COLOR
-                          : UNASSIGNED_COLOR;
-                        const allSubsDone = task.subtasks.length > 0 &&
-                          task.subtasks.every(s => s.status === "done");
-
-                        return (
-                          <div key={task.id}>
-                            {/* Task row */}
-                            <div
-                              className="grid group/task hover:bg-muted/20 transition-colors"
-                              style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}
-                            >
-                              <div className="border-b border-r px-3 py-1.5 flex items-center gap-2 pl-8">
-                                {task.subtasks.length > 0 ? (
-                                  <button onClick={() => toggleTask(task.id)} className="shrink-0">
-                                    {isTaskExpanded ? (
-                                      <ChevronDown className="h-3 w-3 text-muted-foreground" />
-                                    ) : (
-                                      <ChevronRight className="h-3 w-3 text-muted-foreground" />
-                                    )}
-                                  </button>
-                                ) : (
-                                  <div className="w-3" />
-                                )}
-                                <StatusIcon
-                                  status={task.status}
-                                  onClick={() => {
-                                    const next = task.status === "done" ? "not_started" : "done";
-                                    updateTask(task.id, { status: next });
-                                  }}
-                                />
-                                <span className={`text-xs truncate flex-1 ${
-                                  task.status === "done" ? "line-through text-muted-foreground" : ""
-                                }`}>
-                                  {task.title}
-                                </span>
-                                <TaskActions
-                                  task={task}
-                                  teamMembers={teamMembers}
-                                  onAssign={(assigneeId) => updateTask(task.id, { assigneeId })}
-                                  onEdit={() => {
-                                    setEditingTask(task);
-                                    setEditTitle(task.title);
-                                    setEditDescription(task.description);
-                                    setEditStartDate(task.startDate || "");
-                                    setEditDueDate(task.dueDate || "");
-                                  }}
-                                  onAddSubtask={() => {
-                                    setAddingSubtask(task.id);
-                                    setNewSubtaskTitle("");
-                                  }}
-                                />
-                              </div>
-
-                              {/* Phase cells - show bar in the task's phase */}
-                              {PIPELINE_PHASES.map((p) => (
-                                <div key={p} className="border-b px-1 py-1.5 flex items-center">
-                                  {p === task.phase && (
-                                    <div className="w-full flex flex-col gap-0.5">
-                                      <div
-                                        className={`h-5 rounded-sm flex-1 flex items-center px-1.5 text-[10px] font-medium ${
-                                          task.status === "done"
-                                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                                            : taskColor.light
-                                        }`}
-                                      >
-                                        <span className="truncate">
-                                          {task.assignee?.name?.split(" ")[0] || "Unassigned"}
-                                        </span>
-                                        {task.subtasks.length > 0 && (
-                                          <span className="ml-auto text-[9px] opacity-70">
-                                            {task.subtasks.filter(s => s.status === "done").length}/{task.subtasks.length}
-                                          </span>
-                                        )}
-                                      </div>
-                                      {(task.startDate || task.dueDate) && (
-                                        <div className="text-[9px] text-muted-foreground px-1 truncate">
-                                          {task.startDate && task.dueDate
-                                            ? `${formatShortDate(task.startDate)} – ${formatShortDate(task.dueDate)}`
-                                            : task.dueDate
-                                              ? `Due ${formatShortDate(task.dueDate)}`
-                                              : `Start ${formatShortDate(task.startDate!)}`}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-
-                            {/* Subtask rows */}
-                            {isTaskExpanded && task.subtasks.map((sub) => {
-                              const subColor = sub.assigneeId
-                                ? assigneeColorMap.get(sub.assigneeId) || UNASSIGNED_COLOR
-                                : UNASSIGNED_COLOR;
-
-                              return (
-                                <div
-                                  key={sub.id}
-                                  className="grid group/sub hover:bg-muted/10 transition-colors"
-                                  style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}
-                                >
-                                  <div className="border-b border-r px-3 py-1 flex items-center gap-2 pl-14">
-                                    <StatusIcon
-                                      status={sub.status}
-                                      onClick={() => {
-                                        const next = sub.status === "done" ? "not_started" : "done";
-                                        updateTask(sub.id, { status: next });
-                                      }}
-                                    />
-                                    <span className={`text-[11px] truncate flex-1 ${
-                                      sub.status === "done" ? "line-through text-muted-foreground" : ""
-                                    }`}>
-                                      {sub.title}
-                                    </span>
-                                    <TaskActions
-                                      task={sub}
-                                      teamMembers={teamMembers}
-                                      onAssign={(assigneeId) => updateTask(sub.id, { assigneeId })}
-                                      onEdit={() => {
-                                        setEditingTask(sub);
-                                        setEditTitle(sub.title);
-                                        setEditDescription(sub.description);
-                                        setEditStartDate(sub.startDate || "");
-                                        setEditDueDate(sub.dueDate || "");
-                                      }}
-                                    />
-                                  </div>
-
-                                  {PIPELINE_PHASES.map((p) => (
-                                    <div key={p} className="border-b px-1 py-1 flex items-center">
-                                      {p === sub.phase && (
-                                        <div
-                                          className={`h-4 rounded-sm w-full flex items-center px-1.5 text-[9px] ${
-                                            sub.status === "done"
-                                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
-                                              : subColor.light
-                                          }`}
-                                        >
-                                          <span className="truncate">
-                                            {sub.assignee?.name?.split(" ")[0] || ""}
-                                          </span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              );
-                            })}
-
-                            {/* Add subtask row */}
-                            {isTaskExpanded && addingSubtask === task.id && (
-                              <div
-                                className="grid"
-                                style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}
-                              >
-                                <div className="border-b border-r px-3 py-1 flex items-center gap-2 pl-14">
-                                  <Input
-                                    value={newSubtaskTitle}
-                                    onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        addSubtask(task.id, task.pipelineGrantId!, task.phase!);
-                                      }
-                                      if (e.key === "Escape") {
-                                        setAddingSubtask(null);
-                                        setNewSubtaskTitle("");
-                                      }
-                                    }}
-                                    placeholder="New subtask..."
-                                    className="h-6 text-xs"
-                                    autoFocus
-                                  />
-                                  <Button
-                                    size="sm"
-                                    className="h-6 text-[10px] px-2"
-                                    onClick={() => addSubtask(task.id, task.pipelineGrantId!, task.phase!)}
-                                  >
-                                    Add
-                                  </Button>
-                                </div>
-                                {PIPELINE_PHASES.map((p) => (
-                                  <div key={p} className="border-b" />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      });
-                    })}
-                  </>
-                )}
-
-                {/* If expanded but no tasks, show generate button */}
-                {isExpanded && grantTasks.length === 0 && (
+                {/* Expanded subtask row */}
+                {isExpanded && hasTasks && (
                   <div
                     className="grid"
-                    style={{ gridTemplateColumns: `280px repeat(${PIPELINE_PHASES.length}, 1fr)` }}
+                    style={{ gridTemplateColumns: gridCols }}
                   >
-                    <div className="border-b border-r px-3 py-4 flex items-center justify-center col-span-1">
+                    {/* Left cell - empty */}
+                    <div className="border-b border-r" />
+
+                    {/* Phase cells with subtasks listed directly */}
+                    {PIPELINE_PHASES.map((phase) => {
+                      const phaseTasks = grantTasks.filter(t => t.phase === phase);
+                      const isCurrentPhase = phase === grant.stage;
+                      // Flatten: show subtasks if they exist, otherwise the parent task itself
+                      const items: Array<{ item: GanttSubtask | GanttTask; parentTask: GanttTask }> = [];
+                      for (const task of phaseTasks) {
+                        if (task.subtasks.length > 0) {
+                          for (const sub of task.subtasks) {
+                            items.push({ item: sub, parentTask: task });
+                          }
+                        } else {
+                          items.push({ item: task, parentTask: task });
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={phase}
+                          className={`border-b border-l ${
+                            isCurrentPhase ? "bg-muted/20" : ""
+                          }`}
+                        >
+                          {items.length === 0 ? (
+                            <div className="px-2 py-3 text-xs text-muted-foreground/30 text-center">
+                              &mdash;
+                            </div>
+                          ) : (
+                            <div className="py-1.5">
+                              {items.map(({ item, parentTask }) => {
+                                const color = item.assigneeId
+                                  ? assigneeColorMap.get(item.assigneeId) || UNASSIGNED_COLOR
+                                  : UNASSIGNED_COLOR;
+
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-start gap-1.5 px-2 py-1 group/item hover:bg-muted/30 transition-colors"
+                                  >
+                                    <button
+                                      onClick={() => {
+                                        const next = item.status === "done" ? "not_started" : "done";
+                                        updateTask(item.id, { status: next });
+                                      }}
+                                      className="shrink-0 mt-0.5"
+                                    >
+                                      {item.status === "done" ? (
+                                        <Check className="h-3.5 w-3.5 text-green-600" />
+                                      ) : item.status === "in_progress" ? (
+                                        <Circle className="h-3.5 w-3.5 text-blue-500 fill-blue-500/20" />
+                                      ) : (
+                                        <Circle className="h-3.5 w-3.5 text-muted-foreground/40" />
+                                      )}
+                                    </button>
+
+                                    <span
+                                      className={`text-xs leading-snug flex-1 ${
+                                        item.status === "done"
+                                          ? "line-through text-muted-foreground"
+                                          : ""
+                                      }`}
+                                    >
+                                      {item.title}
+                                    </span>
+
+                                    {/* Assignee avatar */}
+                                    <AssigneeBadge
+                                      assignee={item.assignee}
+                                      assigneeId={item.assigneeId}
+                                      colorMap={assigneeColorMap}
+                                      teamMembers={teamMembers}
+                                      onAssign={(assigneeId) => updateTask(item.id, { assigneeId })}
+                                    />
+
+                                    {/* Edit button on hover */}
+                                    <button
+                                      onClick={() => {
+                                        setEditingTask(item);
+                                        setEditTitle(item.title);
+                                        setEditDescription(item.description);
+                                        setEditStartDate(item.startDate || "");
+                                        setEditDueDate(item.dueDate || "");
+                                      }}
+                                      className="shrink-0 mt-0.5 opacity-0 group-hover/item:opacity-50 hover:!opacity-100 transition-opacity"
+                                    >
+                                      <Pencil className="h-3 w-3 text-muted-foreground" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+
+                              {/* Add subtask + menu at bottom of cell */}
+                              {phaseTasks.length > 0 && (
+                                <div className="px-2 pt-1">
+                                  {addingSubtask && phaseTasks.some(t => t.id === addingSubtask.parentId) ? (
+                                    <div className="flex items-center gap-1">
+                                      <Input
+                                        value={newSubtaskTitle}
+                                        onChange={(e) => setNewSubtaskTitle(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") {
+                                            addSubtask(addingSubtask.parentId, addingSubtask.grantId, addingSubtask.phase);
+                                          }
+                                          if (e.key === "Escape") {
+                                            setAddingSubtask(null);
+                                            setNewSubtaskTitle("");
+                                          }
+                                        }}
+                                        placeholder="New subtask..."
+                                        className="h-6 text-xs"
+                                        autoFocus
+                                      />
+                                      <Button
+                                        size="sm"
+                                        className="h-6 text-xs px-2 shrink-0"
+                                        onClick={() => addSubtask(addingSubtask.parentId, addingSubtask.grantId, addingSubtask.phase)}
+                                      >
+                                        Add
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <PhaseActions
+                                      phaseTasks={phaseTasks}
+                                      teamMembers={teamMembers}
+                                      onAddSubtask={(taskId, phase, grantId) => {
+                                        setAddingSubtask({ parentId: taskId, phase, grantId });
+                                        setNewSubtaskTitle("");
+                                      }}
+                                      onEdit={(t) => {
+                                        setEditingTask(t);
+                                        setEditTitle(t.title);
+                                        setEditDescription(t.description);
+                                        setEditStartDate(t.startDate || "");
+                                        setEditDueDate(t.dueDate || "");
+                                      }}
+                                      onAssign={(id, assigneeId) => updateTask(id, { assigneeId })}
+                                    />
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Expanded but no tasks */}
+                {isExpanded && !hasTasks && (
+                  <div className="grid" style={{ gridTemplateColumns: gridCols }}>
+                    <div className="border-b border-r px-3 py-4 flex items-center justify-center">
                       <Button
                         size="sm"
                         variant="outline"
                         className="text-xs"
+                        disabled={generatingGrantId === grant.id}
                         onClick={() => generateTasks(grant.id)}
                       >
-                        <Plus className="h-3 w-3 mr-1.5" />
-                        Generate Tasks
+                        {generatingGrantId === grant.id ? (
+                          <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                        ) : (
+                          <Plus className="h-3 w-3 mr-1.5" />
+                        )}
+                        {generatingGrantId === grant.id ? "Generating..." : "Generate Tasks"}
                       </Button>
                     </div>
                     {PIPELINE_PHASES.map((p) => (
@@ -732,62 +689,48 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
   );
 }
 
-// ── Sub-components ──
+// ── Assignee Badge ──
 
-function StatusIcon({ status, onClick }: { status: string; onClick: () => void }) {
-  if (status === "done") {
-    return (
-      <button onClick={onClick} className="shrink-0">
-        <Check className="h-3.5 w-3.5 text-green-600" />
-      </button>
-    );
-  }
-  if (status === "in_progress") {
-    return (
-      <button onClick={onClick} className="shrink-0">
-        <Circle className="h-3.5 w-3.5 text-blue-500 fill-blue-500/20" />
-      </button>
-    );
-  }
-  return (
-    <button onClick={onClick} className="shrink-0">
-      <Circle className="h-3.5 w-3.5 text-muted-foreground" />
-    </button>
-  );
-}
-
-function TaskActions({
-  task,
+function AssigneeBadge({
+  assignee,
+  assigneeId,
+  colorMap,
   teamMembers,
   onAssign,
-  onEdit,
-  onAddSubtask,
 }: {
-  task: GanttTask | GanttSubtask;
+  assignee: TaskAssignee | null;
+  assigneeId: string | null;
+  colorMap: Map<string, ReturnType<typeof getAssigneeColor>>;
   teamMembers: TeamMember[];
   onAssign: (assigneeId: string | null) => void;
-  onEdit: () => void;
-  onAddSubtask?: () => void;
 }) {
+  const color = assigneeId ? colorMap.get(assigneeId) || UNASSIGNED_COLOR : UNASSIGNED_COLOR;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-5 w-5 p-0 opacity-40 hover:opacity-100 transition-opacity">
-          <MoreHorizontal className="h-3.5 w-3.5" />
-        </Button>
+        <button className="shrink-0 mt-0.5">
+          {assignee ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div
+                  className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white ${color.bg}`}
+                >
+                  {getInitials(assignee.name)}
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">
+                {assignee.name}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <div className="w-5 h-5 rounded-full border border-dashed border-muted-foreground/30 flex items-center justify-center">
+              <User className="h-2.5 w-2.5 text-muted-foreground/30" />
+            </div>
+          )}
+        </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem onClick={onEdit} className="text-xs">
-          <Pencil className="h-3 w-3 mr-2" />
-          Edit
-        </DropdownMenuItem>
-        {onAddSubtask && (
-          <DropdownMenuItem onClick={onAddSubtask} className="text-xs">
-            <Plus className="h-3 w-3 mr-2" />
-            Add Subtask
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
+      <DropdownMenuContent align="end" className="w-44">
         <div className="px-2 py-1 text-[10px] text-muted-foreground font-medium">Assign to</div>
         {teamMembers.map((member) => (
           <DropdownMenuItem
@@ -797,16 +740,84 @@ function TaskActions({
           >
             <User className="h-3 w-3 mr-2" />
             {member.name}
-            {task.assigneeId === member.id && (
-              <Check className="h-3 w-3 ml-auto" />
-            )}
+            {assigneeId === member.id && <Check className="h-3 w-3 ml-auto" />}
           </DropdownMenuItem>
         ))}
-        {task.assigneeId && (
-          <DropdownMenuItem onClick={() => onAssign(null)} className="text-xs text-muted-foreground">
-            Unassign
-          </DropdownMenuItem>
+        {assigneeId && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onAssign(null)} className="text-xs text-muted-foreground">
+              Unassign
+            </DropdownMenuItem>
+          </>
         )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ── Phase Actions: three-dot at the bottom of a phase cell ──
+
+function PhaseActions({
+  phaseTasks,
+  teamMembers,
+  onAddSubtask,
+  onEdit,
+  onAssign,
+}: {
+  phaseTasks: GanttTask[];
+  teamMembers: TeamMember[];
+  onAddSubtask: (parentId: string, phase: string, grantId: string) => void;
+  onEdit: (task: GanttTask) => void;
+  onAssign: (taskId: string, assigneeId: string | null) => void;
+}) {
+  // Use the first (usually only) parent task for the phase
+  const primaryTask = phaseTasks[0];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-5 w-full p-0 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuItem
+          onClick={() => onAddSubtask(primaryTask.id, primaryTask.phase!, primaryTask.pipelineGrantId!)}
+          className="text-xs"
+        >
+          <Plus className="h-3 w-3 mr-2" />
+          Add Subtask
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onEdit(primaryTask)} className="text-xs">
+          <Pencil className="h-3 w-3 mr-2" />
+          Edit Phase Task
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1 text-[10px] text-muted-foreground font-medium">
+          Assign all to
+        </div>
+        {teamMembers.map((member) => (
+          <DropdownMenuItem
+            key={member.id}
+            onClick={() => {
+              for (const t of phaseTasks) {
+                onAssign(t.id, member.id);
+                for (const s of t.subtasks) {
+                  onAssign(s.id, member.id);
+                }
+              }
+            }}
+            className="text-xs"
+          >
+            <User className="h-3 w-3 mr-2" />
+            {member.name}
+          </DropdownMenuItem>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   );

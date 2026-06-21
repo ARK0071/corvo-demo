@@ -471,6 +471,41 @@ export async function generateReportsForAward(awardId: string): Promise<number> 
     });
   }
 
+  // SF-270 Reimbursement Requests (quarterly, aligned with SF-425)
+  for (const qd of quarterlyDates) {
+    const isPast = qd.dueDate.toISOString().split("T")[0] < todayStr;
+    reportsToCreate.push({
+      awardId: award.id,
+      type: "sf270",
+      title: "SF-270 Request for Advance or Reimbursement",
+      dueDate: qd.dueDate,
+      periodStart: qd.periodStart,
+      periodEnd: qd.periodEnd,
+      status: isPast ? "submitted" : "upcoming",
+      submittedDate: isPast ? qd.dueDate : null,
+      notes: "",
+    });
+  }
+
+  // BABA Compliance Reports (quarterly for infrastructure programs)
+  const babaPrograms = ["PIDP", "CRISI", "INFRA", "RAISE", "Mega"];
+  if (babaPrograms.some((p) => award.program.includes(p))) {
+    for (const qd of quarterlyDates) {
+      const isPast = qd.dueDate.toISOString().split("T")[0] < todayStr;
+      reportsToCreate.push({
+        awardId: award.id,
+        type: "baba",
+        title: "BABA Compliance Report",
+        dueDate: qd.dueDate,
+        periodStart: qd.periodStart,
+        periodEnd: qd.periodEnd,
+        status: isPast ? "submitted" : "upcoming",
+        submittedDate: isPast ? qd.dueDate : null,
+        notes: "",
+      });
+    }
+  }
+
   // Closeout report if applicable
   if (award.status === "closeout_pending" || award.status === "closed") {
     const closeoutDue = new Date(
@@ -524,6 +559,26 @@ export async function autoSeedIfEmpty(): Promise<void> {
           awardId: award.id,
           type: "sf425",
           title: `SF-425 - ${award.title}`,
+          dueDate: new Date(end.getTime() + 90 * 24 * 60 * 60 * 1000),
+          periodStart: start,
+          periodEnd: end,
+          status: "upcoming",
+          notes: "",
+        },
+        {
+          awardId: award.id,
+          type: "sf270",
+          title: `SF-270 - ${award.title}`,
+          dueDate: new Date(end.getTime() + 90 * 24 * 60 * 60 * 1000),
+          periodStart: start,
+          periodEnd: end,
+          status: "upcoming",
+          notes: "",
+        },
+        {
+          awardId: award.id,
+          type: "baba",
+          title: `BABA Compliance - ${award.title}`,
           dueDate: new Date(end.getTime() + 90 * 24 * 60 * 60 * 1000),
           periodStart: start,
           periodEnd: end,

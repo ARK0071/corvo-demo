@@ -114,6 +114,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "pipelineGrantId is required" }, { status: 400 });
     }
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(pipelineGrantId)) {
+      // Received a Grants.gov opportunity ID instead of the DB UUID — look up the real ID
+      const pipelineRow = await prisma.pipelineGrant.findFirst({
+        where: { grantId: pipelineGrantId, portProfileId },
+        select: { id: true },
+      });
+      if (!pipelineRow) {
+        return NextResponse.json(
+          { error: `Pipeline grant not found for grantId: ${pipelineGrantId}` },
+          { status: 404 },
+        );
+      }
+      return handleTaskGeneration(pipelineRow.id, portProfileId, phases, session?.user?.id);
+    }
+
     // Check if tasks already exist for this pipeline grant
     const existingCount = await prisma.task.count({
       where: { pipelineGrantId, parentTaskId: null },
@@ -225,10 +241,25 @@ export async function PUT(request: NextRequest) {
       },
     });
 
-    // If marking a parent task as done, check if all phase tasks are done
-    // and auto-advance the pipeline grant to the next phase
-    if (updates.status === "done" && !task.parentTaskId && task.pipelineGrantId && task.phase) {
-      const phaseTasks = await prisma.task.findMany({
+    // Auto-complete parent when all subtasks are done, then auto-advance phase
+    if (updates.status === "done" && task.pipelineGrantId && task.phase) {
+      // If this is a subtask, check if all siblings are done → mark parent done
+      if (task.parentTaskId) {
+        const siblings = await prisma.task.findMany({
+          where: { parentTaskId: task.parentTaskId },
+          select: { status: true },
+        });
+        const allSiblingsDone = siblings.every((s: { status: string }) => s.status === "done");
+        if (allSiblingsDone) {
+          await prisma.task.update({
+            where: { id: task.parentTaskId },
+            data: { status: "done" },
+          });
+        }
+      }
+
+      // Check if all parent tasks in this phase are done → advance pipeline stage
+      const phaseParents = await prisma.task.findMany({
         where: {
           pipelineGrantId: task.pipelineGrantId,
           parentTaskId: null,
@@ -237,8 +268,8 @@ export async function PUT(request: NextRequest) {
         select: { status: true },
       });
 
-      const allDone = phaseTasks.every((t: { status: string }) => t.status === "done");
-      if (allDone) {
+      const allPhaseDone = phaseParents.every((t: { status: string }) => t.status === "done");
+      if (allPhaseDone) {
         const currentPhaseIndex = PIPELINE_PHASES.indexOf(task.phase as PipelinePhase);
         if (currentPhaseIndex >= 0 && currentPhaseIndex < PIPELINE_PHASES.length - 1) {
           const nextPhase = PIPELINE_PHASES[currentPhaseIndex + 1];
@@ -247,6 +278,20 @@ export async function PUT(request: NextRequest) {
             data: { stage: nextPhase },
           });
         }
+      }
+    }
+
+    // If un-completing a subtask, also un-complete the parent
+    if (updates.status && updates.status !== "done" && task.parentTaskId) {
+      const parent = await prisma.task.findUnique({
+        where: { id: task.parentTaskId },
+        select: { status: true },
+      });
+      if (parent?.status === "done") {
+        await prisma.task.update({
+          where: { id: task.parentTaskId },
+          data: { status: "not_started" },
+        });
       }
     }
 

@@ -1195,6 +1195,64 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
     });
   }, []);
 
+  // ─── Phase Navigation (go back to earlier phases) ───
+
+  function handleNavigateToPhase(targetPhase: "research" | "review" | "draft") {
+    if (targetPhase === "research") {
+      // Re-run research for current grant
+      if (currentGrantId && currentGrantTitle) {
+        handleStartResearch(currentGrantId, currentGrantTitle);
+      } else if (selectedDraft) {
+        handleStartResearch(selectedDraft.grantId, selectedDraft.grantTitle);
+      }
+      return;
+    }
+
+    if (targetPhase === "review") {
+      // Go back to review phase — restore research data from draft or current state
+      let rd = researchData;
+      let gId = currentGrantId;
+      let gTitle = currentGrantTitle;
+      let dId = currentDraftId;
+      let ug = userGuidance;
+
+      if (phase === "draft" && selectedDraft) {
+        rd = selectedDraft.researchData || researchData;
+        gId = selectedDraft.grantId;
+        gTitle = selectedDraft.grantTitle;
+        dId = selectedDraft.id;
+        ug = selectedDraft.userGuidance || userGuidance;
+      }
+
+      if (!rd) return;
+
+      setResearchData(rd);
+      setCurrentGrantId(gId);
+      setCurrentGrantTitle(gTitle);
+      setCurrentDraftId(dId);
+      setUserGuidance(ug);
+
+      if (rd.metadata?.nofoAutoFetched) setNofoUploaded(true);
+      if (rd.metadata?.acfrAutoFetched && rd.metadata?.acfrPdfUrl) setAcfrFileName("Auto-fetched from web");
+
+      setPhase("review");
+      return;
+    }
+
+    if (targetPhase === "draft") {
+      // Go forward to draft view — find draft with sections
+      const draftToShow = selectedDraft
+        || drafts.find(d => d.id === currentDraftId)
+        || (currentGrantId ? drafts.find(d => d.grantId === currentGrantId) : null);
+
+      if (draftToShow && draftToShow.sections.length > 0 && draftToShow.sections.some(s => s.content?.trim())) {
+        setSelectedDraftId(draftToShow.id);
+        setExpandedSections(new Set(draftToShow.sections.map((s) => s.sectionId)));
+        setPhase("draft");
+      }
+    }
+  }
+
   // ─── Legacy Export Functions (kept for HTML/TXT) ───
 
   function exportToHTML() {
@@ -1321,27 +1379,48 @@ ${s.content
         <div className="p-4 border-b">
           <div className="space-y-2">
             {[
-              { key: "research", label: "Research", icon: Search, phases: ["researching", "review", "generating", "draft"] },
-              { key: "review", label: "Review & Forms", icon: FileCheck, phases: ["review", "generating", "draft"] },
-              { key: "draft", label: "Generate Draft", icon: FileText, phases: ["generating", "draft"] },
+              { key: "research" as const, label: "Research", icon: Search, phases: ["researching", "review", "generating", "draft"] },
+              { key: "review" as const, label: "Review & Forms", icon: FileCheck, phases: ["review", "generating", "draft"] },
+              { key: "draft" as const, label: "Generate Draft", icon: FileText, phases: ["generating", "draft"] },
             ].map((step, i) => {
-              const isDone = step.key === "research" && ["review", "generating", "draft"].includes(phase);
-              const isDone2 = step.key === "review" && ["generating", "draft"].includes(phase);
-              const isDone3 = step.key === "draft" && phase === "draft";
+              // A draft with real content exists (for forward-navigation to draft phase)
+              const draftCandidate = selectedDraft
+                || drafts.find(d => d.id === currentDraftId)
+                || (currentGrantId ? drafts.find(d => d.grantId === currentGrantId) : undefined);
+              const hasDraftWithSections = draftCandidate
+                ? draftCandidate.sections.length > 0 && draftCandidate.sections.some(s => s.content?.trim())
+                : false;
+              // Research is done if we have research data (even when navigating away from review/draft)
+              const researchDone = !!researchData || ["review", "generating", "draft"].includes(phase);
+              const isDone = step.key === "research" && researchDone;
+              const isDone2 = step.key === "review" && (["generating", "draft"].includes(phase) || (researchDone && phase !== "researching" && phase !== "review"));
+              const isDone3 = step.key === "draft" && (phase === "draft" || hasDraftWithSections);
+              const stepDone = isDone || isDone2 || isDone3;
               const isActive = (step.key === "research" && phase === "researching") ||
                                (step.key === "review" && phase === "review") ||
                                (step.key === "draft" && phase === "generating");
+              const isProcessing = phase === "researching" || phase === "generating";
+              // Clickable if step is done and not already the active/current phase
+              const canClick = stepDone && !isActive && !isProcessing && !(step.key === "draft" && phase === "draft");
 
               return (
-                <div key={step.key} className="flex items-center gap-3">
+                <button
+                  key={step.key}
+                  className={`flex items-center gap-3 w-full text-left rounded-md px-2 py-1 -mx-2 transition-colors ${
+                    canClick ? "hover:bg-muted/60 cursor-pointer" : isProcessing ? "cursor-wait" : "cursor-default"
+                  }`}
+                  disabled={!canClick}
+                  onClick={() => canClick && handleNavigateToPhase(step.key)}
+                  title={canClick ? `Go to ${step.label}` : undefined}
+                >
                   <div className={`flex items-center justify-center w-7 h-7 rounded-full border-2 shrink-0 ${
-                    isDone || isDone2 || isDone3
+                    stepDone
                       ? "bg-emerald-500 border-emerald-500 text-white"
                       : isActive
                       ? "border-[#3d8b8b] text-[#3d8b8b] bg-[#3d8b8b]/10"
                       : "border-muted-foreground/30 text-muted-foreground/30"
                   }`}>
-                    {isDone || isDone2 || isDone3 ? (
+                    {stepDone ? (
                       <CheckCircle2 className="h-4 w-4" />
                     ) : isActive ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1350,7 +1429,7 @@ ${s.content
                     )}
                   </div>
                   <span className={`text-sm ${
-                    isDone || isDone2 || isDone3
+                    stepDone
                       ? "text-emerald-600 font-medium"
                       : isActive
                       ? "text-foreground font-medium"
@@ -1358,7 +1437,10 @@ ${s.content
                   }`}>
                     {step.label}
                   </span>
-                </div>
+                  {canClick && (
+                    <RotateCw className="h-3 w-3 ml-auto text-muted-foreground/50" />
+                  )}
+                </button>
               );
             })}
           </div>
@@ -1490,6 +1572,7 @@ ${s.content
               setShowVersionHistory(!showVersionHistory);
             }}
             onRestoreVersion={(vn) => handleRestoreVersion(selectedDraft.id, vn)}
+            onBackToReview={() => handleNavigateToPhase("review")}
           />
         )}
         {phase === "draft" && !selectedDraft && (
@@ -2445,6 +2528,7 @@ function DraftView({
   onRegenerateSection,
   onToggleVersionHistory,
   onRestoreVersion,
+  onBackToReview,
 }: {
   draft: LocalDraft;
   expandedSections: Set<string>;
@@ -2469,6 +2553,7 @@ function DraftView({
   onRegenerateSection: (sectionId: string, additionalInstructions?: string) => void;
   onToggleVersionHistory: () => void;
   onRestoreVersion: (versionNumber: number) => void;
+  onBackToReview: () => void;
 }) {
   return (
     <>
@@ -2530,6 +2615,9 @@ function DraftView({
               <Eye className="h-3 w-3 inline mr-1" /> Preview
             </button>
           </div>
+          <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={onBackToReview}>
+            <RefreshCw className="h-3.5 w-3.5" /> Edit Research & Regenerate
+          </Button>
           <div className="flex-1" />
           <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={() => onSetShowAttachments(!showAttachments)}>
             <Paperclip className="h-3.5 w-3.5" />

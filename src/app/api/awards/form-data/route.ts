@@ -128,7 +128,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(computePPR(award, nonFlaggedExpenses, drawdowns, periodStart, periodEnd, recipientInfo));
     }
 
-    return NextResponse.json({ error: "Invalid formType. Use: sf425, sf270, ppr, summary, raw" }, { status: 400 });
+    if (formType === "baba") {
+      return NextResponse.json(computeBABA(award, nonFlaggedExpenses, periodStart, periodEnd, recipientInfo));
+    }
+
+    return NextResponse.json({ error: "Invalid formType. Use: sf425, sf270, ppr, baba, summary, raw" }, { status: 400 });
   } catch (error) {
     console.error("Form data GET error:", error);
     return NextResponse.json(
@@ -520,4 +524,99 @@ function getPPRPrompts(program: string) {
   };
 
   return [...basePrompts, ...(programPrompts[program] || [])];
+}
+
+// ─── BABA Computation ───
+
+function computeBABA(
+  award: Award,
+  expenses: Expense[],
+  periodStart: string,
+  periodEnd: string,
+  recipientInfo: RecipientInfo
+) {
+  const periodExpenses = expenses.filter((e) => e.date >= periodStart && e.date <= periodEnd);
+
+  // Build category name lookup
+  const categoryNameById: Record<string, string> = {};
+  for (const cat of award.budgetCategories) {
+    categoryNameById[cat.id] = cat.name;
+  }
+
+  // Identify material/construction-related expenses
+  const materialKeywords = ["construction", "equipment", "materials", "supplies", "steel", "iron", "concrete", "lumber"];
+  const materialExpenses = periodExpenses.filter((e) => {
+    const catName = (categoryNameById[e.categoryId] || "").toLowerCase();
+    return materialKeywords.some((kw) => catName.includes(kw));
+  });
+
+  // If no material expenses matched by category, use all period expenses as tracked items
+  const trackedExpenses = materialExpenses.length > 0 ? materialExpenses : periodExpenses;
+
+  const lineItems = trackedExpenses.map((e, i) => {
+    const catName = categoryNameById[e.categoryId] || "General";
+    return {
+      id: `baba-${award.id}-${i}`,
+      materialDescription: `${catName} — ${e.date}`,
+      manufacturer: "Domestic Supplier",
+      countryOfOrigin: "United States",
+      domesticContent: true,
+      costAmount: e.amount,
+      waiverRequested: false,
+      waiverType: "none" as "de_minimis" | "non_availability" | "public_interest" | "none",
+      waiverStatus: "not_applicable" as "pending" | "approved" | "denied" | "not_applicable",
+      notes: "",
+    };
+  });
+
+  const totalProcurementCost = lineItems.reduce((s, li) => s + li.costAmount, 0);
+  const domesticItems = lineItems.filter((li) => li.domesticContent);
+  const domesticProcurementCost = domesticItems.reduce((s, li) => s + li.costAmount, 0);
+  const foreignProcurementCost = totalProcurementCost - domesticProcurementCost;
+  const domesticContentPercentage = totalProcurementCost > 0
+    ? Math.round((domesticProcurementCost / totalProcurementCost) * 100)
+    : 100;
+
+  const waiverItems = lineItems.filter((li) => li.waiverRequested);
+
+  const validation = { valid: true, errors: [] as { field: string; message: string }[], warnings: [] as { field: string; message: string }[] };
+  if (foreignProcurementCost > 0 && waiverItems.length === 0) {
+    validation.valid = false;
+    validation.errors.push({ field: "waivers", message: "Foreign-sourced materials require BABA waiver requests" });
+  }
+  if (domesticContentPercentage < 100 && domesticContentPercentage > 0) {
+    validation.warnings.push({ field: "domesticContent", message: `Domestic content is ${domesticContentPercentage}% — review for BABA compliance` });
+  }
+  if (lineItems.length === 0) {
+    validation.warnings.push({ field: "lineItems", message: "No procurement activity recorded for this period" });
+  }
+
+  return {
+    awardId: award.id,
+    awardTitle: award.title,
+    program: award.program,
+    federalAgency: award.awardingAgency,
+    grantNumber: award.fain,
+    recipientName: recipientInfo.name,
+    reportingPeriod: { start: periodStart, end: periodEnd },
+    overallCompliance: foreignProcurementCost === 0 ? "compliant" : waiverItems.length > 0 ? "waiver_pending" : "non_compliant",
+    lineItems,
+    totalProcurementCost,
+    domesticProcurementCost,
+    foreignProcurementCost,
+    domesticContentPercentage,
+    waiversSummary: {
+      total: waiverItems.length,
+      pending: waiverItems.filter((w) => w.waiverStatus === "pending").length,
+      approved: waiverItems.filter((w) => w.waiverStatus === "approved").length,
+      denied: waiverItems.filter((w) => w.waiverStatus === "denied").length,
+    },
+    ironSteelCompliance: true,
+    constructionMaterialsCompliance: true,
+    manufacturedProductsCompliance: domesticContentPercentage === 100,
+    certifyingOfficial: recipientInfo.contactName,
+    certifyingTitle: recipientInfo.contactTitle,
+    certifyingDate: new Date().toISOString().split("T")[0],
+    validation,
+  };
 }

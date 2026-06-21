@@ -24,6 +24,7 @@ const STATIC_PORTS = [
   { id: "freeport-demo", name: "Port Freeport DEMO", slug: "freeport-demo" },
   { id: "freeport-mock", name: "Port Freeport Mock", slug: "freeport-mock" },
   { id: "burns-engineering", name: "Burns Engineering", slug: "burns-engineering" },
+  { id: "cte", name: "Center for Transportation and the Environment", slug: "cte" },
 ] as const;
 
 // Dynamic ports added at runtime via admin

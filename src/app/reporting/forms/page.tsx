@@ -10,12 +10,14 @@ import {
   AlertTriangle,
   Users,
   Check,
+  Shield,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
 import SF425FormView from "../components/SF425FormView";
 import SF270FormView from "../components/SF270FormView";
 import PPRFormView from "../components/PPRFormView";
+import BABAFormView from "../components/BABAFormView";
 import ReportDetailView from "../components/ReportDetailView";
 
 // ─── Types ───
@@ -63,7 +65,7 @@ function daysUntil(dateStr: string): number {
 }
 
 function reportTypeLabel(type: string): string {
-  const map: Record<string, string> = { sf425: "SF-425", sf270: "SF-270", progress: "Progress Report", closeout: "Closeout" };
+  const map: Record<string, string> = { sf425: "SF-425", sf270: "SF-270", baba: "BABA", progress: "Progress Report", closeout: "Closeout" };
   return map[type] || type;
 }
 
@@ -88,7 +90,8 @@ type DetailView =
   | { mode: "detail"; report: Report }
   | { mode: "sf425"; report: Report }
   | { mode: "sf270"; report: Report }
-  | { mode: "ppr"; report: Report };
+  | { mode: "ppr"; report: Report }
+  | { mode: "baba"; report: Report };
 
 // ─── Page ───
 
@@ -124,18 +127,17 @@ export default function FormsPage() {
   useEffect(() => { fetchReports(); }, [tenant.isLoading, tenant.portId]);
 
   const handleSelectReport = (report: Report) => {
-    // For SF-425 reports, go directly to the form
     if (report.type === "sf425") {
       setView({ mode: "sf425", report });
+    } else if (report.type === "sf270") {
+      setView({ mode: "sf270", report });
+    } else if (report.type === "baba") {
+      setView({ mode: "baba", report });
     } else if (report.type === "progress" || report.type === "ppr") {
       setView({ mode: "ppr", report });
     } else {
       setView({ mode: "detail", report });
     }
-  };
-
-  const handleSelectSF270 = (report: Report) => {
-    setView({ mode: "sf270", report });
   };
 
   // ─── Detail Views ───
@@ -197,6 +199,22 @@ export default function FormsPage() {
       );
     }
 
+    if (view.mode === "baba") {
+      return (
+        <BABAFormView
+          reportId={r.id}
+          awardId={r.awardId}
+          periodStart={r.periodStart}
+          periodEnd={r.periodEnd}
+          program={r.program}
+          awardTitle={r.awardTitle}
+          onBack={() => setView(null)}
+          reportStatus={r.status}
+          onStatusChange={() => { fetchReports(); setView(null); }}
+        />
+      );
+    }
+
     // detail mode
     return (
       <ReportDetailView
@@ -225,6 +243,8 @@ export default function FormsPage() {
 
   const pending = reports.filter((r) => r.status !== "submitted");
   const sf425Reports = pending.filter((r) => r.type === "sf425").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const sf270Reports = pending.filter((r) => r.type === "sf270").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const babaReports = pending.filter((r) => r.type === "baba").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const progressReports = pending.filter((r) => r.type === "progress").sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const closeoutReports = pending.filter((r) => r.type === "closeout");
 
@@ -244,10 +264,16 @@ export default function FormsPage() {
 
       <FormSection
         icon={<Banknote className="h-4 w-4 text-[#3d8b8b]" />}
-        title="SF-270 Reimbursement Requests"
-        reports={sf425Reports.slice(0, 6)}
-        onSelect={handleSelectSF270}
-        labelOverride="SF-270"
+        title="SF-270 Request for Advance or Reimbursement"
+        reports={sf270Reports}
+        onSelect={handleSelectReport}
+      />
+
+      <FormSection
+        icon={<Shield className="h-4 w-4 text-[#3d8b8b]" />}
+        title="BABA (Build America, Buy America) Compliance"
+        reports={babaReports}
+        onSelect={handleSelectReport}
       />
 
       <FormSection

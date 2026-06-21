@@ -119,6 +119,73 @@ export interface SF270Validation {
   errors: { lineId: string; message: string }[];
 }
 
+// ─── BABA Types ───
+
+export interface BABALineItem {
+  id: string;
+  materialDescription: string;
+  manufacturer: string;
+  countryOfOrigin: string;
+  domesticContent: boolean;
+  costAmount: number;
+  waiverRequested: boolean;
+  waiverType?: "de_minimis" | "non_availability" | "public_interest" | "none";
+  waiverStatus?: "pending" | "approved" | "denied" | "not_applicable";
+  notes: string;
+}
+
+export interface BABAFormData {
+  // Header
+  awardId: string;
+  awardTitle: string;
+  program: string;
+  federalAgency: string;
+  grantNumber: string;
+  recipientName: string;
+
+  // Reporting period
+  reportingPeriod: { start: string; end: string };
+
+  // Compliance status
+  overallCompliance: "compliant" | "non_compliant" | "waiver_pending" | "not_applicable";
+
+  // Material / product line items
+  lineItems: BABALineItem[];
+
+  // Summary metrics
+  totalProcurementCost: number;
+  domesticProcurementCost: number;
+  foreignProcurementCost: number;
+  domesticContentPercentage: number;
+
+  // Waivers
+  waiversSummary: {
+    total: number;
+    pending: number;
+    approved: number;
+    denied: number;
+  };
+
+  // Iron/Steel/Construction Materials tracking (BABA Section 70914)
+  ironSteelCompliance: boolean;
+  constructionMaterialsCompliance: boolean;
+  manufacturedProductsCompliance: boolean;
+
+  // Certification
+  certifyingOfficial: string;
+  certifyingTitle: string;
+  certifyingDate: string;
+
+  // Validation
+  validation: BABAValidation;
+}
+
+export interface BABAValidation {
+  valid: boolean;
+  errors: { field: string; message: string }[];
+  warnings: { field: string; message: string }[];
+}
+
 // ─── SF-PPR Types ───
 
 export interface PPRFormData {
@@ -521,11 +588,91 @@ function getDefaultObjectives(award: Award): PPRObjective[] {
   return objectives;
 }
 
+// ─── BABA Generation ───
+
+export function generateBABA(awardId: string, periodStart: string, periodEnd: string): BABAFormData | null {
+  const award = getAwardById(awardId);
+  if (!award) return null;
+
+  const expenses = getExpensesForAward(awardId).filter((e) => e.status !== "flagged");
+  const periodExpenses = expenses.filter((e) => e.date >= periodStart && e.date <= periodEnd);
+
+  // Generate sample line items from period expenses that look like material purchases
+  const materialCategories = ["Construction", "Equipment", "Materials", "Supplies"];
+  const materialExpenses = periodExpenses.filter((e) =>
+    materialCategories.some((cat) => (e as any).categoryName?.includes(cat) || (e as any).vendor?.includes(cat))
+  );
+
+  const lineItems: BABALineItem[] = materialExpenses.length > 0
+    ? materialExpenses.map((e, i) => ({
+        id: `baba-${awardId}-${i}`,
+        materialDescription: (e as any).description || `Material Purchase #${i + 1}`,
+        manufacturer: "Domestic Manufacturer",
+        countryOfOrigin: "United States",
+        domesticContent: true,
+        costAmount: e.amount,
+        waiverRequested: false,
+        waiverType: "none" as const,
+        waiverStatus: "not_applicable" as const,
+        notes: "",
+      }))
+    : [];
+
+  const totalProcurementCost = lineItems.reduce((s, li) => s + li.costAmount, 0);
+  const domesticItems = lineItems.filter((li) => li.domesticContent);
+  const domesticProcurementCost = domesticItems.reduce((s, li) => s + li.costAmount, 0);
+  const foreignProcurementCost = totalProcurementCost - domesticProcurementCost;
+  const domesticContentPercentage = totalProcurementCost > 0
+    ? Math.round((domesticProcurementCost / totalProcurementCost) * 100)
+    : 100;
+
+  const waiverItems = lineItems.filter((li) => li.waiverRequested);
+
+  const validation: BABAValidation = { valid: true, errors: [], warnings: [] };
+  if (foreignProcurementCost > 0 && waiverItems.length === 0) {
+    validation.valid = false;
+    validation.errors.push({ field: "waivers", message: "Foreign-sourced materials require BABA waiver requests" });
+  }
+  if (domesticContentPercentage < 100 && domesticContentPercentage > 0) {
+    validation.warnings.push({ field: "domesticContent", message: `Domestic content is ${domesticContentPercentage}% — review for BABA compliance` });
+  }
+
+  return {
+    awardId,
+    awardTitle: award.title,
+    program: award.program,
+    federalAgency: award.awardingAgency,
+    grantNumber: award.fain,
+    recipientName: "Port Freeport",
+    reportingPeriod: { start: periodStart, end: periodEnd },
+    overallCompliance: foreignProcurementCost === 0 ? "compliant" : waiverItems.length > 0 ? "waiver_pending" : "non_compliant",
+    lineItems,
+    totalProcurementCost,
+    domesticProcurementCost,
+    foreignProcurementCost,
+    domesticContentPercentage,
+    waiversSummary: {
+      total: waiverItems.length,
+      pending: waiverItems.filter((w) => w.waiverStatus === "pending").length,
+      approved: waiverItems.filter((w) => w.waiverStatus === "approved").length,
+      denied: waiverItems.filter((w) => w.waiverStatus === "denied").length,
+    },
+    ironSteelCompliance: true,
+    constructionMaterialsCompliance: true,
+    manufacturedProductsCompliance: domesticContentPercentage === 100,
+    certifyingOfficial: "Phyllis Saathoff",
+    certifyingTitle: "Executive Director/CEO",
+    certifyingDate: new Date().toISOString().split("T")[0],
+    validation,
+  };
+}
+
 // ─── In-Memory Draft Storage ───
 
 const sf425Drafts = new Map<string, SF425FormData>();
 const sf270Drafts = new Map<string, SF270FormData>();
 const pprDrafts = new Map<string, PPRFormData>();
+const babaDrafts = new Map<string, BABAFormData>();
 
 export function saveSF425Draft(reportId: string, data: SF425FormData): void {
   sf425Drafts.set(reportId, data);
@@ -549,4 +696,12 @@ export function savePPRDraft(reportId: string, data: PPRFormData): void {
 
 export function getPPRDraft(reportId: string): PPRFormData | undefined {
   return pprDrafts.get(reportId);
+}
+
+export function saveBABADraft(reportId: string, data: BABAFormData): void {
+  babaDrafts.set(reportId, data);
+}
+
+export function getBABADraft(reportId: string): BABAFormData | undefined {
+  return babaDrafts.get(reportId);
 }

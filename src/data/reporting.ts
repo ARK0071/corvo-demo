@@ -11,7 +11,7 @@ import { getAllAwards, getAwardById, getExpensesForAward, getDrawdownsForAward, 
 
 // ─── Types ───
 
-export type ReportType = "sf425" | "progress" | "sefa" | "single_audit" | "closeout" | "custom";
+export type ReportType = "sf425" | "sf270" | "baba" | "progress" | "sefa" | "single_audit" | "closeout" | "custom";
 export type ReportStatus = "upcoming" | "in_progress" | "draft_ready" | "submitted" | "overdue" | "drafting" | "pending_review" | "ready_to_certify" | "certified";
 export type ReportFrequency = "quarterly" | "semi_annual" | "annual";
 
@@ -158,6 +158,51 @@ function generateReportScheduleForAward(award: Award): ScheduledReport[] {
         program: award.program,
         type: "sf425",
         title: `SF-425 Federal Financial Report`,
+        dueDate: qd.dueDate,
+        periodStart: qd.periodStart,
+        periodEnd: qd.periodEnd,
+        status: isPast ? "submitted" : "upcoming",
+        submittedDate: isPast ? qd.dueDate : undefined,
+        notes: "",
+      });
+    });
+  }
+
+  // SF-270 Reimbursement Requests (quarterly, aligned with SF-425)
+  if (award.cfda.startsWith("20.")) {
+    const sf270Dates = generateQuarterlyDates(award.performancePeriod.start, award.performancePeriod.end);
+    sf270Dates.forEach((qd, i) => {
+      const isPast = qd.dueDate < today;
+      reports.push({
+        id: `rpt-sf270-${award.id}-${i}`,
+        awardId: award.id,
+        awardTitle: award.title,
+        program: award.program,
+        type: "sf270",
+        title: `SF-270 Request for Advance or Reimbursement`,
+        dueDate: qd.dueDate,
+        periodStart: qd.periodStart,
+        periodEnd: qd.periodEnd,
+        status: isPast ? "submitted" : "upcoming",
+        submittedDate: isPast ? qd.dueDate : undefined,
+        notes: "",
+      });
+    });
+  }
+
+  // BABA Compliance Reports (quarterly for infrastructure programs)
+  const babaPrograms = ["PIDP", "CRISI", "INFRA", "RAISE", "Mega"];
+  if (babaPrograms.some((p) => award.program.includes(p))) {
+    const babaDates = generateQuarterlyDates(award.performancePeriod.start, award.performancePeriod.end);
+    babaDates.forEach((qd, i) => {
+      const isPast = qd.dueDate < today;
+      reports.push({
+        id: `rpt-baba-${award.id}-${i}`,
+        awardId: award.id,
+        awardTitle: award.title,
+        program: award.program,
+        type: "baba",
+        title: `BABA Compliance Report`,
         dueDate: qd.dueDate,
         periodStart: qd.periodStart,
         periodEnd: qd.periodEnd,

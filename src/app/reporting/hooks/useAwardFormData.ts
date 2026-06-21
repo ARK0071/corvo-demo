@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
-import type { SF425FormData, SF270FormData, PPRFormData } from "@/data/federal-report-templates";
+import type { SF425FormData, SF270FormData, PPRFormData, BABAFormData } from "@/data/federal-report-templates";
 
 // ─── Types ───
 
@@ -152,6 +152,39 @@ export function usePPRFormData(awardId: string | null, periodStart: string, peri
   useEffect(() => { fetchPPR(); }, [awardId, tenant.isLoading, tenant.portId]);
 
   return { data, loading, error, refresh: fetchPPR };
+}
+
+// ─── BABA Hook ───
+
+export function useBABAFormData(awardId: string | null, periodStart: string, periodEnd: string): FormDataHookResult<BABAFormData> {
+  const headers = useTenantHeaders();
+  const tenant = useTenant();
+  const [data, setData] = useState<BABAFormData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchBABA = useCallback(async () => {
+    if (!awardId || tenant.isLoading) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ awardId, periodStart, periodEnd, formType: "baba" });
+      const res = await fetch(`/api/awards/form-data?${params}`, {
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      if (!res.ok) throw new Error(`Failed to fetch BABA data: ${res.status}`);
+      const formData = await res.json();
+      setData(formData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load form data");
+    } finally {
+      setLoading(false);
+    }
+  }, [awardId, periodStart, periodEnd, headers, tenant.isLoading]);
+
+  useEffect(() => { fetchBABA(); }, [awardId, tenant.isLoading, tenant.portId]);
+
+  return { data, loading, error, refresh: fetchBABA };
 }
 
 // ─── Financial Summary Hook ───
