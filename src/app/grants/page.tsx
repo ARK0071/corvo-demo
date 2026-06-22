@@ -746,7 +746,7 @@ function UnifiedGrantsDashboard() {
               <p className="text-sm text-muted-foreground">
                 {activeTab === "discover" && "Search and discover grant opportunities"}
                 {activeTab === "pipeline" && "Track your grant applications through each stage"}
-                {activeTab === "projects" && "Manage port projects and match them to grants"}
+                {activeTab === "projects" && "Manage projects and match them to grants"}
                 {activeTab === "outreach" && "Search qualified federal contractors with Subchapter N compliance intelligence"}
               </p>
             </div>

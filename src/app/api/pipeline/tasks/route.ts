@@ -102,6 +102,67 @@ export async function GET(request: NextRequest) {
   }
 }
 
+async function handleTaskGeneration(
+  pipelineGrantId: string,
+  portProfileId: string,
+  phases: PipelinePhase[] | undefined,
+  userId: string | undefined,
+) {
+  const existingCount = await prisma.task.count({
+    where: { pipelineGrantId, parentTaskId: null },
+  });
+  if (existingCount > 0) {
+    return NextResponse.json({ message: "Tasks already exist", created: 0 });
+  }
+
+  const phasesToGenerate: PipelinePhase[] = phases || PIPELINE_PHASES;
+  let totalCreated = 0;
+
+  for (let i = 0; i < phasesToGenerate.length; i++) {
+    const phase = phasesToGenerate[i];
+    const template = PHASE_TASK_TEMPLATES[phase];
+    if (!template) continue;
+
+    const parentTask = await prisma.task.create({
+      data: {
+        portProfileId,
+        pipelineGrantId,
+        title: template.title,
+        description: template.description,
+        status: "not_started",
+        priority: template.priority,
+        phase,
+        source: "template",
+        sortOrder: i,
+        createdBy: userId || null,
+      },
+    });
+    totalCreated++;
+
+    for (let j = 0; j < template.subtasks.length; j++) {
+      const sub = template.subtasks[j];
+      await prisma.task.create({
+        data: {
+          portProfileId,
+          pipelineGrantId,
+          title: sub.title,
+          description: sub.description,
+          status: "not_started",
+          priority: sub.priority,
+          phase,
+          parentTaskId: parentTask.id,
+          source: "template",
+          sortOrder: j,
+          createdBy: userId || null,
+        },
+      });
+      totalCreated++;
+    }
+  }
+
+  return NextResponse.json({ created: totalCreated }, { status: 201 });
+}
+
 // POST: Auto-generate tasks for a pipeline grant
 export async function POST(request: NextRequest) {
   try {
@@ -118,7 +179,6 @@ export async function POST(request: NextRequest) {
 
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(pipelineGrantId)) {
-      // Received a Grants.gov opportunity ID instead of the DB UUID — look up the real ID
       const pipelineRow = await prisma.pipelineGrant.findFirst({
         where: { grantId: pipelineGrantId, portProfileId },
         select: { id: true },
@@ -132,63 +192,7 @@ export async function POST(request: NextRequest) {
       return handleTaskGeneration(pipelineRow.id, portProfileId, phases, session?.user?.id);
     }
 
-    // Check if tasks already exist for this pipeline grant
-    const existingCount = await prisma.task.count({
-      where: { pipelineGrantId, parentTaskId: null },
-    });
-    if (existingCount > 0) {
-      return NextResponse.json({ message: "Tasks already exist", created: 0 });
-    }
-
-    const phasesToGenerate: PipelinePhase[] = phases || PIPELINE_PHASES;
-    const userId = session?.user?.id;
-    let totalCreated = 0;
-
-    for (let i = 0; i < phasesToGenerate.length; i++) {
-      const phase = phasesToGenerate[i];
-      const template = PHASE_TASK_TEMPLATES[phase];
-      if (!template) continue;
-
-      // Create the parent task for this phase
-      const parentTask = await prisma.task.create({
-        data: {
-          portProfileId,
-          pipelineGrantId,
-          title: template.title,
-          description: template.description,
-          status: "not_started",
-          priority: template.priority,
-          phase,
-          source: "template",
-          sortOrder: i,
-          createdBy: userId || null,
-        },
-      });
-      totalCreated++;
-
-      // Create subtasks
-      for (let j = 0; j < template.subtasks.length; j++) {
-        const sub = template.subtasks[j];
-        await prisma.task.create({
-          data: {
-            portProfileId,
-            pipelineGrantId,
-            title: sub.title,
-            description: sub.description,
-            status: "not_started",
-            priority: sub.priority,
-            phase,
-            parentTaskId: parentTask.id,
-            source: "template",
-            sortOrder: j,
-            createdBy: userId || null,
-          },
-        });
-        totalCreated++;
-      }
-    }
-
-    return NextResponse.json({ created: totalCreated }, { status: 201 });
+    return handleTaskGeneration(pipelineGrantId, portProfileId, phases, session?.user?.id);
   } catch (error) {
     console.error("Pipeline tasks POST error:", error);
     return NextResponse.json(
