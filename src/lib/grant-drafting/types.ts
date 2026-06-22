@@ -338,7 +338,8 @@ export type DraftStreamEvent =
   | { type: "scoring_complete"; sections: DraftSection[] }
   | { type: "attachments"; attachments: AttachmentStatus[] }
   | { type: "complete"; response: DraftResponse }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "heartbeat"; completedCount: number; totalCount: number };
 
 // ─── Generation Request ───
 

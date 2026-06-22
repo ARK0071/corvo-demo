@@ -11,7 +11,7 @@ import {
   type UserGuidance,
 } from "@/lib/grant-drafting";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   // ─── Auth ───
@@ -133,14 +133,27 @@ export async function POST(req: NextRequest) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
           };
 
+          let completedCount = 0;
+          const totalCount = genRequest.grantRequirements.applicationSections.length;
+
+          const heartbeatInterval = setInterval(() => {
+            sendEvent({ type: "heartbeat", completedCount, totalCount });
+          }, 10_000);
+
+          const originalSendEvent = (event: DraftStreamEvent) => {
+            if (event.type === "section_complete") completedCount++;
+            sendEvent(event);
+          };
+
           try {
-            await generateDraftStreaming(genRequest, sendEvent);
+            await generateDraftStreaming(genRequest, originalSendEvent);
           } catch (error) {
             sendEvent({
               type: "error",
               message: error instanceof Error ? error.message : "Generation failed",
             });
           } finally {
+            clearInterval(heartbeatInterval);
             controller.close();
           }
         },

@@ -620,10 +620,19 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
 
               switch (event.type) {
                 case "section_start":
-                  setGeneratingProgress(`Generating section ${event.index + 1}/${event.total}: ${event.title}...`);
+                  setGeneratingProgress(`Generating ${event.total} sections in parallel with Claude...`);
                   break;
                 case "section_complete":
-                  setStreamingSections((prev) => [...prev, event.section]);
+                  setStreamingSections((prev) => {
+                    const next = [...prev, event.section];
+                    setGeneratingProgress(`Completed ${next.length} section${next.length > 1 ? "s" : ""}... (generating remaining)`);
+                    return next;
+                  });
+                  break;
+                case "heartbeat":
+                  if (event.completedCount > 0) {
+                    setGeneratingProgress(`Completed ${event.completedCount}/${event.totalCount} sections...`);
+                  }
                   break;
                 case "scoring_start":
                   setGeneratingProgress("Scoring sections with Claude...");
@@ -632,7 +641,6 @@ export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraft
                   setStreamingSections(event.sections);
                   break;
                 case "attachments":
-                  // Attachments processed
                   break;
                 case "complete":
                   finalResponse = event.response;
@@ -2480,7 +2488,7 @@ function GeneratingView({ progress, streamingSections }: { progress: string; str
         <h3 className="text-lg font-semibold mb-2">Generating Application Draft</h3>
         <p className="text-sm text-muted-foreground">{progress}</p>
         <p className="text-xs text-muted-foreground mt-2">
-          Drafting all sections in parallel with Claude Sonnet. Typically takes 15-30 seconds
+          Drafting all sections in parallel with Claude Sonnet. This may take 1–3 minutes depending on the grant.
         </p>
 
         {/* Live streaming progress */}

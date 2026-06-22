@@ -486,15 +486,44 @@ export async function generateDraftStreaming(
   });
 
   // Generate all sections in parallel, sending completion events as they finish
-  const sectionPromises = sections.map(async (section, i) => {
-    const result = await generateSection(
-      section, i, portName, req.entityProfile, req.grantRequirements, req.grantDetails, req.userGuidance, req.webSources,
-    );
-    sendEvent({ type: "section_complete", section: result });
-    return result;
+  const sectionResults = await Promise.allSettled(
+    sections.map(async (section, i) => {
+      const result = await generateSection(
+        section, i, portName, req.entityProfile, req.grantRequirements, req.grantDetails, req.userGuidance, req.webSources,
+      );
+      sendEvent({ type: "section_complete", section: result });
+      return result;
+    })
+  );
+
+  const generatedSections: DraftSection[] = [];
+  const errors: string[] = [];
+  sectionResults.forEach((result, i) => {
+    if (result.status === "fulfilled") {
+      generatedSections.push(result.value);
+    } else {
+      const errMsg = result.reason instanceof Error ? result.reason.message : "Unknown error";
+      errors.push(`Section "${sections[i].title}": ${errMsg}`);
+      generatedSections.push({
+        sectionId: `section-${i}`,
+        title: sections[i].title,
+        content: `[Generation failed: ${errMsg}. Click "Regenerate" to retry this section.]`,
+        confidence: "low",
+        confidenceReason: `Generation failed: ${errMsg}`,
+        gapAnnotations: [],
+        wordCount: 0,
+        maxWords: sections[i].maxWords,
+        weight: sections[i].weight,
+        aiGenerated: true,
+        lastEditedAt: new Date().toISOString(),
+      });
+      sendEvent({ type: "section_complete", section: generatedSections[generatedSections.length - 1] });
+    }
   });
 
-  const generatedSections = await Promise.all(sectionPromises);
+  if (generatedSections.length === 0) {
+    throw new Error("All sections failed to generate. Please try again.");
+  }
 
   // Calculate completeness
   const totalWeight = generatedSections.reduce((sum, s) => sum + s.weight, 0);
