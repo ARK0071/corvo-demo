@@ -34,6 +34,43 @@ export const PHASE_LABELS: Record<PipelinePhase, string> = {
   closeout: "Closeout",
 };
 
+// Display columns merge "applied" and "under_review" into one column
+export type DisplayColumn = "eligible" | "drafting" | "applied_review" | "awarded" | "reporting" | "closeout";
+
+export const DISPLAY_COLUMNS: DisplayColumn[] = [
+  "eligible",
+  "drafting",
+  "applied_review",
+  "awarded",
+  "reporting",
+  "closeout",
+];
+
+export const DISPLAY_COLUMN_LABELS: Record<DisplayColumn, string> = {
+  eligible: "Eligible",
+  drafting: "Drafting",
+  applied_review: "Applied / Review",
+  awarded: "Awarded",
+  reporting: "Reporting",
+  closeout: "Closeout",
+};
+
+// Map display columns to the data phases they contain
+export const DISPLAY_COLUMN_PHASES: Record<DisplayColumn, PipelinePhase[]> = {
+  eligible: ["eligible"],
+  drafting: ["drafting"],
+  applied_review: ["applied", "under_review"],
+  awarded: ["awarded"],
+  reporting: ["reporting"],
+  closeout: ["closeout"],
+};
+
+// Map a data phase to its display column
+export function phaseToDisplayColumn(phase: PipelinePhase): DisplayColumn {
+  if (phase === "applied" || phase === "under_review") return "applied_review";
+  return phase as DisplayColumn;
+}
+
 export const PHASE_COLORS: Record<PipelinePhase, string> = {
   eligible: "bg-blue-500",
   drafting: "bg-indigo-500",

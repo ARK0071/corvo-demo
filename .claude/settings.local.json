@@ -26,7 +26,10 @@
       "Bash(npx shadcn@latest add dialog select dropdown-menu popover calendar textarea label --yes --overwrite)",
       "Bash(npm run:*)",
       "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/scripts/seed-burns-demo.ts'', ''utf8''\\); console.log\\(''File reads OK''\\)\")",
-      "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/data/profiles/burns-engineering.ts'', ''utf8''\\); console.log\\(''Profile reads OK''\\)\")"
+      "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/data/profiles/burns-engineering.ts'', ''utf8''\\); console.log\\(''Profile reads OK''\\)\")",
+      "Bash(brew install:*)",
+      "Bash(brew list:*)",
+      "Bash(brew info:*)"
     ]
   }
 }

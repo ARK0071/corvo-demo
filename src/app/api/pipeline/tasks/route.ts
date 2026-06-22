@@ -78,6 +78,7 @@ export async function GET(request: NextRequest) {
         subtasks: {
           include: {
             assignee: { select: { id: true, name: true, email: true, image: true } },
+            _count: { select: { comments: true } },
           },
           orderBy: { sortOrder: "asc" },
         },
@@ -86,6 +87,7 @@ export async function GET(request: NextRequest) {
             grant: { select: { title: true, agency: true } },
           },
         },
+        _count: { select: { comments: true } },
       },
       orderBy: [{ phase: "asc" }, { sortOrder: "asc" }],
     });
@@ -224,6 +226,8 @@ export async function PUT(request: NextRequest) {
     if (updates.description !== undefined) data.description = updates.description;
     if (updates.assigneeId !== undefined) data.assigneeId = updates.assigneeId || null;
     if (updates.priority !== undefined) data.priority = updates.priority;
+    if (updates.flagged !== undefined) data.flagged = updates.flagged;
+    if (updates.sortOrder !== undefined) data.sortOrder = updates.sortOrder;
     if (updates.startDate !== undefined) data.startDate = updates.startDate ? new Date(updates.startDate) : null;
     if (updates.dueDate !== undefined) data.dueDate = updates.dueDate ? new Date(updates.dueDate) : null;
 

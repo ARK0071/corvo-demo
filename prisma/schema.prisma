@@ -797,6 +797,7 @@ model Task {
   deliverableType String?        @map("deliverable_type") @db.VarChar(50)
   deliverableId   String?        @map("deliverable_id") @db.Uuid
   sortOrder       Int            @default(0) @map("sort_order")
+  flagged         Boolean        @default(false)
   createdBy       String?        @map("created_by") @db.Uuid
   createdAt       DateTime       @default(now()) @map("created_at")
   updatedAt       DateTime       @updatedAt @map("updated_at")

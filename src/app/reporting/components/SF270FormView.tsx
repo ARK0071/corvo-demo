@@ -10,13 +10,16 @@ import {
   Loader2,
   Save,
   RotateCcw,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useSF270FormData, useDrawdowns, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 import { getAgencyTemplate } from "@/data/agency-templates";
-import type { SF270FormData } from "@/data/federal-report-templates";
+import type { SF270FormData, SF270LineItem } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull, fmt } from "./helpers";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/reports/state-transitions";
 
@@ -37,6 +40,7 @@ export default function SF270FormView({
   reportId, awardId, periodStart, periodEnd,
   program, awardTitle, awardingAgency, onBack, reportStatus,
 }: SF270FormViewProps) {
+  const tenantHeaders = useTenantHeaders();
   const { data: apiData, loading, error, refresh } = useSF270FormData(awardId, periodStart, periodEnd);
   const { data: drawdowns } = useDrawdowns(awardId);
   const { saveDraft, saveDraftImmediate, lastSaved, saving, saveError } = useDraftPersistence(reportId);
@@ -44,7 +48,9 @@ export default function SF270FormView({
   const agencyTemplate = awardingAgency ? getAgencyTemplate(awardingAgency) : null;
 
   const [formData, setFormData] = useState<SF270FormData | null>(null);
+  const [editMode, setEditMode] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (apiData && !formData && !draftLoading) {
     if (savedDraft && !draftRestored) {
@@ -54,6 +60,34 @@ export default function SF270FormView({
       setFormData(apiData);
     }
   }
+
+  const handleOverride = useCallback(
+    (lineId: string, newValue: number) => {
+      if (!formData) return;
+      const updated = {
+        ...formData,
+        lineItems: formData.lineItems.map((item) =>
+          item.lineId === lineId ? { ...item, value: newValue } : item
+        ),
+      };
+      // Recompute computed lines
+      const a = updated.lineItems.find((i) => i.lineId === "a")?.value ?? 0;
+      const b = updated.lineItems.find((i) => i.lineId === "b")?.value ?? 0;
+      const c = a - b;
+      const d = updated.lineItems.find((i) => i.lineId === "d")?.value ?? 0;
+      const e = Math.max(0, c - d);
+      updated.lineItems = updated.lineItems.map((item) => {
+        if (item.lineId === "c") return { ...item, value: c };
+        if (item.lineId === "e") return { ...item, value: e };
+        return item;
+      });
+      updated.federalShareOfOutlays = c;
+      updated.federalShareNowRequested = e;
+      setFormData(updated);
+      saveDraft(updated);
+    },
+    [formData, saveDraft]
+  );
 
   const handleRegenerate = useCallback(() => {
     setFormData(null);
@@ -66,6 +100,25 @@ export default function SF270FormView({
     setDraftRestored(false);
     refresh();
   }, [saveDraftImmediate, refresh]);
+
+  const handleDownloadPDF = useCallback(async () => {
+    setPdfError(null);
+    try {
+      const res = await fetch(`/api/reports/${reportId}/pdf?form=sf270`, {
+        headers: tenantHeaders,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Failed to generate PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : "Failed to generate PDF");
+    }
+  }, [reportId, tenantHeaders]);
 
   if ((loading || draftLoading) && !formData) {
     return (
@@ -137,12 +190,17 @@ export default function SF270FormView({
             <Button variant="ghost" size="sm" onClick={handleDiscardDraft}>
               <RotateCcw className="h-3.5 w-3.5 mr-1" /> Discard
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setEditMode(!editMode)}>
+              {editMode ? <Lock className="h-3.5 w-3.5 mr-1" /> : <Unlock className="h-3.5 w-3.5 mr-1" />}
+              {editMode ? "Lock" : "Edit"}
+            </Button>
             <Button variant="outline" size="sm" onClick={handleRegenerate}>Regenerate</Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Button variant="outline" size="sm" onClick={handleDownloadPDF}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print
             </Button>
           </div>
         </div>
+        {pdfError && <p className="text-xs text-red-500 text-right mt-1 no-print">{pdfError}</p>}
       </div>
 
       {/* Summary Cards */}
@@ -200,23 +258,14 @@ export default function SF270FormView({
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Federal Sponsoring Agency</label>
-              <p>{formData.federalSponsoringAgency}</p>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Grant Number</label>
-              <p>{formData.grantNumber}</p>
-            </div>
+            <FormField label="Federal Sponsoring Agency" value={formData.federalSponsoringAgency} />
+            <FormField label="Grant Number" value={formData.grantNumber} />
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-0.5">Recipient</label>
-              <p>{formData.recipientName}</p>
+              <p className="text-sm">{formData.recipientName}</p>
               <p className="text-xs text-muted-foreground">{formData.recipientAddress}</p>
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Computation Period</label>
-              <p>{fmtDate(formData.computationPeriod.start)} - {fmtDate(formData.computationPeriod.end)}</p>
-            </div>
+            <FormField label="Computation Period" value={`${fmtDate(formData.computationPeriod.start)} - ${fmtDate(formData.computationPeriod.end)}`} />
           </div>
         </CardContent>
       </Card>
@@ -225,6 +274,11 @@ export default function SF270FormView({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Computation of Amount Requested</CardTitle>
+          {editMode && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Click on editable amounts to override computed values. Computed lines will update automatically.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -238,19 +292,14 @@ export default function SF270FormView({
                 </tr>
               </thead>
               <tbody>
-                {formData.lineItems.map((item) => {
-                  const isResult = item.lineId === "e";
-                  return (
-                    <tr key={item.lineId} className={`border-b last:border-0 ${isResult ? "bg-[#3d8b8b]/5 font-medium" : "hover:bg-muted/50"}`}>
-                      <td className="py-2.5 pr-4 font-mono text-xs font-medium">{item.lineId}</td>
-                      <td className="py-2.5 pr-4">{item.label}</td>
-                      <td className={`py-2.5 pr-4 text-right tabular-nums ${isResult ? "text-[#3d8b8b] font-bold" : ""}`}>
-                        {fmtFull(item.value)}
-                      </td>
-                      <td className="py-2.5 text-xs text-muted-foreground">{item.source}</td>
-                    </tr>
-                  );
-                })}
+                {formData.lineItems.map((item) => (
+                  <LineItemRow
+                    key={item.lineId}
+                    item={item}
+                    editMode={editMode}
+                    onOverride={handleOverride}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
@@ -303,18 +352,9 @@ export default function SF270FormView({
             in accordance with the grant conditions or other agreement and that payment is due and has not been previously requested.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Certifying Official</label>
-              <p>{formData.certifyingOfficial}</p>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Title</label>
-              <p>{formData.certifyingTitle}</p>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground block mb-0.5">Date</label>
-              <p>{fmtDate(formData.certifyingDate)}</p>
-            </div>
+            <FormField label="Certifying Official" value={formData.certifyingOfficial} />
+            <FormField label="Title" value={formData.certifyingTitle} />
+            <FormField label="Date" value={fmtDate(formData.certifyingDate)} />
           </div>
         </CardContent>
       </Card>
@@ -325,5 +365,54 @@ export default function SF270FormView({
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Sub-components ───
+
+function FormField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <label className="text-xs font-medium text-muted-foreground block mb-0.5">{label}</label>
+      <p className="text-sm">{value}</p>
+    </div>
+  );
+}
+
+function LineItemRow({
+  item, editMode, onOverride,
+}: {
+  item: SF270LineItem;
+  editMode: boolean;
+  onOverride: (lineId: string, value: number) => void;
+}) {
+  const isComputed = item.source.startsWith("Computed:");
+  const isResult = item.lineId === "e";
+  const canEdit = editMode && item.editable && !isComputed;
+
+  return (
+    <tr className={`border-b last:border-0 ${isResult ? "bg-[#3d8b8b]/5 font-medium" : "hover:bg-muted/50"}`}>
+      <td className="py-2.5 pr-4 font-mono text-xs font-medium">{item.lineId}</td>
+      <td className="py-2.5 pr-4">
+        <span className={isComputed ? "text-muted-foreground" : ""}>{item.label}</span>
+      </td>
+      <td className="py-2.5 pr-4 text-right">
+        {canEdit ? (
+          <input
+            type="number"
+            defaultValue={item.value}
+            onBlur={(e) => onOverride(item.lineId, parseFloat(e.target.value) || 0)}
+            className="w-full text-right rounded border bg-background px-2 py-1 text-sm tabular-nums"
+          />
+        ) : (
+          <span className={`tabular-nums font-medium ${isResult ? "text-[#3d8b8b] font-bold" : ""} ${isComputed ? "text-muted-foreground" : ""}`}>
+            {fmtFull(item.value)}
+          </span>
+        )}
+      </td>
+      <td className="py-2.5">
+        <span className="text-xs text-muted-foreground">{item.source}</span>
+      </td>
+    </tr>
   );
 }

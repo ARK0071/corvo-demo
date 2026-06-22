@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBABAFormData, useDraftPersistence, useDraftLoader } from "../hooks/useAwardFormData";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 import type { BABAFormData } from "@/data/federal-report-templates";
 import { fmtDate, fmtFull } from "./helpers";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/reports/state-transitions";
@@ -47,12 +48,14 @@ export default function BABAFormView({
   reportId, awardId, periodStart, periodEnd,
   program, awardTitle, onBack, reportStatus,
 }: BABAFormViewProps) {
+  const tenantHeaders = useTenantHeaders();
   const { data: apiData, loading, error, refresh } = useBABAFormData(awardId, periodStart, periodEnd);
   const { saveDraft, saveDraftImmediate, lastSaved, saving, saveError } = useDraftPersistence(reportId);
   const { draft: savedDraft, loading: draftLoading } = useDraftLoader(reportId);
 
   const [formData, setFormData] = useState<BABAFormData | null>(null);
   const [draftRestored, setDraftRestored] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   if (apiData && !formData && !draftLoading) {
     if (savedDraft && !draftRestored) {
@@ -74,6 +77,25 @@ export default function BABAFormView({
     setDraftRestored(false);
     refresh();
   }, [saveDraftImmediate, refresh]);
+
+  const handleDownloadPDF = useCallback(async () => {
+    setPdfError(null);
+    try {
+      const res = await fetch(`/api/reports/${reportId}/pdf?form=baba`, {
+        headers: tenantHeaders,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error || "Failed to generate PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : "Failed to generate PDF");
+    }
+  }, [reportId, tenantHeaders]);
 
   if ((loading || draftLoading) && !formData) {
     return (
@@ -146,11 +168,12 @@ export default function BABAFormView({
               <RotateCcw className="h-3.5 w-3.5 mr-1" /> Discard
             </Button>
             <Button variant="outline" size="sm" onClick={handleRegenerate}>Regenerate</Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Button variant="outline" size="sm" onClick={handleDownloadPDF}>
               <Printer className="h-3.5 w-3.5 mr-1" /> Print
             </Button>
           </div>
         </div>
+        {pdfError && <p className="text-xs text-red-500 text-right mt-1 no-print">{pdfError}</p>}
       </div>
 
       {/* Summary Cards */}

@@ -787,6 +787,22 @@ async function seedScheduledReports() {
     // Annual
     { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "sefa", title: "Schedule of Expenditures of Federal Awards (SEFA) — FY2024", dueDate: new Date("2025-03-31"), periodStart: new Date("2023-10-01"), periodEnd: new Date("2024-09-30"), status: "submitted", submittedDate: new Date("2025-03-28") },
     { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "single_audit", title: "Single Audit Report — FY2024", dueDate: new Date("2025-06-30"), periodStart: new Date("2023-10-01"), periodEnd: new Date("2024-09-30"), status: "in_progress", notes: "External auditor engaged — fieldwork in progress" },
+
+    // ── SF-270 Reimbursement Requests ──
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-28") },
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "submitted", submittedDate: new Date("2025-04-25") },
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q2 2025", dueDate: new Date("2025-07-30"), periodStart: new Date("2025-04-01"), periodEnd: new Date("2025-06-30"), status: "upcoming" },
+    { portId: PORT_ID, awardId: AWARD_IDS.crisi, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-27") },
+    { portId: PORT_ID, awardId: AWARD_IDS.crisi, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "drafting", notes: "Pending expense reconciliation" },
+    { portId: PORT_ID, awardId: AWARD_IDS.epa, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "upcoming" },
+    { portId: PORT_ID, awardId: AWARD_IDS.txdotEast5th, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — H2 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-07-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-25") },
+
+    // ── BABA Compliance Reports (PIDP, CRISI) ──
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-28") },
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "submitted", submittedDate: new Date("2025-04-26") },
+    { portId: PORT_ID, awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q2 2025", dueDate: new Date("2025-07-30"), periodStart: new Date("2025-04-01"), periodEnd: new Date("2025-06-30"), status: "drafting", notes: "Reviewing domestic content certifications for warehouse steel procurement" },
+    { portId: PORT_ID, awardId: AWARD_IDS.crisi, type: "baba", title: "BABA Compliance Report — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-27") },
+    { portId: PORT_ID, awardId: AWARD_IDS.crisi, type: "baba", title: "BABA Compliance Report — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "upcoming" },
   ];
 
   for (const report of reports) { await prisma.demoScheduledReport.create({ data: report }); }

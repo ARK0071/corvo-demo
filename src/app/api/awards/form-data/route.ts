@@ -338,12 +338,12 @@ function computeSF270(
   const requestNumber = drawdowns.filter((d) => d.status !== "draft").length + 1;
 
   const lineItems = [
-    { lineId: "a", label: "Total Program Outlays to Date", value: cumulativeExpenses, source: "Cumulative non-flagged expenses" },
-    { lineId: "b", label: "Less: Non-Federal Share of Outlays", value: Math.round(cumulativeExpenses * matchPercentage), source: "Match percentage applied to cumulative outlays" },
-    { lineId: "c", label: "Federal Share of Outlays (a - b)", value: cumulativeFederalShare, source: "Computed: Line a minus Line b" },
-    { lineId: "d", label: "Less: Total Federal Payments Received", value: federalPaymentsReceived, source: "Sum of payment_received drawdowns" },
-    { lineId: "e", label: "Federal Share Now Requested (c - d)", value: federalShareNowRequested, source: "Computed: Line c minus Line d" },
-    { lineId: "f", label: "Non-Federal Amount Applied This Period", value: nonFederalOutlays, source: "Match portion of period outlays" },
+    { lineId: "a", label: "Total Program Outlays to Date", value: cumulativeExpenses, source: "Cumulative non-flagged expenses", editable: true },
+    { lineId: "b", label: "Less: Non-Federal Share of Outlays", value: Math.round(cumulativeExpenses * matchPercentage), source: "Match percentage applied to cumulative outlays", editable: true },
+    { lineId: "c", label: "Federal Share of Outlays (a - b)", value: cumulativeFederalShare, source: "Computed: Line a minus Line b", editable: false },
+    { lineId: "d", label: "Less: Total Federal Payments Received", value: federalPaymentsReceived, source: "Sum of payment_received drawdowns", editable: false },
+    { lineId: "e", label: "Federal Share Now Requested (c - d)", value: federalShareNowRequested, source: "Computed: Line c minus Line d", editable: false },
+    { lineId: "f", label: "Non-Federal Amount Applied This Period", value: nonFederalOutlays, source: "Match portion of period outlays", editable: true },
   ];
 
   const validation = { valid: true, errors: [] as { lineId: string; message: string }[] };

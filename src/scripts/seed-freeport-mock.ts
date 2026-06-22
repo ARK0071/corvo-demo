@@ -629,6 +629,24 @@ async function seedScheduledReports() {
     { awardId: AWARD_IDS.txdotAccess, type: "closeout", title: "Final Closeout Report", dueDate: new Date("2027-04-30"), periodStart: new Date("2022-07-01"), periodEnd: new Date("2026-06-30"), status: "in_progress", notes: "Complete all closeout checklist items before submission." },
     { awardId: AWARD_IDS.pidp, type: "sefa", title: "Schedule of Expenditures of Federal Awards (SEFA) — FY2024", dueDate: new Date("2025-03-31"), periodStart: new Date("2023-10-01"), periodEnd: new Date("2024-09-30"), status: "submitted", submittedDate: new Date("2025-03-28") },
     { awardId: AWARD_IDS.pidp, type: "single_audit", title: "Single Audit Report — FY2025", dueDate: new Date("2027-09-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2025-09-30"), status: "in_progress", notes: "External auditor engaged — fieldwork in progress" },
+
+    // ── SF-270 Reimbursement Requests ──
+    { awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-28") },
+    { awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "submitted", submittedDate: new Date("2025-04-25") },
+    { awardId: AWARD_IDS.pidp, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q2 2026", dueDate: new Date("2026-10-31"), periodStart: new Date("2026-04-01"), periodEnd: new Date("2026-06-30"), status: "upcoming" },
+    { awardId: AWARD_IDS.crisi, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-27") },
+    { awardId: AWARD_IDS.crisi, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q2 2026", dueDate: new Date("2026-11-30"), periodStart: new Date("2026-04-01"), periodEnd: new Date("2026-06-30"), status: "drafting", notes: "Pending expense reconciliation" },
+    { awardId: AWARD_IDS.epa, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q3 2026", dueDate: new Date("2027-01-31"), periodStart: new Date("2026-07-01"), periodEnd: new Date("2026-09-30"), status: "upcoming" },
+    { awardId: AWARD_IDS.txdotEast5th, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — H2 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-07-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-25") },
+    { awardId: AWARD_IDS.txdotRider37, type: "sf270", title: "SF-270 Request for Advance or Reimbursement — Q2 2026", dueDate: new Date("2026-10-31"), periodStart: new Date("2026-04-01"), periodEnd: new Date("2026-06-30"), status: "upcoming" },
+
+    // ── BABA Compliance Reports (infrastructure programs: PIDP, CRISI) ──
+    { awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-28") },
+    { awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q1 2025", dueDate: new Date("2025-04-30"), periodStart: new Date("2025-01-01"), periodEnd: new Date("2025-03-31"), status: "submitted", submittedDate: new Date("2025-04-26") },
+    { awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q2 2026", dueDate: new Date("2026-10-31"), periodStart: new Date("2026-04-01"), periodEnd: new Date("2026-06-30"), status: "drafting", notes: "Reviewing domestic content certifications for warehouse steel procurement" },
+    { awardId: AWARD_IDS.pidp, type: "baba", title: "BABA Compliance Report — Q3 2026", dueDate: new Date("2027-01-31"), periodStart: new Date("2026-07-01"), periodEnd: new Date("2026-09-30"), status: "upcoming" },
+    { awardId: AWARD_IDS.crisi, type: "baba", title: "BABA Compliance Report — Q4 2024", dueDate: new Date("2025-01-30"), periodStart: new Date("2024-10-01"), periodEnd: new Date("2024-12-31"), status: "submitted", submittedDate: new Date("2025-01-27") },
+    { awardId: AWARD_IDS.crisi, type: "baba", title: "BABA Compliance Report — Q2 2026", dueDate: new Date("2026-11-30"), periodStart: new Date("2026-04-01"), periodEnd: new Date("2026-06-30"), status: "upcoming" },
   ];
 
   for (const report of reports) { await prisma.scheduledReport.create({ data: report }); }
