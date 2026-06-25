@@ -115,7 +115,7 @@ export function initializeProjectsForProfile(profileId: string): void {
 
   if (profileId === "lawa") {
     initializeLAWAProjects();
-  } else if (profileId === "louisiana-gateway-port") {
+  } else if (profileId === "louisiana-gateway") {
     louisianaGatewayProjects.forEach((p) => createProject(p));
   } else if (profileId === "port-freeport") {
     initializePortFreeportDefaults();

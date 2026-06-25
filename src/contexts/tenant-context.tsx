@@ -33,8 +33,8 @@ interface StoredConfig {
 
 const DEFAULT_CONFIG: StoredConfig = {
   environment: "demo",
-  portId: "freeport",
-  portSlug: "port-freeport",
+  portId: "freeport-mock",
+  portSlug: "freeport-mock",
 };
 
 function syncTenantCookies(config: StoredConfig) {

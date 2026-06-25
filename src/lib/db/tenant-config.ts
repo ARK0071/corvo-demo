@@ -5,70 +5,42 @@
  * - test: Shared test tables, EC2 Qwen3 embeddings (2560 dims)
  * - demo: Shared demo tables with portId filter, OpenAI embeddings (1536 dims)
  * - production: Per-port tables, EC2 Qwen3 embeddings (2560 dims)
+ *
+ * All port data comes from the database. No static/hardcoded port list.
  */
 
 export type Environment = "test" | "demo" | "production";
 
 export interface TenantConfig {
   environment: Environment;
-  portId: string; // e.g., "freeport", "lawa", "louisiana-gateway"
-  portSlug: string; // URL-safe version
+  portId: string;
+  portSlug: string;
 }
 
-// Static ports (built-in)
-const STATIC_PORTS = [
-  { id: "freeport", name: "Port Freeport", slug: "port-freeport" },
-  { id: "lawa", name: "Los Angeles World Airports", slug: "lawa" },
-  { id: "louisiana-gateway", name: "Louisiana Gateway", slug: "louisiana-gateway" },
-  { id: "polestar-defense", name: "Pole Star Defense", slug: "polestar-defense" },
-  { id: "freeport-demo", name: "Port Freeport DEMO", slug: "freeport-demo" },
-  { id: "freeport-mock", name: "Port Freeport Mock", slug: "freeport-mock" },
-  { id: "burns-engineering", name: "Burns Engineering", slug: "burns-engineering" },
-  { id: "cte", name: "Center for Transportation and the Environment", slug: "cte" },
-] as const;
+// Ports registered at runtime (from DB via API routes or admin)
+const registeredPorts: { id: string; name: string; slug: string }[] = [];
 
-// Dynamic ports added at runtime via admin
-const dynamicPorts: { id: string; name: string; slug: string }[] = [];
+// Expose registered ports for server-side code that needs them
+export const AVAILABLE_PORTS: readonly { id: string; name: string; slug: string }[] = registeredPorts;
 
-// Combined view of all ports
-export const AVAILABLE_PORTS: readonly { id: string; name: string; slug: string }[] = new Proxy(
-  [] as { id: string; name: string; slug: string }[],
-  {
-    get(_target, prop) {
-      const combined = [...STATIC_PORTS, ...dynamicPorts];
-      if (prop === "length") return combined.length;
-      if (prop === Symbol.iterator) return combined[Symbol.iterator].bind(combined);
-      if (prop === "find") return combined.find.bind(combined);
-      if (prop === "filter") return combined.filter.bind(combined);
-      if (prop === "map") return combined.map.bind(combined);
-      if (prop === "forEach") return combined.forEach.bind(combined);
-      if (prop === "some") return combined.some.bind(combined);
-      if (prop === "every") return combined.every.bind(combined);
-      if (prop === "includes") return combined.includes.bind(combined);
-      if (typeof prop === "string" && !isNaN(Number(prop))) return combined[Number(prop)];
-      return (combined as unknown as Record<string | symbol, unknown>)[prop];
-    },
-  }
-);
-
-// Add a port at runtime
+// Add a port at runtime (called by admin entities route, etc.)
 export function registerPort(port: { id: string; name: string; slug: string }): void {
-  if (!dynamicPorts.some((p) => p.id === port.id) && !STATIC_PORTS.some((p) => p.id === port.id)) {
-    dynamicPorts.push(port);
+  if (!registeredPorts.some((p) => p.id === port.id)) {
+    registeredPorts.push(port);
   }
 }
 
-// Remove a dynamic port
+// Remove a port
 export function unregisterPort(id: string): boolean {
-  const idx = dynamicPorts.findIndex((p) => p.id === id);
+  const idx = registeredPorts.findIndex((p) => p.id === id);
   if (idx !== -1) {
-    dynamicPorts.splice(idx, 1);
+    registeredPorts.splice(idx, 1);
     return true;
   }
   return false;
 }
 
-export type PortId = typeof STATIC_PORTS[number]["id"] | string;
+export type PortId = string;
 
 // Embedding dimensions by environment
 export const EMBEDDING_DIMENSIONS: Record<Environment, number> = {
@@ -84,11 +56,11 @@ export const EMBEDDING_SERVICE: Record<Environment, "openai" | "ec2"> = {
   production: "ec2",
 };
 
-// Default configuration (can be overridden via localStorage/settings)
+// Default configuration
 const DEFAULT_CONFIG: TenantConfig = {
-  environment: "test", // Default to test
-  portId: "freeport",
-  portSlug: "port-freeport",
+  environment: "demo",
+  portId: "freeport-mock",
+  portSlug: "freeport-mock",
 };
 
 // In-memory cache for server-side
@@ -101,7 +73,6 @@ let serverConfig: TenantConfig = { ...DEFAULT_CONFIG };
  */
 export function getTenantConfig(): TenantConfig {
   if (typeof window !== "undefined") {
-    // Client-side: read from localStorage
     try {
       const stored = localStorage.getItem("corvo_tenant_config");
       if (stored) {
@@ -118,14 +89,11 @@ export function getTenantConfig(): TenantConfig {
     return { ...DEFAULT_CONFIG };
   }
 
-  // Server-side: use in-memory cache
   return { ...serverConfig };
 }
 
 /**
  * Set tenant configuration
- * On client: saves to localStorage
- * On server: updates in-memory cache
  */
 export function setTenantConfig(config: Partial<TenantConfig>): TenantConfig {
   const current = getTenantConfig();
@@ -136,10 +104,8 @@ export function setTenantConfig(config: Partial<TenantConfig>): TenantConfig {
   };
 
   if (typeof window !== "undefined") {
-    // Client-side: save to localStorage
     localStorage.setItem("corvo_tenant_config", JSON.stringify(updated));
   } else {
-    // Server-side: update in-memory cache
     serverConfig = updated;
   }
 
@@ -182,15 +148,9 @@ export function useOpenAIEmbeddings(): boolean {
 }
 
 /**
- * Get the port info by ID
+ * Get the port info by ID from registered ports.
+ * Returns a basic object with id=slug if not found in registered list.
  */
-export function getPortInfo(portId: string) {
-  return AVAILABLE_PORTS.find((p) => p.id === portId) || AVAILABLE_PORTS[0];
-}
-
-// Log configuration on load (server-side only)
-if (typeof window === "undefined") {
-  console.log("[tenant-config] Default environment:", DEFAULT_CONFIG.environment);
-  console.log("[tenant-config] Default port:", DEFAULT_CONFIG.portId);
-  console.log("[tenant-config] Embedding dimensions:", EMBEDDING_DIMENSIONS[DEFAULT_CONFIG.environment]);
+export function getPortInfo(portId: string): { id: string; name: string; slug: string } {
+  return registeredPorts.find((p) => p.id === portId) || { id: portId, name: portId, slug: portId };
 }

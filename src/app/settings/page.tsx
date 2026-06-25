@@ -31,7 +31,7 @@ const ENVIRONMENT_INFO: Record<Environment, { label: string; description: string
 };
 
 export default function SettingsPage() {
-  const { profile, profileId, setProfileId, allProfiles } = useProfile();
+  const { profile, profileId, setProfileId, allProfiles, isLoading: profilesLoading, error: profilesError } = useProfile();
   const tenant = useTenant();
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
@@ -60,31 +60,45 @@ export default function SettingsPage() {
                 Select the active entity profile. This controls grant eligibility scoring, alignment matching, and competitiveness analysis across the platform.
               </p>
               <div className="space-y-2">
-                {allProfiles.map(({ id, profile: p }) => (
-                  <button
-                    key={id}
-                    onClick={() => setProfileId(id)}
-                    className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                      id === profileId
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{p.name}</span>
-                        {id === profileId && (
-                          <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
-                        )}
+                {profilesLoading ? (
+                  <p className="text-xs text-muted-foreground py-3">Loading profiles...</p>
+                ) : profilesError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+                    <p className="text-sm text-red-700">Database error: {profilesError}</p>
+                    <p className="text-xs text-red-500 mt-1">Check database connection and ensure profiles have been seeded.</p>
+                  </div>
+                ) : allProfiles.length === 0 ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-sm text-amber-700">No profiles found in the database.</p>
+                    <p className="text-xs text-amber-500 mt-1">Run the seed script: npx tsx src/scripts/seed-production-profiles.ts</p>
+                  </div>
+                ) : (
+                  allProfiles.map(({ id, profile: p }) => (
+                    <button
+                      key={id}
+                      onClick={() => setProfileId(id)}
+                      className={`w-full flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        id === profileId
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-muted-foreground/30 hover:bg-muted/50"
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">{p.name}</span>
+                          {id === profileId && (
+                            <Badge className="bg-primary/10 text-primary text-[10px]">Active</Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {p.classification || p.entityType}
+                          {p.location?.city ? ` \u00b7 ${p.location.city}, ${p.location.stateCode}` : ""}
+                        </span>
                       </div>
-                      <span className="text-xs text-muted-foreground">
-                        {p.classification || p.entityType}
-                        {p.location?.city ? ` \u00b7 ${p.location.city}, ${p.location.stateCode}` : ""}
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{p.entityType}</span>
-                  </button>
-                ))}
+                      <span className="text-xs text-muted-foreground">{p.entityType}</span>
+                    </button>
+                  ))
+                )}
               </div>
             </Card>
           ) : (

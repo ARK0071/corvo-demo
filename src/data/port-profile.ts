@@ -42,10 +42,3 @@ export interface PortProfile {
 
 // Re-export profile registry
 export { getProfile, getAllProfiles, getAllProfileIds, getDefaultProfile, DEFAULT_PROFILE_ID, ensureProfilesLoaded } from "./profiles";
-
-// Export default profile (for backward compatibility)
-export { getDefaultProfile as getCurrentProfile };
-
-// Legacy export - use getDefaultProfile() instead
-import { getDefaultProfile } from "./profiles";
-export const currentPortProfile = getDefaultProfile();

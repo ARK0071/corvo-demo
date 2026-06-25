@@ -1,6 +1,6 @@
 import { prisma } from "../lib/db/client";
 
-const PORTS = ["freeport", "lawa", "louisiana-gateway", "polestar-defense", "freeport-demo", "burns-engineering", "cte"];
+const PORTS = ["freeport-mock", "lawa", "louisiana-gateway", "polestar-defense", "burns-engineering", "cte"];
 
 const USER_TEMPLATES = [
   { email: "drafter@{port}.demo", name: "Alex Drafter", title: "Grants Accountant", role: "drafter" },

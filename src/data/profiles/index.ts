@@ -1,32 +1,14 @@
 /**
  * Port Profile Registry
  *
- * Central registry for all client port profiles.
- * Profiles are loaded from the database via ensureProfilesLoaded().
- * Static profiles are kept as fallbacks until DB is available.
+ * All profiles are loaded from the database via ensureProfilesLoaded().
+ * No static/hardcoded fallbacks — if DB is unavailable, profiles are empty.
  */
 
 import type { PortProfile } from "../port-profile";
-import { portFreeportProfile } from "./port-freeport";
-import { portOfLosAngelesProfile } from "./port-of-los-angeles";
-import { lawaProfile } from "./lawa";
-import { louisianaGatewayPortProfile } from "./louisiana-gateway-port";
-import { burnsEngineeringProfile } from "./burns-engineering";
 
-// Static (built-in) profiles — used as fallback until DB is loaded
-const STATIC_PROFILES: Record<string, PortProfile> = {
-  "port-freeport": portFreeportProfile,
-  "louisiana-gateway-port": louisianaGatewayPortProfile,
-  "port-of-los-angeles": portOfLosAngelesProfile,
-  "lawa": lawaProfile,
-  "burns-engineering": burnsEngineeringProfile,
-};
-
-// Dynamic profiles added at runtime (from DB or admin)
-const dynamicProfiles: Record<string, PortProfile> = {};
-
-// Track which profile IDs came from DB (vs admin runtime)
-const dbProfileIds = new Set<string>();
+// Profiles loaded from DB at runtime
+const dbProfiles: Record<string, PortProfile> = {};
 
 // Whether DB profiles have been loaded
 let dbLoaded = false;
@@ -34,22 +16,20 @@ let dbLoaded = false;
 /**
  * Load all profiles from the database into the in-memory registry.
  * Call this from API routes before using getProfile() to ensure
- * DB-persisted entities (like admin-created ones) are available.
+ * DB-persisted entities are available.
  */
 export async function ensureProfilesLoaded(): Promise<void> {
   if (dbLoaded) return;
-  // Only run on server side
   if (typeof window !== "undefined") return;
 
   try {
-    // Dynamic import to avoid bundling prisma client-side
     const { prisma } = await import("@/lib/db/client");
-    const dbRecords = await prisma.portProfile.findMany({
+    const records = await prisma.portProfile.findMany({
       orderBy: { name: "asc" },
     });
 
-    for (const p of dbRecords) {
-      const profile: PortProfile = {
+    for (const p of records) {
+      dbProfiles[p.slug] = {
         name: p.name,
         entityType: p.entityType,
         classification: p.classification || "",
@@ -70,60 +50,49 @@ export async function ensureProfilesLoaded(): Promise<void> {
         environmentalGoals: (p.environmentalGoals as string[]) || [],
         communityImpact: (p.communityImpact as string[]) || [],
       };
-      dynamicProfiles[p.slug] = profile;
-      dbProfileIds.add(p.slug);
     }
 
     dbLoaded = true;
-  } catch {
-    // DB unavailable — rely on static profiles
+  } catch (err) {
+    console.error("[profiles] Failed to load profiles from database:", err);
   }
 }
 
 // Add a profile at runtime
 export function registerProfile(id: string, profile: PortProfile): void {
-  dynamicProfiles[id] = profile;
+  dbProfiles[id] = profile;
 }
 
-// Remove a dynamic profile
+// Remove a profile
 export function unregisterProfile(id: string): boolean {
-  if (id in STATIC_PROFILES && !dbProfileIds.has(id)) return false;
-  if (id in dynamicProfiles) {
-    delete dynamicProfiles[id];
-    dbProfileIds.delete(id);
+  if (id in dbProfiles) {
+    delete dbProfiles[id];
     return true;
   }
   return false;
 }
 
-// Check if a profile is built-in (exists in static data and NOT overridden by DB)
-export function isStaticProfile(id: string): boolean {
-  return id in STATIC_PROFILES && !dbProfileIds.has(id);
-}
-
 // Get profile by ID
 export function getProfile(profileId: string): PortProfile | undefined {
-  return dynamicProfiles[profileId] ?? STATIC_PROFILES[profileId];
+  return dbProfiles[profileId];
 }
 
 // Get all profile IDs
 export function getAllProfileIds(): string[] {
-  const ids = new Set([...Object.keys(STATIC_PROFILES), ...Object.keys(dynamicProfiles)]);
-  return Array.from(ids);
+  return Object.keys(dbProfiles);
 }
 
 // Get all profiles
 export function getAllProfiles(): Array<{ id: string; profile: PortProfile }> {
   return getAllProfileIds().map((id) => ({
     id,
-    profile: getProfile(id)!,
+    profile: dbProfiles[id],
   }));
 }
 
-// Default profile ID (can be changed based on deployment)
-export const DEFAULT_PROFILE_ID = "port-freeport";
+export const DEFAULT_PROFILE_ID = "freeport-mock";
 
-// Get default profile
-export function getDefaultProfile(): PortProfile {
-  return getProfile(DEFAULT_PROFILE_ID) ?? STATIC_PROFILES[DEFAULT_PROFILE_ID];
+// Get default profile (may be undefined if DB hasn't loaded)
+export function getDefaultProfile(): PortProfile | undefined {
+  return getProfile(DEFAULT_PROFILE_ID);
 }

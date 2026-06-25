@@ -1,23 +1,22 @@
 import { NextResponse } from "next/server";
 import { withRole } from "@/lib/auth/api-guard";
 import { prisma } from "@/lib/db/client";
-import { portFreeportProfile } from "@/data/profiles/port-freeport";
 import { lawaProfile } from "@/data/profiles/lawa";
 import { louisianaGatewayPortProfile } from "@/data/profiles/louisiana-gateway-port";
-import { portOfLosAngelesProfile } from "@/data/profiles/port-of-los-angeles";
+import { burnsEngineeringProfile } from "@/data/profiles/burns-engineering";
+import { cteProfile } from "@/data/profiles/cte";
 import type { PortProfile } from "@/data/port-profile";
 
 const PROFILES_TO_SEED: Array<{ slug: string; profile: PortProfile }> = [
-  { slug: "port-freeport", profile: portFreeportProfile },
   { slug: "lawa", profile: lawaProfile },
-  { slug: "louisiana-gateway-port", profile: louisianaGatewayPortProfile },
-  { slug: "port-of-los-angeles", profile: portOfLosAngelesProfile },
+  { slug: "louisiana-gateway", profile: louisianaGatewayPortProfile },
+  { slug: "burns-engineering", profile: burnsEngineeringProfile },
+  { slug: "cte", profile: cteProfile },
 ];
 
 const PORT_ONLY_ENTRIES = [
   { slug: "polestar-defense", name: "Pole Star Defense", entityType: "Private company" },
-  { slug: "freeport-demo", name: "Port Freeport DEMO", entityType: "Special district government" },
-  { slug: "freeport-mock", name: "Port Freeport Mock", entityType: "Special district government" },
+  { slug: "freeport-mock", name: "Port Freeport", entityType: "Special district government" },
 ];
 
 /**

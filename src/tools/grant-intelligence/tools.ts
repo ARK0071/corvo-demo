@@ -26,7 +26,9 @@ function scoreCacheKey(grantId: string): string {
 
 async function activeProfile() {
   await ensureProfilesLoaded();
-  return getProfile(getRequestProfileId()) ?? getDefaultProfile();
+  const profile = getProfile(getRequestProfileId()) ?? getDefaultProfile();
+  if (!profile) throw new Error("No profile loaded — check database connection and ensure profiles are seeded");
+  return profile;
 }
 
 /**

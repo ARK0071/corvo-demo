@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import type { PortProfile } from "@/data/port-profile";
-import { getAllProfiles, DEFAULT_PROFILE_ID, getDefaultProfile } from "@/data/profiles";
+import { DEFAULT_PROFILE_ID } from "@/data/profiles";
 import { useTenant } from "@/contexts/tenant-context";
 
 interface ProfileContextValue {
@@ -12,14 +12,30 @@ interface ProfileContextValue {
   setProfileId: (id: string) => void;
   allProfiles: Array<{ id: string; profile: PortProfile }>;
   isLoading: boolean;
+  error: string | null;
 }
 
+const EMPTY_PROFILE: PortProfile = {
+  name: "",
+  entityType: "",
+  classification: "",
+  location: { city: "", state: "", stateCode: "", county: "", region: "" },
+  characteristics: { cargoTypes: [] },
+  priorities: [],
+  capabilities: [],
+  needs: [],
+  certifications: [],
+  environmentalGoals: [],
+  communityImpact: [],
+};
+
 const ProfileContext = createContext<ProfileContextValue>({
-  profile: getDefaultProfile(),
+  profile: EMPTY_PROFILE,
   profileId: DEFAULT_PROFILE_ID,
   setProfileId: () => {},
   allProfiles: [],
   isLoading: true,
+  error: null,
 });
 
 export function useProfile() {
@@ -34,24 +50,24 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const isAdmin = userRole === "admin";
 
   const [profileId, setProfileIdState] = useState(DEFAULT_PROFILE_ID);
-  // Start with static profiles as fallback, then load from API
-  const [allProfiles, setAllProfiles] = useState<Array<{ id: string; profile: PortProfile }>>(
-    () => getAllProfiles()
-  );
+  const [allProfiles, setAllProfiles] = useState<Array<{ id: string; profile: PortProfile }>>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Fetch profiles from API (includes DB-persisted entities)
+  // Fetch profiles from API (DB-only)
   const fetchProfiles = useCallback(async () => {
     try {
       const res = await fetch("/api/profiles");
       if (res.ok) {
         const data = await res.json();
-        if (data.profiles?.length) {
-          setAllProfiles(data.profiles);
-        }
+        setAllProfiles(data.profiles || []);
+        setError(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || "Failed to load profiles");
       }
     } catch {
-      // Fall back to static profiles
+      setError("Failed to connect to server");
     }
     setIsLoading(false);
   }, []);
@@ -61,15 +77,12 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfiles]);
 
   // Set profile based on user's entity (portId) from session.
-  // Admins can override via localStorage; non-admins are always locked to their portId.
   useEffect(() => {
     if (sessionStatus === "loading") return;
 
     if (userPortId && !isAdmin) {
-      // Non-admin: always use their assigned entity
       setProfileIdState(userPortId);
     } else if (isAdmin) {
-      // Admin: restore from localStorage, or fall back to their portId
       const stored = localStorage.getItem("corvo-profile-id");
       if (stored) {
         setProfileIdState(stored);
@@ -80,17 +93,16 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }, [sessionStatus, userPortId, isAdmin]);
 
   function setProfileId(id: string) {
-    if (!isAdmin) return; // Non-admins cannot switch profiles
+    if (!isAdmin) return;
     const resolved = allProfiles.find((p) => p.id === id);
     if (resolved) {
       setProfileIdState(id);
       localStorage.setItem("corvo-profile-id", id);
-      // Sync tenant context so API calls use the new entity
       tenant.setPort(id);
     }
   }
 
-  // Keep tenant port in sync with profileId (covers initial load from localStorage)
+  // Keep tenant port in sync with profileId
   useEffect(() => {
     if (isAdmin && profileId && tenant.portId !== profileId) {
       tenant.setPort(profileId);
@@ -100,10 +112,10 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const profile =
     allProfiles.find((p) => p.id === profileId)?.profile ??
     allProfiles[0]?.profile ??
-    getDefaultProfile();
+    EMPTY_PROFILE;
 
   return (
-    <ProfileContext.Provider value={{ profile, profileId, setProfileId, allProfiles, isLoading }}>
+    <ProfileContext.Provider value={{ profile, profileId, setProfileId, allProfiles, isLoading, error }}>
       {children}
     </ProfileContext.Provider>
   );

@@ -29,7 +29,8 @@
       "Bash(node -e \"require\\(''fs''\\).readFileSync\\(''src/data/profiles/burns-engineering.ts'', ''utf8''\\); console.log\\(''Profile reads OK''\\)\")",
       "Bash(brew install:*)",
       "Bash(brew list:*)",
-      "Bash(brew info:*)"
+      "Bash(brew info:*)",
+      "Bash(grep -r \"port-freeport\\\\|louisiana-gateway\\\\|polestar-defense\" /Users/rajaselvamjayakumar/Documents/programing/corvo-demo-1/src/app/api --include=*.ts --include=*.tsx)"
     ]
   }
 }

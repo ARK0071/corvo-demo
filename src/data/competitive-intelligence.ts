@@ -12,7 +12,8 @@
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import { PIDP_AWARDS, type PIDPAward } from "./marad-pidp-awards";
 import { USDOT_AWARDS, type USDOTAward } from "./usdot-awards";
-import { currentPortProfile } from "./port-profile";
+import type { PortProfile } from "./port-profile";
+import { getDefaultProfile, ensureProfilesLoaded } from "./port-profile";
 import { getCompetitiveIntelligenceFromUSAspending, type GrantAward } from "@/lib/usaspending";
 
 export interface CompetitiveInsight {
@@ -75,7 +76,9 @@ const PROGRAM_CFDA_MAP: Record<string, string> = {
  * Analyze competitive intelligence for a specific grant
  */
 export async function analyzeCompetitiveIntelligence(grant: DiscoveredGrant): Promise<CompetitiveInsight | null> {
-  const profile = currentPortProfile;
+  await ensureProfilesLoaded();
+  const profile = getDefaultProfile();
+  if (!profile) return null;
   
   // Identify the grant program
   const programName = identifyGrantProgram(grant);
@@ -433,7 +436,7 @@ function analyzeProjectTypeSuccess(
  */
 function assessCompetitivePosition(
   grant: DiscoveredGrant,
-  profile: typeof currentPortProfile,
+  profile: PortProfile,
   historicalAwards: Array<PIDPAward | USDOTAward>
 ): {
   portAdvantages: string[];

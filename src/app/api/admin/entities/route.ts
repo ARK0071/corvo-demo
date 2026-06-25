@@ -6,7 +6,6 @@ import {
   getProfile,
   registerProfile,
   unregisterProfile,
-  isStaticProfile,
   ensureProfilesLoaded,
 } from "@/data/profiles";
 import { registerPort, unregisterPort } from "@/lib/db/tenant-config";
@@ -86,7 +85,7 @@ export const GET = withRole(["admin"], async () => {
     entityType: profile.entityType,
     classification: profile.classification,
     location: profile.location,
-    isBuiltIn: isStaticProfile(id),
+    isBuiltIn: false,
   }));
   return NextResponse.json({ entities });
 });
@@ -188,13 +187,6 @@ export const DELETE = withRole(["admin"], async (request) => {
 
   if (!id) {
     return NextResponse.json({ error: "Missing id parameter" }, { status: 400 });
-  }
-
-  if (isStaticProfile(id)) {
-    return NextResponse.json(
-      { error: "Cannot delete built-in profiles" },
-      { status: 403 }
-    );
   }
 
   const removed = unregisterProfile(id);

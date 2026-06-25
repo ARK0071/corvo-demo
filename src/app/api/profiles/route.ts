@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
-import { ensureProfilesLoaded, getAllProfiles } from "@/data/profiles";
 import type { PortProfile } from "@/data/port-profile";
 
 interface DBPortProfile {
@@ -46,13 +45,10 @@ function toProfile(p: DBPortProfile): { id: string; profile: PortProfile } {
 }
 
 /**
- * GET /api/profiles — Returns all port profiles (static + DB-persisted).
- * Public endpoint used by the ProfileProvider on the client.
+ * GET /api/profiles — Returns all port profiles from the database.
+ * No static fallback — if DB is unavailable, returns an error.
  */
 export async function GET() {
-  // Ensure server-side registry is hydrated from DB
-  await ensureProfilesLoaded();
-
   try {
     const dbProfiles = await prisma.portProfile.findMany({
       orderBy: { name: "asc" },
@@ -60,9 +56,11 @@ export async function GET() {
 
     const profiles = dbProfiles.map((p: DBPortProfile) => toProfile(p));
     return NextResponse.json({ profiles });
-  } catch {
-    // If DB is unavailable, fall back to server-side in-memory profiles
-    const profiles = getAllProfiles();
-    return NextResponse.json({ profiles });
+  } catch (err) {
+    console.error("[/api/profiles] Database error:", err);
+    return NextResponse.json(
+      { error: "Failed to load profiles from database" },
+      { status: 503 }
+    );
   }
 }

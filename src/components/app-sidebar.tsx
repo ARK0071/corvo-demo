@@ -94,7 +94,7 @@ function AppSidebarInner() {
 
   const grantNavItems = useMemo(() => {
     const base = [...grantMatchItems];
-    if (!tenantLoading && portId === "freeport-mock") {
+    if (!tenantLoading && portId === "polestar-defense") {
       base.splice(4, 0, {
         title: "Partner path",
         url: "/polestar-opportunity",

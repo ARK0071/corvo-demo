@@ -439,7 +439,7 @@ function parseArgs(): { port: string; file: string; env: "demo" | "test" | "prod
 Usage: npx tsx src/scripts/import-projects.ts --port <port-slug> --file <csv-path> [--env demo|test|production]
 
 Arguments:
-  --port <port-slug>   Port identifier (e.g., port-freeport, louisiana-gateway-port)
+  --port <port-slug>   Port identifier (e.g., port-freeport, louisiana-gateway)
   --file <csv-path>    Path to CSV file containing projects
   --env <environment>  Target environment: demo (default), test, or production
 

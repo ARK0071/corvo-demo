@@ -13,7 +13,7 @@ import {
 // Re-export for backward compatibility
 export { getTenantConfig, setTenantConfig, setTenantConfigFromHeaders } from "./tenant-config";
 export type { TenantConfig, Environment, PortId } from "./tenant-config";
-export { AVAILABLE_PORTS, EMBEDDING_DIMENSIONS, EMBEDDING_SERVICE } from "./tenant-config";
+export { EMBEDDING_DIMENSIONS, EMBEDDING_SERVICE } from "./tenant-config";
 
 /**
  * Get database configuration based on current tenant settings

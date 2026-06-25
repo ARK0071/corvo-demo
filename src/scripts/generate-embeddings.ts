@@ -4,7 +4,7 @@
  * Usage:
  *   npx tsx src/scripts/generate-embeddings.ts              # all bundled client profiles below
  *   npx tsx src/scripts/generate-embeddings.ts port-freeport
- *   npx tsx src/scripts/generate-embeddings.ts louisiana-gateway-port
+ *   npx tsx src/scripts/generate-embeddings.ts louisiana-gateway
  *
  * Requires OPENAI_API_KEY in .env.local
  */
@@ -27,7 +27,7 @@ config({ path: path.join(process.cwd(), ".env.local") });
 const EMBEDDINGS_DIR = path.join(process.cwd(), "src/data/embeddings");
 
 /** Profiles that ship static project lists in-repo (add IDs here when new demo clients get projects). */
-const PROFILE_IDS_WITH_PROJECT_EMBEDDINGS = ["port-freeport", "louisiana-gateway-port"] as const;
+const PROFILE_IDS_WITH_PROJECT_EMBEDDINGS = ["port-freeport", "louisiana-gateway"] as const;
 
 async function writeProfileEmbeddings(profileId: string) {
   const profile = getProfile(profileId);

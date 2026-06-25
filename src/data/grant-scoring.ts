@@ -7,7 +7,6 @@
 
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PortProfile } from "./port-profile";
-import { currentPortProfile } from "./port-profile";
 
 export interface TopProjectMatch {
   projectId: string;

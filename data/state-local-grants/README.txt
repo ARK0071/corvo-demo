@@ -2,8 +2,8 @@ State / local grant CSVs (demo)
 
 Place one CSV per client profile. Filename must match the profile id exactly:
 
-  port-freeport.csv
-  louisiana-gateway-port.csv
+  freeport-mock.csv
+  louisiana-gateway.csv
   port-of-los-angeles.csv
   lawa.csv
 

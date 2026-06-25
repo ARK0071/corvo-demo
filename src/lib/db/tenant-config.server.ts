@@ -23,13 +23,13 @@ export async function resolveSecureTenant(headers: Headers): Promise<TenantConfi
   const portId =
     headers.get("x-corvo-port-id") ??
     cookieStore.get("corvo-port-id")?.value ??
-    "freeport";
+    "freeport-mock";
   const portInfo = getPortInfo(portId);
 
   setTenantConfig({
     environment: (headers.get("x-corvo-environment") ??
       cookieStore.get("corvo-environment")?.value ??
-      "test") as Environment,
+      "demo") as Environment,
     portId,
     portSlug:
       headers.get("x-corvo-port-slug") ??
@@ -94,7 +94,7 @@ export async function getAuthUserId(): Promise<string | null> {
  */
 export async function getAuthPortId(): Promise<string> {
   const session = await auth();
-  return session?.user?.portId || "freeport";
+  return session?.user?.portId || "freeport-mock";
 }
 
 /**
@@ -130,5 +130,5 @@ export async function getCurrentUser(headers: Headers) {
  * @deprecated Use getAuthPortId() instead.
  */
 export function getPortIdFromRequest(headers: Headers): string {
-  return headers.get("x-corvo-port-id") || "freeport";
+  return headers.get("x-corvo-port-id") || "freeport-mock";
 }

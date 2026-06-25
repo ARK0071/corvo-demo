@@ -12,12 +12,10 @@ import type { PipelinePhase } from "@/lib/pipeline-tasks";
 /**
  * Resolve the portProfileId (UUID) for the current user.
  *
- * Tries multiple strategies because identifiers are inconsistent across the
- * codebase (e.g. portId "louisiana-gateway", slug "louisiana-gateway-port",
- * profile key "louisiana-gateway-port"):
+ * Tries multiple strategies:
  *   1. If the value is already a UUID, use it directly.
  *   2. Exact slug match in port_profiles.
- *   3. Slug LIKE match (e.g. "louisiana-gateway" matches "louisiana-gateway-port").
+ *   3. Slug LIKE match (prefix-based fallback).
  */
 async function resolvePortProfileId(
   ...candidates: (string | null | undefined)[]
@@ -39,7 +37,7 @@ async function resolvePortProfileId(
     if (exact) return exact.id;
   }
 
-  // Fuzzy: try slug LIKE any candidate (e.g. "louisiana-gateway" → "louisiana-gateway-port")
+  // Fuzzy: try slug LIKE any candidate (prefix-based fallback)
   for (const value of candidates) {
     if (!value || uuidRegex.test(value)) continue;
 

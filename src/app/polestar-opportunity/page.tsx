@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useTenant } from "@/contexts/tenant-context";
 
-/** Visible only when the active tenant port is the Freeport mock workspace (Settings → port / headers). */
+/** Visible only when the active tenant port is Polestar Defense (Settings → port / headers). */
 export default function PolestarOpportunityPage() {
   const { portId, portName, isLoading } = useTenant();
 
@@ -43,7 +43,7 @@ export default function PolestarOpportunityPage() {
     );
   }
 
-  if (portId !== "freeport-mock") {
+  if (portId !== "polestar-defense") {
     return (
       <div className="mx-auto max-w-lg px-6 py-16 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -51,9 +51,8 @@ export default function PolestarOpportunityPage() {
         </div>
         <h1 className="text-lg font-semibold tracking-tight">Workspace not available</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          This partner opportunity view is enabled only for the <strong>Port Freeport Mock</strong> tenant.
-          Admins can activate it under <strong>Settings</strong> by selecting that port for your session
-          (same tenant the mock dataset uses).
+          This partner opportunity view is enabled only for the <strong>Polestar Defense</strong> tenant.
+          Admins can activate it under <strong>Settings</strong> by selecting that port for your session.
         </p>
         <p className="mt-4 text-xs text-muted-foreground">Current tenant: {portName}</p>
       </div>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, Fragment, useRef } from "react";
 import { useTenant, useTenantHeaders } from "@/contexts/tenant-context";
-import { getProfile } from "@/data/profiles";
+import { useProfile } from "@/components/profile-provider";
 import { FEDERAL_FORMS } from "@/data/federal-forms";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -296,7 +296,7 @@ interface LocalDraft extends DraftResponse {
 export function GrantDraftView({ initialGrantId, initialGrantTitle }: GrantDraftViewProps) {
   const tenant = useTenant();
   const tenantHeaders = useTenantHeaders();
-  const profile = getProfile(tenant.portSlug) ?? { name: tenant.portName };
+  const { profile } = useProfile();
 
   // Phase state
   const [phase, setPhase] = useState<Phase>("idle");
