@@ -1477,7 +1477,7 @@ ${s.content
             return (
               <Card
                 key={draft.id}
-                className={`p-3 cursor-pointer transition-colors ${
+                className={`p-3 cursor-pointer transition-colors group/draft ${
                   selectedDraftId === draft.id || currentDraftId === draft.id ? "border-primary bg-muted/50" : "hover:bg-muted/30"
                 }`}
                 onClick={() => {
@@ -1497,7 +1497,19 @@ ${s.content
                   }
                 }}
               >
-                <div className="font-medium text-sm line-clamp-2">{draft.grantTitle}</div>
+                <div className="flex items-start justify-between gap-1">
+                  <div className="font-medium text-sm line-clamp-2">{draft.grantTitle}</div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteDraft(draft.id);
+                    }}
+                    className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive opacity-0 group-hover/draft:opacity-100 transition-opacity"
+                    title="Delete draft"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
                 <div className="flex items-center gap-2 mt-2">
                   {isResearching ? (
                     <>

@@ -1703,6 +1703,7 @@ function UnifiedGrantsDashboard() {
                 awardCeiling: g.awardCeiling,
               }))}
               onRefreshPipeline={fetchPipelineFromDB}
+              onRemoveGrant={handleRemoveFromPipeline}
             />
           )}
 

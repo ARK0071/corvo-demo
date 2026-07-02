@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Send,
   Clock,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,6 +128,7 @@ interface GanttChartProps {
     awardCeiling?: number;
   }>;
   onRefreshPipeline: () => void;
+  onRemoveGrant?: (grantId: string) => void;
 }
 
 function getInitials(name: string): string {
@@ -175,7 +177,7 @@ function getProgressBarColor(doneItems: number, totalItems: number, hasFlags: bo
 
 // ── Component ──
 
-export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttChartProps) {
+export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline, onRemoveGrant }: GanttChartProps) {
   const tenantHeaders = useTenantHeaders();
   const [tasks, setTasks] = useState<GanttTask[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -427,6 +429,7 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
   const grantRows = useMemo(() => {
     return pipelineGrants.map((pg) => ({
       id: pg.id,
+      grantId: pg.grantId,
       title: pg.title,
       agency: pg.agency,
       stage: pg.stage,
@@ -520,26 +523,116 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
 
             return (
               <div key={grant.id}>
-                {/* Grant summary row */}
-                <div
-                  className="grid group hover:bg-muted/30 transition-colors"
-                  style={{ gridTemplateColumns: gridCols }}
-                >
-                  <div className="border-b border-r px-3 py-2 flex items-center gap-2">
+                {/* Collapsed: grid row with truncated name + progress bars */}
+                {!isExpanded && (
+                  <div
+                    className="grid group hover:bg-muted/30 transition-colors"
+                    style={{ gridTemplateColumns: gridCols }}
+                  >
+                    <div className="border-b border-r px-3 py-2 flex items-center gap-2">
+                      <button
+                        onClick={() => toggleGrant(grant.id)}
+                        className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold truncate">{grant.title}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{grant.agency}</p>
+                        </div>
+                      </button>
+                      {!hasTasks && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 text-[10px] px-2 shrink-0"
+                          disabled={generatingGrantId === grant.id}
+                          onClick={() => generateTasks(grant.id)}
+                        >
+                          {generatingGrantId === grant.id ? (
+                            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                          ) : (
+                            <Plus className="h-3 w-3 mr-1" />
+                          )}
+                          {generatingGrantId === grant.id ? "Generating..." : "Generate"}
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Phase summary cells */}
+                    {DISPLAY_COLUMNS.map((col, colIdx) => {
+                      const phases = DISPLAY_COLUMN_PHASES[col];
+                      const phaseTasks = grantTasks.filter(t => phases.includes(t.phase as PipelinePhase));
+                      const allSubs = phaseTasks.flatMap(t => t.subtasks);
+                      const totalItems = allSubs.length || phaseTasks.length;
+                      const doneItems = allSubs.length > 0
+                        ? allSubs.filter(s => s.status === "done").length
+                        : phaseTasks.filter(t => t.status === "done").length;
+                      const isCurrentCol = col === currentDisplayCol;
+                      const isPastCol = colIdx < currentDisplayIdx;
+
+                      const allItems = allSubs.length > 0 ? allSubs : phaseTasks;
+                      const hasFlags = allItems.some(i => i.flagged || i.status === "blocked");
+                      const hasOverdue = allItems.some(i => isOverdue(i.dueDate) && i.status !== "done");
+                      const barColor = getProgressBarColor(doneItems, totalItems, hasFlags, hasOverdue);
+
+                      return (
+                        <div
+                          key={col}
+                          className={`border-b border-l px-2 py-2 flex items-center justify-center ${
+                            isCurrentCol ? "bg-muted/40" : ""
+                          }`}
+                        >
+                          {totalItems > 0 && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1.5">
+                                  {hasFlags && <Flag className="h-3 w-3 text-red-500 shrink-0" />}
+                                  <div className="h-2 rounded-full overflow-hidden bg-muted w-12">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${
+                                        isPastCol || doneItems === totalItems
+                                          ? "bg-green-500"
+                                          : barColor
+                                      }`}
+                                      style={{
+                                        width: `${totalItems > 0 ? (doneItems / totalItems) * 100 : 0}%`,
+                                      }}
+                                    />
+                                  </div>
+                                  <span className="text-[10px] tabular-nums text-muted-foreground">
+                                    {doneItems}/{totalItems}
+                                  </span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {DISPLAY_COLUMN_LABELS[col]}: {doneItems} of {totalItems} done
+                                {hasFlags && " (has flagged items)"}
+                                {hasOverdue && " (has overdue items)"}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          {totalItems === 0 && isPastCol && (
+                            <Check className="h-3.5 w-3.5 text-green-500" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Expanded: full-width row with full name + 3-dot menu */}
+                {isExpanded && (
+                  <div className="border-b bg-muted/20 px-3 py-2 flex items-start gap-2">
                     <button
                       onClick={() => toggleGrant(grant.id)}
-                      className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+                      className="flex items-center gap-1.5 shrink-0 mt-0.5"
                     >
-                      {isExpanded ? (
-                        <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      ) : (
-                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold truncate">{grant.title}</p>
-                        <p className="text-[10px] text-muted-foreground truncate">{grant.agency}</p>
-                      </div>
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold whitespace-normal">{grant.title}</p>
+                      <p className="text-[10px] text-muted-foreground whitespace-normal">{grant.agency}</p>
+                    </div>
                     {!hasTasks && (
                       <Button
                         size="sm"
@@ -556,68 +649,34 @@ export function PipelineGanttChart({ pipelineGrants, onRefreshPipeline }: GanttC
                         {generatingGrantId === grant.id ? "Generating..." : "Generate"}
                       </Button>
                     )}
+                    {onRemoveGrant && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-6 w-6 p-0 shrink-0 text-muted-foreground hover:text-foreground"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => {
+                              if (confirm("Remove this grant from the pipeline?")) {
+                                onRemoveGrant(grant.grantId);
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-2" />
+                            Remove from pipeline
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
-
-                  {/* Phase summary cells (using display columns) */}
-                  {DISPLAY_COLUMNS.map((col, colIdx) => {
-                    const phases = DISPLAY_COLUMN_PHASES[col];
-                    const phaseTasks = grantTasks.filter(t => phases.includes(t.phase as PipelinePhase));
-                    const allSubs = phaseTasks.flatMap(t => t.subtasks);
-                    const totalItems = allSubs.length || phaseTasks.length;
-                    const doneItems = allSubs.length > 0
-                      ? allSubs.filter(s => s.status === "done").length
-                      : phaseTasks.filter(t => t.status === "done").length;
-                    const isCurrentCol = col === currentDisplayCol;
-                    const isPastCol = colIdx < currentDisplayIdx;
-
-                    const allItems = allSubs.length > 0 ? allSubs : phaseTasks;
-                    const hasFlags = allItems.some(i => i.flagged || i.status === "blocked");
-                    const hasOverdue = allItems.some(i => isOverdue(i.dueDate) && i.status !== "done");
-                    const barColor = getProgressBarColor(doneItems, totalItems, hasFlags, hasOverdue);
-
-                    return (
-                      <div
-                        key={col}
-                        className={`border-b border-l px-2 py-2 flex items-center justify-center ${
-                          isCurrentCol ? "bg-muted/40" : ""
-                        }`}
-                      >
-                        {totalItems > 0 && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <div className="flex items-center gap-1.5">
-                                {hasFlags && <Flag className="h-3 w-3 text-red-500 shrink-0" />}
-                                <div className="h-2 rounded-full overflow-hidden bg-muted w-12">
-                                  <div
-                                    className={`h-full rounded-full transition-all ${
-                                      isPastCol || doneItems === totalItems
-                                        ? "bg-green-500"
-                                        : barColor
-                                    }`}
-                                    style={{
-                                      width: `${totalItems > 0 ? (doneItems / totalItems) * 100 : 0}%`,
-                                    }}
-                                  />
-                                </div>
-                                <span className="text-[10px] tabular-nums text-muted-foreground">
-                                  {doneItems}/{totalItems}
-                                </span>
-                              </div>
-                            </TooltipTrigger>
-                            <TooltipContent side="top" className="text-xs">
-                              {DISPLAY_COLUMN_LABELS[col]}: {doneItems} of {totalItems} done
-                              {hasFlags && " (has flagged items)"}
-                              {hasOverdue && " (has overdue items)"}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
-                        {totalItems === 0 && isPastCol && (
-                          <Check className="h-3.5 w-3.5 text-green-500" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                )}
 
                 {/* Expanded task rows */}
                 {isExpanded && hasTasks && (
