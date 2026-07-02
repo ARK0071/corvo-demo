@@ -142,12 +142,21 @@ function readJsonIfExists<T>(filePath: string): T | null {
   }
 }
 
+// "freeport-mock" is the DB slug; "port-freeport" is the legacy embeddings directory name
+const FREEPORT_IDS = new Set(["port-freeport", "freeport-mock"]);
+
 function loadProjectEmbeddingsForProfile(profileId: string): Record<string, ProjectEmbedding> {
   const scoped = path.join(EMBEDDINGS_ROOT, "profiles", profileId, "project-embeddings.json");
   const fromProfile = readJsonIfExists<Record<string, ProjectEmbedding>>(scoped);
   if (fromProfile && Object.keys(fromProfile).length > 0) return fromProfile;
 
-  if (profileId === "port-freeport") {
+  if (FREEPORT_IDS.has(profileId)) {
+    // Try the alternate directory name
+    const altId = profileId === "freeport-mock" ? "port-freeport" : "freeport-mock";
+    const altScoped = path.join(EMBEDDINGS_ROOT, "profiles", altId, "project-embeddings.json");
+    const fromAlt = readJsonIfExists<Record<string, ProjectEmbedding>>(altScoped);
+    if (fromAlt && Object.keys(fromAlt).length > 0) return fromAlt;
+
     const legacy = path.join(EMBEDDINGS_ROOT, "project-embeddings.json");
     const fromLegacy = readJsonIfExists<Record<string, ProjectEmbedding>>(legacy);
     if (fromLegacy) return fromLegacy;
@@ -161,7 +170,13 @@ function loadProfileEmbeddingForProfile(profileId: string): ProfileEmbedding | n
   const fromProfile = readJsonIfExists<ProfileEmbedding>(scoped);
   if (fromProfile) return fromProfile;
 
-  if (profileId === "port-freeport") {
+  if (FREEPORT_IDS.has(profileId)) {
+    // Try the alternate directory name
+    const altId = profileId === "freeport-mock" ? "port-freeport" : "freeport-mock";
+    const altScoped = path.join(EMBEDDINGS_ROOT, "profiles", altId, "profile-embedding.json");
+    const fromAlt = readJsonIfExists<ProfileEmbedding>(altScoped);
+    if (fromAlt) return fromAlt;
+
     const legacy = path.join(EMBEDDINGS_ROOT, "profile-embedding.json");
     return readJsonIfExists<ProfileEmbedding>(legacy);
   }

@@ -117,7 +117,7 @@ export function initializeProjectsForProfile(profileId: string): void {
     initializeLAWAProjects();
   } else if (profileId === "louisiana-gateway") {
     louisianaGatewayProjects.forEach((p) => createProject(p));
-  } else if (profileId === "port-freeport") {
+  } else if (profileId === "port-freeport" || profileId === "freeport-mock") {
     initializePortFreeportDefaults();
   }
   // Other profiles (e.g. DB-created entities) start with no projects
