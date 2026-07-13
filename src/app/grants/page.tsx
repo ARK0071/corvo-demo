@@ -163,6 +163,7 @@ function UnifiedGrantsDashboard() {
   const [scanning, setScanning] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [expandedGrant, setExpandedGrant] = useState<string | null>(null);
+  const [descriptionExpanded, setDescriptionExpanded] = useState<Set<string>>(new Set());
   const [fetchingDetails, setFetchingDetails] = useState<Set<string>>(new Set());
 
   // Pipeline tab state - always from DB
@@ -1381,9 +1382,28 @@ function UnifiedGrantsDashboard() {
                     {isExpanded && grant.description && (
                       <div className="border-t px-4 pb-4 pt-3">
                         <div
-                          className="text-sm text-muted-foreground mb-3 prose prose-sm dark:prose-invert max-w-none"
-                          dangerouslySetInnerHTML={{ __html: grant.description.slice(0, 500) }}
+                          className={`text-sm text-muted-foreground mb-1 prose prose-sm dark:prose-invert max-w-none ${
+                            !descriptionExpanded.has(grant.id) ? "line-clamp-4" : ""
+                          }`}
+                          dangerouslySetInnerHTML={{ __html: grant.description }}
                         />
+                        {grant.description.length > 300 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDescriptionExpanded((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(grant.id)) next.delete(grant.id);
+                                else next.add(grant.id);
+                                return next;
+                              });
+                            }}
+                            className="text-xs text-primary hover:underline mb-3"
+                          >
+                            {descriptionExpanded.has(grant.id) ? "See less" : "See more"}
+                          </button>
+                        )}
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                           <div>
@@ -1468,10 +1488,16 @@ function UnifiedGrantsDashboard() {
                               <div className="mb-3">
                                 <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Top Project Matches</span>
                                 <ul className="mt-1 space-y-0.5">
-                                  {score.topProjectMatches.slice(0, 5).map((m) => (
-                                    <li key={m.projectId} className="text-xs font-medium flex items-center justify-between gap-2">
-                                      <span className="truncate">{m.projectName}</span>
-                                      <span className="text-muted-foreground shrink-0">{m.similarity}%</span>
+                                  {score.topProjectMatches.slice(0, 5).map((m, i, arr) => (
+                                    <li key={m.projectId} className="text-xs font-medium flex items-center gap-2">
+                                      <span className="truncate basis-1/2 shrink-0">{m.projectName}</span>
+                                      <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full animate-[bar-fill_0.6s_ease-out_forwards]"
+                                          style={{ width: 0, animationDelay: `${i * 80}ms`, backgroundColor: `rgba(34,197,94,${1 - i * (0.7 / (arr.length - 1 || 1))})`, '--bar-width': `${m.similarity}%` } as React.CSSProperties}
+                                        />
+                                      </div>
+                                      <span className="text-muted-foreground shrink-0 tabular-nums w-7 text-right">{m.similarity}%</span>
                                     </li>
                                   ))}
                                 </ul>
@@ -1482,10 +1508,16 @@ function UnifiedGrantsDashboard() {
                               <div className="mb-3">
                                 <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Funding Domain Matches</span>
                                 <ul className="mt-1 space-y-0.5">
-                                  {(score.topDomainMatches ?? []).slice(0, 5).map((m) => (
-                                    <li key={m.domainId} className="text-xs font-medium flex items-center justify-between gap-2">
-                                      <span className="truncate">{m.domainName}</span>
-                                      <span className="text-muted-foreground shrink-0">{m.similarity}%</span>
+                                  {(score.topDomainMatches ?? []).slice(0, 5).map((m, i, arr) => (
+                                    <li key={m.domainId} className="text-xs font-medium flex items-center gap-2">
+                                      <span className="truncate basis-1/2 shrink-0">{m.domainName}</span>
+                                      <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                                        <div
+                                          className="h-full rounded-full animate-[bar-fill_0.6s_ease-out_forwards]"
+                                          style={{ width: 0, animationDelay: `${i * 80}ms`, backgroundColor: `rgba(34,197,94,${1 - i * (0.7 / (arr.length - 1 || 1))})`, '--bar-width': `${m.similarity}%` } as React.CSSProperties}
+                                        />
+                                      </div>
+                                      <span className="text-muted-foreground shrink-0 tabular-nums w-7 text-right">{m.similarity}%</span>
                                     </li>
                                   ))}
                                 </ul>

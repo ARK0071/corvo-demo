@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useCurrentUser } from "@/contexts/user-context";
+import { useTenantHeaders } from "@/contexts/tenant-context";
 
 interface AdminUser {
   id: string;
@@ -18,7 +19,7 @@ interface AdminUser {
   createdAt: string;
 }
 
-const ROLES = ["drafter", "reviewer", "certifying_official", "moderator", "admin"];
+const ROLES = ["drafter", "reviewer", "certifying_official", "moderator", "admin", "subrecipient"];
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -126,19 +127,33 @@ export default function AdminUsersPage() {
 
 function CreateUserForm({ ports, onCreated }: { ports: { id: string; name: string }[]; onCreated: () => void }) {
   const { user, isModerator } = useCurrentUser();
+  const headers = useTenantHeaders();
   const [form, setForm] = useState({
     email: "",
     name: "",
     title: "",
     portId: isModerator && user ? user.portId : "freeport",
     role: "drafter",
+    subrecipientId: "",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [subrecipients, setSubrecipients] = useState<{ id: string; entityName: string }[]>([]);
+
+  useEffect(() => {
+    if (form.role === "subrecipient") {
+      setSubrecipients([]);
+      setForm((f) => ({ ...f, subrecipientId: "" }));
+      fetch(`/api/subrecipients?portSlug=${encodeURIComponent(form.portId)}`, { headers })
+        .then((r) => r.ok ? r.json() : { subrecipients: [] })
+        .then((data) => setSubrecipients(data.subrecipients || []))
+        .catch(() => {});
+    }
+  }, [form.role, form.portId, headers]);
 
   // Moderators can only assign non-privileged roles
   const availableRoles = isModerator
-    ? ROLES.filter((r) => r !== "admin" && r !== "moderator")
+    ? ROLES.filter((r) => r !== "admin" && r !== "moderator" && r !== "subrecipient")
     : ROLES;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -205,7 +220,7 @@ function CreateUserForm({ ports, onCreated }: { ports: { id: string; name: strin
             <label className="text-xs font-medium">Port *</label>
             <select
               value={form.portId}
-              onChange={(e) => setForm((f) => ({ ...f, portId: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, portId: e.target.value, subrecipientId: "" }))}
               className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
             >
               {ports.map((p) => (
@@ -227,6 +242,22 @@ function CreateUserForm({ ports, onCreated }: { ports: { id: string; name: strin
           </select>
         </div>
       </div>
+      {form.role === "subrecipient" && (
+        <div>
+          <label className="text-xs font-medium">Subrecipient Entity *</label>
+          <select
+            required
+            value={form.subrecipientId}
+            onChange={(e) => setForm((f) => ({ ...f, subrecipientId: e.target.value }))}
+            className="mt-1 w-full px-3 py-1.5 border rounded-md text-sm"
+          >
+            <option value="">Select subrecipient...</option>
+            {subrecipients.map((s) => (
+              <option key={s.id} value={s.id}>{s.entityName}</option>
+            ))}
+          </select>
+        </div>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button type="submit" size="sm" disabled={saving}>
         {saving ? "Creating..." : "Create User"}

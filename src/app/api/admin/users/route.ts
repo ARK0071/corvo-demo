@@ -8,7 +8,8 @@ const createUserSchema = z.object({
   name: z.string().min(1),
   title: z.string().default(""),
   portId: z.string().min(1),
-  role: z.enum(["drafter", "reviewer", "certifying_official", "moderator", "admin"]),
+  role: z.enum(["drafter", "reviewer", "certifying_official", "moderator", "admin", "subrecipient"]),
+  subrecipientId: z.string().uuid().optional(),
 });
 
 export const GET = withRole(["admin", "moderator"], async (request, { user: caller }) => {
@@ -43,6 +44,8 @@ export const GET = withRole(["admin", "moderator"], async (request, { user: call
       lastLoginAt: true,
       loginCount: true,
       createdAt: true,
+      subrecipientId: true,
+      subrecipient: { select: { entityName: true } },
     },
   });
 
@@ -76,6 +79,14 @@ export const POST = withRole(["admin", "moderator"], async (request, { user: cal
     }
   }
 
+  // Subrecipient role requires a subrecipientId
+  if (parsed.data.role === "subrecipient" && !parsed.data.subrecipientId) {
+    return NextResponse.json(
+      { error: "subrecipientId is required when role is subrecipient" },
+      { status: 400 }
+    );
+  }
+
   // Check if email already exists
   const existing = await prisma.user.findUnique({
     where: { email: parsed.data.email },
@@ -95,6 +106,7 @@ export const POST = withRole(["admin", "moderator"], async (request, { user: cal
       title: parsed.data.title,
       portId: parsed.data.portId,
       role: parsed.data.role,
+      subrecipientId: parsed.data.subrecipientId || null,
     },
   });
 

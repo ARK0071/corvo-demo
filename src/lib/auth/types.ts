@@ -11,6 +11,7 @@ declare module "next-auth" {
       portId: string;
       title: string;
       active: boolean;
+      subrecipientId?: string | null;
     };
   }
 }

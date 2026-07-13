@@ -15,6 +15,38 @@ const SESSION_COOKIE_NAMES = [
   "authjs.session-token",
 ];
 
+// Paths subrecipient users ARE allowed to access
+const SUB_ALLOWED_PATHS = [
+  "/sub",
+  "/api/sub",
+  "/api/attachments",
+  "/api/auth",
+  "/settings",
+  "/api/users",
+];
+
+// Paths that are prime-only (subrecipients should NOT access)
+const PRIME_ONLY_PATHS = [
+  "/grants",
+  "/reporting",
+  "/admin",
+  "/dashboard",
+  "/drafting",
+  "/awards",
+  "/grant-match",
+  "/porter-dashboard",
+  "/competitive-intel",
+  "/newsroom",
+  "/calendar",
+  "/api/pipeline",
+  "/api/tasks",
+  "/api/admin",
+  "/api/grants",
+  "/api/awards",
+  "/api/chat",
+  "/api/grant-match-chat",
+];
+
 function hasSessionCookie(request: NextRequest): boolean {
   return SESSION_COOKIE_NAMES.some((name) => request.cookies.has(name));
 }
@@ -37,6 +69,10 @@ export function middleware(request: NextRequest) {
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
+
+  // Role-based routing is enforced at the API/page level since middleware
+  // cannot read session data without a DB call. The withSubrecipientAuth
+  // guard and page-level checks handle subrecipient route restriction.
 
   return NextResponse.next();
 }

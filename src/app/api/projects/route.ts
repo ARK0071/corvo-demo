@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
-import * as DemoProjects from "@/lib/db/repositories/demo-projects";
+import * as Projects from "@/lib/db/repositories/projects";
 import type { Project } from "@/data/projects";
 
 // GET: List all projects or search with params
@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
     // If ID provided, return single project
     if (id) {
-      const project = await DemoProjects.getProjectById(id);
+      const project = await Projects.getProjectById(id);
       if (!project) {
         return NextResponse.json({ error: "Project not found" }, { status: 404 });
       }
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
     const limit = searchParams.get("limit");
     const offset = searchParams.get("offset");
 
-    const result = await DemoProjects.searchProjects({
+    const result = await Projects.searchProjects({
       keyword,
       status: status.length > 0 ? status : undefined,
       priority: priority.length > 0 ? priority : undefined,
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const project = await DemoProjects.createProject(projectData, portProfileId);
+    const project = await Projects.createProject(projectData, portProfileId);
     return NextResponse.json(project, { status: 201 });
   } catch (error) {
     console.error("Projects POST error:", error);
@@ -87,7 +87,7 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const project = await DemoProjects.updateProject(id, updates);
+    const project = await Projects.updateProject(id, updates);
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
@@ -113,7 +113,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
     }
 
-    const deleted = await DemoProjects.deleteProject(id);
+    const deleted = await Projects.deleteProject(id);
     if (!deleted) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }

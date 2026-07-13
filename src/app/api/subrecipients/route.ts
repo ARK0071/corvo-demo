@@ -12,8 +12,8 @@ import { getTenantConfig } from "@/lib/db/tenant-config";
 
 // ─── Resolve portProfileId from tenant slug ───
 
-async function getPortProfileId(): Promise<string> {
-  const portId = getTenantConfig().portId;
+async function getPortProfileId(slugOverride?: string): Promise<string> {
+  const portId = slugOverride || getTenantConfig().portId;
   const profile = await prisma.portProfile.findFirst({
     where: { slug: portId },
     select: { id: true },
@@ -51,8 +51,9 @@ function computeRiskLevel(factors: Record<string, boolean>): { level: string; in
 export async function GET(request: NextRequest) {
   try {
     await resolveSecureTenant(request.headers);
-    const portProfileId = await getPortProfileId();
     const params = request.nextUrl.searchParams;
+    const portSlug = params.get("portSlug") || undefined;
+    const portProfileId = await getPortProfileId(portSlug);
     const awardId = params.get("awardId");
     const id = params.get("id");
 

@@ -63,6 +63,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.portId = dbUser.portId;
         session.user.title = dbUser.title;
         session.user.active = dbUser.active;
+        session.user.subrecipientId = dbUser.subrecipientId;
       }
 
       return session;

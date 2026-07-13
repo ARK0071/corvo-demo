@@ -14,31 +14,43 @@ datasource db {
 // =============================================================================
 
 model User {
-  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  portId        String    @map("port_id") @db.VarChar(100)
-  email         String    @unique
-  emailVerified DateTime? @map("email_verified")
-  name          String
-  title         String    @default("")
-  phone         String?
-  image         String?
-  role          String    @default("drafter")
-  active        Boolean   @default(true)
-  lastLoginAt   DateTime? @map("last_login_at")
-  loginCount    Int       @default(0) @map("login_count")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id              String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portId          String        @map("port_id") @db.VarChar(100)
+  email           String        @unique
+  emailVerified   DateTime?     @map("email_verified")
+  name            String
+  title           String        @default("")
+  phone           String?
+  image           String?
+  role            String        @default("drafter")
+  active          Boolean       @default(true)
+  lastLoginAt     DateTime?     @map("last_login_at")
+  loginCount      Int           @default(0) @map("login_count")
+  subrecipientId  String?       @map("subrecipient_id") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
-  accounts         Account[]
-  sessions         Session[]
-  apiKeys          ApiKey[]
-  assignedTasks    Task[]            @relation("TaskAssignee")
-  createdTasks     Task[]            @relation("TaskCreator")
-  taskComments     TaskComment[]
-  grantAssignments GrantAssignment[]
-  notifications    Notification[]
+  accounts              Account[]
+  sessions              Session[]
+  apiKeys               ApiKey[]
+  assignedTasks         Task[]            @relation("TaskAssignee")
+  createdTasks          Task[]            @relation("TaskCreator")
+  taskComments          TaskComment[]
+  grantAssignments      GrantAssignment[]
+  notifications         Notification[]
+  subrecipient          Subrecipient?     @relation(fields: [subrecipientId], references: [id])
+  uploadedAttachments   Attachment[]
+  subComments           SubrecipientComment[]
+  uploadedDocuments     SubrecipientDocument[] @relation("SubDocUploader")
+  reviewedDocuments     SubrecipientDocument[] @relation("SubDocReviewer")
+  createdExpenses       SubrecipientExpense[]  @relation("SubExpenseCreator")
+  reviewedExpenses      SubrecipientExpense[]  @relation("SubExpenseReviewer")
+  scheduledVisits       MonitoringVisit[]      @relation("VisitScheduler")
+  confirmedVisits       MonitoringVisit[]      @relation("VisitConfirmer")
+  completedVisits       MonitoringVisit[]      @relation("VisitCompleter")
 
   @@index([portId])
+  @@index([subrecipientId])
   @@map("users")
 }
 
@@ -402,11 +414,14 @@ model Award {
   budgetModifications    BudgetModification[]
   scheduledReports       ScheduledReport[]
   closeoutChecklist      CloseoutChecklist?
-  subrecipients          Subrecipient[]
-  complianceChecklists   ComplianceChecklist[]
-  auditFindings          AuditFinding[]
-  tasks                  Task[]
-  grantAssignments       GrantAssignment[]
+  subrecipients            Subrecipient[]
+  complianceChecklists     ComplianceChecklist[]
+  auditFindings            AuditFinding[]
+  tasks                    Task[]
+  grantAssignments         GrantAssignment[]
+  subrecipientDocuments    SubrecipientDocument[]
+  subrecipientExpenses     SubrecipientExpense[]
+  monitoringVisits         MonitoringVisit[]
 
   @@index([portProfileId])
   @@index([status])
@@ -611,23 +626,28 @@ model CloseoutChecklist {
 // =============================================================================
 
 model Subrecipient {
-  id                    String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  awardId               String              @map("award_id") @db.Uuid
-  entityName            String              @map("entity_name") @db.VarChar(255)
-  uei                   String?             @db.VarChar(20)
-  classification        String              @db.VarChar(20)
-  classificationAnswers Json                @default("[]") @map("classification_answers")
-  riskLevel             String              @default("standard") @map("risk_level") @db.VarChar(20)
-  riskFactors           Json                @default("[]") @map("risk_factors")
-  monitoringIntensity   String              @default("standard") @map("monitoring_intensity") @db.VarChar(20)
-  subawardAmount        Decimal             @map("subaward_amount") @db.Decimal(15, 2)
-  cumulativeSpend       Decimal             @default(0) @map("cumulative_spend") @db.Decimal(15, 2)
-  singleAuditRequired   Boolean             @default(false) @map("single_audit_required")
-  status                String              @default("active") @db.VarChar(20)
-  createdAt             DateTime            @default(now()) @map("created_at")
-  updatedAt             DateTime            @updatedAt @map("updated_at")
-  award                 Award               @relation(fields: [awardId], references: [id], onDelete: Cascade)
-  reports               SubrecipientReport[]
+  id                     String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  awardId                String              @map("award_id") @db.Uuid
+  entityName             String              @map("entity_name") @db.VarChar(255)
+  uei                    String?             @db.VarChar(20)
+  classification         String              @db.VarChar(20)
+  classificationAnswers  Json                @default("[]") @map("classification_answers")
+  riskLevel              String              @default("standard") @map("risk_level") @db.VarChar(20)
+  riskFactors            Json                @default("[]") @map("risk_factors")
+  monitoringIntensity    String              @default("standard") @map("monitoring_intensity") @db.VarChar(20)
+  subawardAmount         Decimal             @map("subaward_amount") @db.Decimal(15, 2)
+  cumulativeSpend        Decimal             @default(0) @map("cumulative_spend") @db.Decimal(15, 2)
+  singleAuditRequired    Boolean             @default(false) @map("single_audit_required")
+  expenseReportingMode   String              @default("line_item") @map("expense_reporting_mode") @db.VarChar(20)
+  status                 String              @default("active") @db.VarChar(20)
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  award                  Award               @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  reports                SubrecipientReport[]
+  users                  User[]
+  documents              SubrecipientDocument[]
+  expenses               SubrecipientExpense[]
+  monitoringVisits       MonitoringVisit[]
 
   @@index([awardId])
   @@map("subrecipients")
@@ -646,10 +666,164 @@ model SubrecipientReport {
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
   subrecipient    Subrecipient @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+  linkedDocuments SubrecipientDocument[]
 
   @@index([subrecipientId])
   @@index([dueDate])
   @@map("subrecipient_reports")
+}
+
+// =============================================================================
+// ATTACHMENTS - Generic file storage for S3-backed uploads
+// =============================================================================
+
+model Attachment {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  uploadedById String   @map("uploaded_by_id") @db.Uuid
+  fileName     String   @map("file_name") @db.VarChar(500)
+  fileKey      String   @map("file_key") @db.VarChar(1000)
+  fileSize     Int      @map("file_size")
+  mimeType     String   @map("mime_type") @db.VarChar(255)
+  resourceType String   @map("resource_type") @db.VarChar(50)
+  resourceId   String   @map("resource_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  uploadedBy User @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+
+  @@index([resourceType, resourceId])
+  @@index([uploadedById])
+  @@map("attachments")
+}
+
+// =============================================================================
+// SUBRECIPIENT DOCUMENTS - Document submissions from subrecipients
+// =============================================================================
+
+model SubrecipientDocument {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  subrecipientId  String    @map("subrecipient_id") @db.Uuid
+  awardId         String    @map("award_id") @db.Uuid
+  reportId        String?   @map("report_id") @db.Uuid
+  category        String    @db.VarChar(50)
+  title           String    @db.VarChar(500)
+  description     String    @default("")
+  status          String    @default("uploaded") @db.VarChar(20)
+  reviewNotes     String?   @map("review_notes")
+  reviewedById    String?   @map("reviewed_by_id") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at")
+  uploadedById    String    @map("uploaded_by_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  subrecipient Subrecipient        @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+  award        Award               @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  report       SubrecipientReport? @relation(fields: [reportId], references: [id])
+  uploadedBy   User                @relation("SubDocUploader", fields: [uploadedById], references: [id])
+  reviewedBy   User?               @relation("SubDocReviewer", fields: [reviewedById], references: [id])
+  comments     SubrecipientComment[] @relation("DocumentComments")
+
+  @@index([subrecipientId])
+  @@index([awardId])
+  @@index([status])
+  @@map("subrecipient_documents")
+}
+
+// =============================================================================
+// SUBRECIPIENT EXPENSES - Expense submissions from subrecipients
+// =============================================================================
+
+model SubrecipientExpense {
+  id              String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  subrecipientId  String    @map("subrecipient_id") @db.Uuid
+  awardId         String    @map("award_id") @db.Uuid
+  reportingMode   String    @map("reporting_mode") @db.VarChar(20)
+  periodStart     DateTime? @map("period_start") @db.Date
+  periodEnd       DateTime? @map("period_end") @db.Date
+  category        String    @db.VarChar(50)
+  description     String
+  amount          Decimal   @db.Decimal(15, 2)
+  expenseDate     DateTime? @map("expense_date") @db.Date
+  status          String    @default("draft") @db.VarChar(20)
+  submittedAt     DateTime? @map("submitted_at")
+  reviewedById    String?   @map("reviewed_by_id") @db.Uuid
+  reviewedAt      DateTime? @map("reviewed_at")
+  reviewNotes     String?   @map("review_notes")
+  createdById     String    @map("created_by_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  subrecipient Subrecipient @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+  award        Award        @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("SubExpenseCreator", fields: [createdById], references: [id])
+  reviewedBy   User?        @relation("SubExpenseReviewer", fields: [reviewedById], references: [id])
+  comments     SubrecipientComment[] @relation("ExpenseComments")
+
+  @@index([subrecipientId])
+  @@index([awardId])
+  @@index([status])
+  @@map("subrecipient_expenses")
+}
+
+// =============================================================================
+// SUBRECIPIENT COMMENTS - Comment threads on documents & expenses
+// =============================================================================
+
+model SubrecipientComment {
+  id         String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  documentId String?  @map("document_id") @db.Uuid
+  expenseId  String?  @map("expense_id") @db.Uuid
+  visitId    String?  @map("visit_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  body       String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  document SubrecipientDocument? @relation("DocumentComments", fields: [documentId], references: [id], onDelete: Cascade)
+  expense  SubrecipientExpense?  @relation("ExpenseComments", fields: [expenseId], references: [id], onDelete: Cascade)
+  visit    MonitoringVisit?      @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  user     User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([expenseId])
+  @@index([visitId])
+  @@map("subrecipient_comments")
+}
+
+// =============================================================================
+// MONITORING VISITS - Scheduled site visits and desk reviews
+// =============================================================================
+
+model MonitoringVisit {
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  subrecipientId   String    @map("subrecipient_id") @db.Uuid
+  awardId          String    @map("award_id") @db.Uuid
+  type             String    @db.VarChar(30)
+  scheduledDate    DateTime  @map("scheduled_date") @db.Date
+  scheduledById    String    @map("scheduled_by_id") @db.Uuid
+  status           String    @default("proposed") @db.VarChar(20)
+  confirmedAt      DateTime? @map("confirmed_at")
+  confirmedById    String?   @map("confirmed_by_id") @db.Uuid
+  location         String?   @db.VarChar(500)
+  agenda           String    @default("")
+  findings         String?
+  findingsSeverity String?   @map("findings_severity") @db.VarChar(20)
+  completedAt      DateTime? @map("completed_at")
+  completedById    String?   @map("completed_by_id") @db.Uuid
+  followUpDueDate  DateTime? @map("follow_up_due_date") @db.Date
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  subrecipient Subrecipient          @relation(fields: [subrecipientId], references: [id], onDelete: Cascade)
+  award        Award                 @relation(fields: [awardId], references: [id], onDelete: Cascade)
+  scheduledBy  User                  @relation("VisitScheduler", fields: [scheduledById], references: [id])
+  confirmedBy  User?                 @relation("VisitConfirmer", fields: [confirmedById], references: [id])
+  completedBy  User?                 @relation("VisitCompleter", fields: [completedById], references: [id])
+  comments     SubrecipientComment[]
+
+  @@index([subrecipientId])
+  @@index([awardId])
+  @@index([scheduledDate])
+  @@index([status])
+  @@map("monitoring_visits")
 }
 
 // =============================================================================

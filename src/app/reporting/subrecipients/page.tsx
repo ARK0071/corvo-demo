@@ -14,10 +14,23 @@ import {
   XCircle,
   ChevronRight,
   X,
+  Receipt,
+  MapPin,
+  MessageSquare,
+  Calendar,
+  Eye,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
 
 // ─── Types ───
@@ -85,6 +98,15 @@ const CLASSIFICATION_QUESTIONS = [
 
 // ─── Page ───
 
+type TabId = "entities" | "documents" | "expenses" | "visits";
+
+const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: "entities", label: "Entities", icon: <Users className="h-3.5 w-3.5" /> },
+  { id: "documents", label: "Document Review", icon: <FileText className="h-3.5 w-3.5" /> },
+  { id: "expenses", label: "Expense Review", icon: <Receipt className="h-3.5 w-3.5" /> },
+  { id: "visits", label: "Monitoring Visits", icon: <MapPin className="h-3.5 w-3.5" /> },
+];
+
 export default function SubrecipientsPage() {
   const headers = useTenantHeaders();
   const tenant = useTenant();
@@ -92,6 +114,7 @@ export default function SubrecipientsPage() {
   const [awards, setAwards] = useState<Award[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabId>("entities");
 
   const fetchData = useCallback(async () => {
     if (tenant.isLoading) return;
@@ -160,6 +183,36 @@ export default function SubrecipientsPage() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-1 border-b">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? "border-[#3d8b8b] text-[#3d8b8b]"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {tab.icon}
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "documents" && (
+        <DocumentReviewTab headers={headers} />
+      )}
+      {activeTab === "expenses" && (
+        <ExpenseReviewTab headers={headers} />
+      )}
+      {activeTab === "visits" && (
+        <VisitManagementTab headers={headers} subs={subs} />
+      )}
+
+      {activeTab !== "entities" ? null : (
+      <>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
         <Card>
@@ -296,7 +349,698 @@ export default function SubrecipientsPage() {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
     </div>
+  );
+}
+
+// ─── Document Review Tab ───
+
+interface ReviewDoc {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  status: string;
+  createdAt: string;
+  subrecipient: { entityName: string };
+  award: { title: string; fain: string };
+  uploadedBy: { name: string };
+  report: { title: string; reportType: string; dueDate: string } | null;
+  comments: Array<{ id: string; body: string; createdAt: string; user: { id: string; name: string; role: string } }>;
+}
+
+function DocumentReviewTab({ headers }: { headers: Record<string, string> }) {
+  const [docs, setDocs] = useState<ReviewDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<ReviewDoc | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [commentText, setCommentText] = useState("");
+  const [filterStatus, setFilterStatus] = useState("uploaded");
+
+  const fetchDocs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/subrecipients/documents/review?status=${filterStatus}`, {
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDocs(data.documents || []);
+      }
+    } catch { /* */ }
+    setLoading(false);
+  }, [headers, filterStatus]);
+
+  useEffect(() => { fetchDocs(); }, [fetchDocs]);
+
+  const handleReview = async (id: string, action: "accept" | "reject") => {
+    if (action === "reject" && !reviewNotes.trim()) {
+      alert("Notes are required when rejecting a document");
+      return;
+    }
+    await fetch("/api/subrecipients/documents/review", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action, reviewNotes: reviewNotes || undefined }),
+    });
+    setSelected(null);
+    setReviewNotes("");
+    fetchDocs();
+  };
+
+  const handleComment = async (docId: string) => {
+    if (!commentText.trim()) return;
+    await fetch("/api/sub/comments", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ documentId: docId, body: commentText }),
+    });
+    setCommentText("");
+    fetchDocs();
+  };
+
+  if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <>
+      {/* Filter */}
+      <div className="flex gap-2">
+        {["uploaded", "accepted", "rejected"].map((s) => (
+          <Button
+            key={s}
+            size="sm"
+            variant={filterStatus === s ? "default" : "outline"}
+            onClick={() => setFilterStatus(s)}
+            className="capitalize text-xs"
+          >
+            {s} ({docs.length})
+          </Button>
+        ))}
+      </div>
+
+      {docs.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No {filterStatus} documents to review
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {docs.map((doc) => (
+            <Card key={doc.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelected(doc); setReviewNotes(""); }}>
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <FileText className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium">{doc.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {doc.subrecipient.entityName} &middot; {doc.award.fain} &middot; {doc.category.replace(/_/g, " ")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Uploaded by {doc.uploadedBy.name} on {new Date(doc.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {doc.comments.length > 0 && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <MessageSquare className="h-3 w-3" />{doc.comments.length}
+                      </span>
+                    )}
+                    <Badge className={doc.status === "uploaded" ? "bg-blue-100 text-blue-700" : doc.status === "accepted" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                      {doc.status}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Review Sheet */}
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent className="overflow-y-auto">
+          {selected && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Review Document</SheetTitle>
+              </SheetHeader>
+              <div className="space-y-4 mt-4">
+                <div>
+                  <p className="font-medium">{selected.title}</p>
+                  <p className="text-sm text-muted-foreground capitalize">{selected.category.replace(/_/g, " ")}</p>
+                  <p className="text-sm text-muted-foreground">{selected.subrecipient.entityName}</p>
+                </div>
+                {selected.description && <p className="text-sm">{selected.description}</p>}
+                {selected.report && (
+                  <div className="text-sm p-2 bg-muted rounded">
+                    Linked report: {selected.report.title} (due {new Date(selected.report.dueDate).toLocaleDateString()})
+                  </div>
+                )}
+
+                {selected.status === "uploaded" && (
+                  <div className="space-y-3 p-3 border rounded-lg">
+                    <p className="text-sm font-medium">Review Action</p>
+                    <Textarea
+                      value={reviewNotes}
+                      onChange={(e) => setReviewNotes(e.target.value)}
+                      placeholder="Review notes (required for rejection)"
+                      rows={3}
+                    />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => handleReview(selected.id, "accept")} className="bg-emerald-600 hover:bg-emerald-700">
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Accept
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleReview(selected.id, "reject")}>
+                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Comments */}
+                <div>
+                  <p className="text-sm font-medium mb-2">Comments</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {selected.comments.map((c) => (
+                      <div key={c.id} className="p-2 bg-muted rounded text-sm">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                          <span className="font-medium">{c.user.name}</span> &middot; {new Date(c.createdAt).toLocaleDateString()}
+                          {c.user.role === "subrecipient" && <Badge variant="outline" className="text-[9px] px-1 py-0 ml-1">Sub</Badge>}
+                        </div>
+                        <p>{c.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <Input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..."
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleComment(selected.id); } }}
+                    />
+                    <Button size="sm" onClick={() => handleComment(selected.id)} disabled={!commentText.trim()}>Send</Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+// ─── Expense Review Tab ───
+
+interface ReviewExpense {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+  expenseDate: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  reportingMode: string;
+  status: string;
+  submittedAt: string | null;
+  reviewNotes: string | null;
+  subrecipient: { entityName: string; subawardAmount: number; cumulativeSpend: number };
+  award: { title: string; fain: string };
+  createdBy: { name: string };
+  comments: Array<{ id: string; body: string; createdAt: string; user: { id: string; name: string; role: string } }>;
+}
+
+function ExpenseReviewTab({ headers }: { headers: Record<string, string> }) {
+  const [expenses, setExpenses] = useState<ReviewExpense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<ReviewExpense | null>(null);
+  const [reviewNotes, setReviewNotes] = useState("");
+  const [commentText, setCommentText] = useState("");
+  const [filterStatus, setFilterStatus] = useState("submitted");
+
+  const fetchExpenses = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/subrecipients/expenses/review?status=${filterStatus}`, {
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExpenses(data.expenses || []);
+      }
+    } catch { /* */ }
+    setLoading(false);
+  }, [headers, filterStatus]);
+
+  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
+
+  const handleReview = async (id: string, action: "approve" | "reject") => {
+    if (action === "reject" && !reviewNotes.trim()) {
+      alert("Notes are required when rejecting an expense");
+      return;
+    }
+    await fetch("/api/subrecipients/expenses/review", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action, reviewNotes: reviewNotes || undefined }),
+    });
+    setSelected(null);
+    setReviewNotes("");
+    fetchExpenses();
+  };
+
+  const handleComment = async (expenseId: string) => {
+    if (!commentText.trim()) return;
+    await fetch("/api/sub/comments", {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ expenseId, body: commentText }),
+    });
+    setCommentText("");
+    fetchExpenses();
+  };
+
+  const totalPending = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+
+  if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div className="flex gap-2">
+          {["submitted", "approved", "rejected"].map((s) => (
+            <Button key={s} size="sm" variant={filterStatus === s ? "default" : "outline"} onClick={() => setFilterStatus(s)} className="capitalize text-xs">
+              {s}
+            </Button>
+          ))}
+        </div>
+        {filterStatus === "submitted" && expenses.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {expenses.length} pending &middot; {fmt(totalPending)} total
+          </p>
+        )}
+      </div>
+
+      {expenses.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No {filterStatus} expenses to review
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {expenses.map((exp) => (
+            <Card key={exp.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelected(exp); setReviewNotes(""); }}>
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <Receipt className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium">{exp.description}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {exp.subrecipient.entityName} &middot; {exp.category.replace(/_/g, " ")}
+                        {exp.expenseDate && ` &middot; ${new Date(exp.expenseDate).toLocaleDateString()}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-semibold text-sm">{fmt(Number(exp.amount))}</span>
+                    <Badge className={exp.status === "submitted" ? "bg-blue-100 text-blue-700" : exp.status === "approved" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}>
+                      {exp.status}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent className="overflow-y-auto">
+          {selected && (
+            <>
+              <SheetHeader>
+                <SheetTitle>Review Expense</SheetTitle>
+              </SheetHeader>
+              <div className="space-y-4 mt-4">
+                <div>
+                  <p className="font-medium">{selected.description}</p>
+                  <p className="text-lg font-semibold">{fmtFull(Number(selected.amount))}</p>
+                </div>
+                <div className="text-sm space-y-1">
+                  <p><span className="text-muted-foreground">Entity:</span> {selected.subrecipient.entityName}</p>
+                  <p><span className="text-muted-foreground">Award:</span> {selected.award.fain}</p>
+                  <p><span className="text-muted-foreground">Category:</span> <span className="capitalize">{selected.category.replace(/_/g, " ")}</span></p>
+                  <p><span className="text-muted-foreground">Submitted by:</span> {selected.createdBy.name}</p>
+                  <p><span className="text-muted-foreground">Cumulative spend:</span> {fmtFull(Number(selected.subrecipient.cumulativeSpend))} / {fmtFull(Number(selected.subrecipient.subawardAmount))}</p>
+                  {Number(selected.subrecipient.cumulativeSpend) + Number(selected.amount) >= 750000 && (
+                    <Badge variant="destructive" className="text-[10px]">Approval will trigger Single Audit requirement</Badge>
+                  )}
+                </div>
+
+                {selected.status === "submitted" && (
+                  <div className="space-y-3 p-3 border rounded-lg">
+                    <p className="text-sm font-medium">Review Action</p>
+                    <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} placeholder="Review notes (required for rejection)" rows={3} />
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => handleReview(selected.id, "approve")} className="bg-emerald-600 hover:bg-emerald-700">
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Approve
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleReview(selected.id, "reject")}>
+                        <XCircle className="h-3.5 w-3.5 mr-1" /> Reject
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-sm font-medium mb-2">Comments</p>
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {selected.comments.map((c) => (
+                      <div key={c.id} className="p-2 bg-muted rounded text-sm">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                          <span className="font-medium">{c.user.name}</span> &middot; {new Date(c.createdAt).toLocaleDateString()}
+                          {c.user.role === "subrecipient" && <Badge variant="outline" className="text-[9px] px-1 py-0 ml-1">Sub</Badge>}
+                        </div>
+                        <p>{c.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    <Input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment..."
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleComment(selected.id); } }}
+                    />
+                    <Button size="sm" onClick={() => handleComment(selected.id)} disabled={!commentText.trim()}>Send</Button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+    </>
+  );
+}
+
+// ─── Visit Management Tab ───
+
+interface VisitData {
+  id: string;
+  type: string;
+  scheduledDate: string;
+  status: string;
+  location: string | null;
+  agenda: string;
+  findings: string | null;
+  findingsSeverity: string | null;
+  followUpDueDate: string | null;
+  subrecipient: { entityName: string };
+  award: { title: string; fain: string };
+  scheduledBy: { name: string };
+  confirmedBy: { name: string } | null;
+  completedBy: { name: string } | null;
+  comments: Array<{ id: string; body: string; createdAt: string; user: { id: string; name: string; role: string } }>;
+}
+
+function VisitManagementTab({ headers, subs }: { headers: Record<string, string>; subs: Subrecipient[] }) {
+  const [visits, setVisits] = useState<VisitData[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<VisitData | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({
+    subrecipientId: "",
+    type: "desk_review",
+    scheduledDate: "",
+    location: "",
+    agenda: "",
+  });
+  const [completeForm, setCompleteForm] = useState({
+    findings: "",
+    findingsSeverity: "none",
+    followUpDueDate: "",
+  });
+  const [scheduling, setScheduling] = useState(false);
+
+  const fetchVisits = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/subrecipients/visits", {
+        headers: { ...headers, "Content-Type": "application/json" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVisits(data.visits || []);
+      }
+    } catch { /* */ }
+    setLoading(false);
+  }, [headers]);
+
+  useEffect(() => { fetchVisits(); }, [fetchVisits]);
+
+  const handleSchedule = async () => {
+    if (!scheduleForm.subrecipientId || !scheduleForm.scheduledDate) return;
+    setScheduling(true);
+    const sub = subs.find((s) => s.id === scheduleForm.subrecipientId);
+    try {
+      await fetch("/api/subrecipients/visits", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subrecipientId: scheduleForm.subrecipientId,
+          awardId: sub?.awardId,
+          type: scheduleForm.type,
+          scheduledDate: scheduleForm.scheduledDate,
+          location: scheduleForm.location || undefined,
+          agenda: scheduleForm.agenda,
+        }),
+      });
+      setShowSchedule(false);
+      setScheduleForm({ subrecipientId: "", type: "desk_review", scheduledDate: "", location: "", agenda: "" });
+      fetchVisits();
+    } catch { /* */ }
+    setScheduling(false);
+  };
+
+  const handleComplete = async (id: string) => {
+    await fetch("/api/subrecipients/visits", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        action: "complete",
+        findings: completeForm.findings || undefined,
+        findingsSeverity: completeForm.findingsSeverity,
+        followUpDueDate: completeForm.followUpDueDate || undefined,
+      }),
+    });
+    setSelected(null);
+    setCompleteForm({ findings: "", findingsSeverity: "none", followUpDueDate: "" });
+    fetchVisits();
+  };
+
+  const handleCancel = async (id: string) => {
+    if (!confirm("Cancel this visit?")) return;
+    await fetch("/api/subrecipients/visits", {
+      method: "PUT",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ id, action: "cancel" }),
+    });
+    setSelected(null);
+    fetchVisits();
+  };
+
+  const visitStatusColor = (status: string) => {
+    const map: Record<string, string> = {
+      proposed: "bg-blue-100 text-blue-700",
+      confirmed: "bg-emerald-100 text-emerald-700",
+      completed: "bg-gray-100 text-gray-700",
+      cancelled: "bg-red-100 text-red-700",
+      rescheduled: "bg-amber-100 text-amber-700",
+    };
+    return map[status] || "bg-gray-100 text-gray-700";
+  };
+
+  if (loading) return <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>;
+
+  return (
+    <>
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setShowSchedule(true)}>
+          <Calendar className="h-3.5 w-3.5 mr-1" /> Schedule Visit
+        </Button>
+      </div>
+
+      {visits.length === 0 ? (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            No monitoring visits scheduled yet
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {visits.map((visit) => (
+            <Card key={visit.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelected(visit)}>
+              <CardContent className="py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium capitalize">{visit.type.replace(/_/g, " ")}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {visit.subrecipient.entityName} &middot; {new Date(visit.scheduledDate).toLocaleDateString()}
+                        {visit.location && ` &middot; ${visit.location}`}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge className={visitStatusColor(visit.status)}>{visit.status}</Badge>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Schedule Sheet */}
+      <Sheet open={showSchedule} onOpenChange={setShowSchedule}>
+        <SheetContent>
+          <SheetHeader><SheetTitle>Schedule Monitoring Visit</SheetTitle></SheetHeader>
+          <div className="space-y-4 mt-4">
+            <div>
+              <label className="text-sm font-medium">Subrecipient</label>
+              <select
+                value={scheduleForm.subrecipientId}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, subrecipientId: e.target.value }))}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm mt-1"
+              >
+                <option value="">Select...</option>
+                {subs.map((s) => <option key={s.id} value={s.id}>{s.entityName}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Type</label>
+              <select
+                value={scheduleForm.type}
+                onChange={(e) => setScheduleForm((f) => ({ ...f, type: e.target.value }))}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm mt-1"
+              >
+                <option value="desk_review">Desk Review</option>
+                <option value="site_visit">Site Visit</option>
+                <option value="financial_review">Financial Review</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Date</label>
+              <Input type="date" value={scheduleForm.scheduledDate} onChange={(e) => setScheduleForm((f) => ({ ...f, scheduledDate: e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Location</label>
+              <Input value={scheduleForm.location} onChange={(e) => setScheduleForm((f) => ({ ...f, location: e.target.value }))} placeholder="Optional" />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Agenda</label>
+              <Textarea value={scheduleForm.agenda} onChange={(e) => setScheduleForm((f) => ({ ...f, agenda: e.target.value }))} placeholder="Topics to cover..." rows={4} />
+            </div>
+            <Button onClick={handleSchedule} disabled={!scheduleForm.subrecipientId || !scheduleForm.scheduledDate || scheduling} className="w-full">
+              {scheduling ? "Scheduling..." : "Schedule Visit"}
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Visit Detail Sheet */}
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent className="overflow-y-auto">
+          {selected && (
+            <>
+              <SheetHeader><SheetTitle className="capitalize">{selected.type.replace(/_/g, " ")}</SheetTitle></SheetHeader>
+              <div className="space-y-4 mt-4">
+                <Badge className={visitStatusColor(selected.status)}>{selected.status}</Badge>
+                <div className="text-sm space-y-1">
+                  <p><span className="text-muted-foreground">Entity:</span> {selected.subrecipient.entityName}</p>
+                  <p><span className="text-muted-foreground">Date:</span> {new Date(selected.scheduledDate).toLocaleDateString()}</p>
+                  {selected.location && <p><span className="text-muted-foreground">Location:</span> {selected.location}</p>}
+                  <p><span className="text-muted-foreground">Scheduled by:</span> {selected.scheduledBy.name}</p>
+                  {selected.confirmedBy && <p><span className="text-muted-foreground">Confirmed by:</span> {selected.confirmedBy.name}</p>}
+                </div>
+                {selected.agenda && (
+                  <div>
+                    <p className="text-sm font-medium mb-1">Agenda</p>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selected.agenda}</p>
+                  </div>
+                )}
+
+                {selected.findings && (
+                  <div className="p-3 border rounded-lg">
+                    <p className="text-sm font-medium mb-1">Findings</p>
+                    <p className="text-sm">{selected.findings}</p>
+                    {selected.findingsSeverity && selected.findingsSeverity !== "none" && (
+                      <Badge className="mt-1" variant={selected.findingsSeverity === "material" ? "destructive" : "outline"}>
+                        {selected.findingsSeverity}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+
+                {selected.status === "confirmed" && (
+                  <div className="space-y-3 p-3 border rounded-lg">
+                    <p className="text-sm font-medium">Complete Visit</p>
+                    <Textarea value={completeForm.findings} onChange={(e) => setCompleteForm((f) => ({ ...f, findings: e.target.value }))} placeholder="Findings..." rows={3} />
+                    <div>
+                      <label className="text-sm font-medium">Severity</label>
+                      <select
+                        value={completeForm.findingsSeverity}
+                        onChange={(e) => setCompleteForm((f) => ({ ...f, findingsSeverity: e.target.value }))}
+                        className="w-full rounded-md border bg-background px-3 py-2 text-sm mt-1"
+                      >
+                        <option value="none">None</option>
+                        <option value="minor">Minor</option>
+                        <option value="major">Major</option>
+                        <option value="material">Material</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium">Follow-up Due Date</label>
+                      <Input type="date" value={completeForm.followUpDueDate} onChange={(e) => setCompleteForm((f) => ({ ...f, followUpDueDate: e.target.value }))} />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={() => handleComplete(selected.id)}>
+                        <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Complete
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleCancel(selected.id)}>Cancel Visit</Button>
+                    </div>
+                  </div>
+                )}
+
+                {(selected.status === "proposed" || selected.status === "rescheduled") && (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="destructive" onClick={() => handleCancel(selected.id)}>Cancel Visit</Button>
+                  </div>
+                )}
+
+                {selected.comments.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Comments</p>
+                    <div className="space-y-2">
+                      {selected.comments.map((c) => (
+                        <div key={c.id} className="p-2 bg-muted rounded text-sm">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                            <span className="font-medium">{c.user.name}</span> &middot; {new Date(c.createdAt).toLocaleDateString()}
+                          </div>
+                          <p>{c.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 

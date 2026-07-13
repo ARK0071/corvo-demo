@@ -19,6 +19,7 @@ interface AuthUser {
   portId: string;
   title: string;
   active: boolean;
+  subrecipientId?: string | null;
 }
 
 type AuthenticatedHandler = (
@@ -61,6 +62,7 @@ export function withAuth(handler: AuthenticatedHandler) {
         portId: session.user.portId,
         title: session.user.title,
         active: session.user.active,
+        subrecipientId: session.user.subrecipientId,
       };
 
       const params = context?.params ? await context.params : undefined;
@@ -85,6 +87,28 @@ export function withRole(roles: string[], handler: AuthenticatedHandler) {
     if (!roles.includes(context.user.role)) {
       return NextResponse.json(
         { error: `Requires one of: ${roles.join(", ")}` },
+        { status: 403 }
+      );
+    }
+    return handler(request, context);
+  });
+}
+
+/**
+ * Wrap an API route handler with subrecipient authentication.
+ * Ensures the user has role "subrecipient" and a linked subrecipientId.
+ */
+export function withSubrecipientAuth(handler: AuthenticatedHandler) {
+  return withAuth(async (request, context) => {
+    if (context.user.role !== "subrecipient") {
+      return NextResponse.json(
+        { error: "Subrecipient access required" },
+        { status: 403 }
+      );
+    }
+    if (!context.user.subrecipientId) {
+      return NextResponse.json(
+        { error: "No subrecipient linked to this account" },
         { status: 403 }
       );
     }

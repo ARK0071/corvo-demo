@@ -12,6 +12,7 @@ export interface AppUser {
   phone: string | null;
   role: string;
   image?: string | null;
+  subrecipientId?: string | null;
 }
 
 interface UserContextValue {
@@ -20,6 +21,7 @@ interface UserContextValue {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isModerator: boolean;
+  isSubrecipient: boolean;
   logout: () => void;
 }
 
@@ -40,6 +42,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       phone: null,
       role: session.user.role,
       image: session.user.image,
+      subrecipientId: session.user.subrecipientId,
     };
   }, [session?.user]);
 
@@ -50,6 +53,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: !!session?.user,
       isAdmin: session?.user?.role === "admin",
       isModerator: session?.user?.role === "moderator",
+      isSubrecipient: session?.user?.role === "subrecipient",
       logout: () => signOut({ callbackUrl: "/login" }),
     }),
     [user, isLoading, session?.user]

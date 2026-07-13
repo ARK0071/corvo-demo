@@ -7,6 +7,7 @@ import { Sun, Moon, Calendar, LogOut, Shield, User } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import AppSidebar from "@/components/app-sidebar";
+import SubrecipientSidebar from "@/components/sub-sidebar";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import { UserProvider, useCurrentUser } from "@/contexts/user-context";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ const ROLE_LABELS: Record<string, string> = {
   certifying_official: "Certifying Official",
   moderator: "Moderator",
   admin: "Admin",
+  subrecipient: "Subrecipient",
 };
 
 function UserMenu() {
@@ -85,7 +87,7 @@ function UserMenu() {
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const { theme, toggleTheme } = useTheme();
-  const { isAuthenticated, isLoading } = useCurrentUser();
+  const { isAuthenticated, isLoading, isSubrecipient } = useCurrentUser();
   const upcomingCount = useMemo(() => getUpcomingDeadlineCount(), []);
 
   // Show minimal layout while loading auth or when not signed in
@@ -100,7 +102,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
-        <AppSidebar />
+        {isSubrecipient ? <SubrecipientSidebar /> : <AppSidebar />}
         <div className="flex-1 flex flex-col">
           <header className="h-12 border-b flex items-center justify-between px-4">
             <div className="flex items-center gap-3">

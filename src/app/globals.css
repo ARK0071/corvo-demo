@@ -141,6 +141,12 @@
   background: hsl(0 0% 70% / 50%);
 }
 
+/* Match bar fill animation */
+@keyframes bar-fill {
+  from { width: 0; }
+  to { width: var(--bar-width); }
+}
+
 /* Typing indicator animation */
 @keyframes typing-dot {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }

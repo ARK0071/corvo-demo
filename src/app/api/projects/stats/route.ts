@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolveSecureTenant } from "@/lib/db/tenant-config.server";
-import * as DemoProjects from "@/lib/db/repositories/demo-projects";
+import * as Projects from "@/lib/db/repositories/projects";
 
 export async function GET(request: NextRequest) {
   try {
     await resolveSecureTenant(request.headers);
 
-    const stats = await DemoProjects.getProjectStats();
+    const stats = await Projects.getProjectStats();
     return NextResponse.json(stats);
   } catch (error) {
     console.error("Projects stats error:", error);

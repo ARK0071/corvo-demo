@@ -209,9 +209,10 @@ export function buildGrantEmbeddingText(grant: {
   fundingCategories?: string[];
   eligibility?: string[];
 }): string {
+  const desc = (grant.description || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
   const parts = [
     grant.title,
-    grant.description?.slice(0, 2000) || "",
+    desc,
     grant.fundingCategories?.join(", ") || "",
     grant.eligibility?.join(", ") || "",
   ];
