@@ -858,7 +858,7 @@ async function updatePortProfile() {
   });
 
   if (profile) {
-    const pastAwards = (profile.pastGrantAwards as Array<Record<string, unknown>>) || [];
+    const pastAwards = (profile.pastGrantAwards as Array<{ program: string; awardYear: number; [key: string]: unknown }>) || [];
     const hasPsgp2026 = pastAwards.some(
       (a) => a.program === "PSGP" && a.awardYear === 2026
     );
@@ -875,7 +875,7 @@ async function updatePortProfile() {
 
       await prisma.portProfile.update({
         where: { id: PROFILE_ID },
-        data: { pastGrantAwards: pastAwards },
+        data: { pastGrantAwards: pastAwards as unknown as object },
       });
       console.log("  ✓ Past grant awards updated");
     } else {

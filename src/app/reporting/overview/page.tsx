@@ -447,10 +447,11 @@ export default function ReportingOverviewPage() {
                           const isOverdue = days < 0;
                           const isUrgent = days >= 0 && days <= 7;
                           return (
-                            <div
+                            <Link
                               key={r.id}
-                              className={`flex items-center justify-between p-2 rounded-md text-xs ${
-                                isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : isUrgent ? "bg-amber-50/50 dark:bg-amber-950/10" : "hover:bg-muted/50"
+                              href={`/reporting/forms?reportId=${encodeURIComponent(r.id)}`}
+                              className={`flex items-center justify-between p-2 rounded-md text-xs transition-colors ${
+                                isOverdue ? "bg-red-50/50 dark:bg-red-950/10 hover:bg-red-100/60 dark:hover:bg-red-950/20" : isUrgent ? "bg-amber-50/50 dark:bg-amber-950/10 hover:bg-amber-100/60 dark:hover:bg-amber-950/20" : "hover:bg-muted/50"
                               }`}
                             >
                               <div className="flex items-center gap-2 min-w-0">
@@ -475,7 +476,7 @@ export default function ReportingOverviewPage() {
                                   {isOverdue ? `${Math.abs(days)}d overdue` : `${days}d`}
                                 </Badge>
                               </div>
-                            </div>
+                            </Link>
                           );
                         })}
                       </div>
@@ -574,9 +575,12 @@ function ReportRow({ report }: { report: Report }) {
   const isUrgent = days >= 0 && days <= 7;
 
   return (
-    <div className={`flex items-center justify-between p-2.5 rounded-md transition-colors ${
-      isOverdue ? "bg-red-50/50 dark:bg-red-950/10" : isUrgent ? "bg-amber-50/50 dark:bg-amber-950/10" : "hover:bg-muted/50"
-    }`}>
+    <Link
+      href={`/reporting/forms?reportId=${encodeURIComponent(report.id)}`}
+      className={`flex items-center justify-between p-2.5 rounded-md transition-colors ${
+        isOverdue ? "bg-red-50/50 dark:bg-red-950/10 hover:bg-red-100/60 dark:hover:bg-red-950/20" : isUrgent ? "bg-amber-50/50 dark:bg-amber-950/10 hover:bg-amber-100/60 dark:hover:bg-amber-950/20" : "hover:bg-muted/50"
+      }`}
+    >
       <div className="flex items-center gap-3 min-w-0">
         <div className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 ${
           isOverdue ? "bg-red-100 dark:bg-red-900/40" : isUrgent ? "bg-amber-100 dark:bg-amber-900/40" : "bg-muted"
@@ -593,6 +597,6 @@ function ReportRow({ report }: { report: Report }) {
         </div>
       </div>
       <span className="text-xs text-muted-foreground shrink-0">{fmtDate(report.dueDate)}</span>
-    </div>
+    </Link>
   );
 }

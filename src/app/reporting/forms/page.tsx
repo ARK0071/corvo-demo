@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DollarSign,
   Banknote,
@@ -96,12 +97,23 @@ type DetailView =
 // ─── Page ───
 
 export default function FormsPage() {
+  return (
+    <Suspense>
+      <FormsPageInner />
+    </Suspense>
+  );
+}
+
+function FormsPageInner() {
   const headers = useTenantHeaders();
   const tenant = useTenant();
+  const searchParams = useSearchParams();
+  const deepLinkReportId = searchParams.get("reportId");
   const [reports, setReports] = useState<Report[]>([]);
   const [subReports, setSubReports] = useState<SubrecipientReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<DetailView | null>(null);
+  const [deepLinked, setDeepLinked] = useState(false);
 
   const fetchReports = useCallback(async () => {
     if (tenant.isLoading) return;
@@ -125,6 +137,16 @@ export default function FormsPage() {
   }, [headers, tenant.isLoading]);
 
   useEffect(() => { fetchReports(); }, [tenant.isLoading, tenant.portId]);
+
+  useEffect(() => {
+    if (!deepLinked && deepLinkReportId && reports.length > 0 && !loading) {
+      const match = reports.find((r) => r.id === deepLinkReportId);
+      if (match) {
+        handleSelectReport(match);
+        setDeepLinked(true);
+      }
+    }
+  }, [deepLinked, deepLinkReportId, reports, loading]);
 
   const handleSelectReport = (report: Report) => {
     if (report.type === "sf425") {
