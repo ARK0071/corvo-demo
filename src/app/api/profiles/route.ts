@@ -15,6 +15,7 @@ interface DBPortProfile {
   certifications: unknown;
   environmentalGoals: unknown;
   communityImpact: unknown;
+  fundingDomains: unknown;
 }
 
 function toProfile(p: DBPortProfile): { id: string; profile: PortProfile } {
@@ -40,6 +41,7 @@ function toProfile(p: DBPortProfile): { id: string; profile: PortProfile } {
       certifications: (p.certifications as string[]) || [],
       environmentalGoals: (p.environmentalGoals as string[]) || [],
       communityImpact: (p.communityImpact as string[]) || [],
+      fundingDomains: (p.fundingDomains as Array<{ id: string; name: string }>) || undefined,
     },
   };
 }

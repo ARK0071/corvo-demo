@@ -38,6 +38,9 @@ export interface PortProfile {
   // Environmental and social factors
   environmentalGoals: string[];
   communityImpact: string[];
+
+  // Custom funding domains (overrides defaults if set)
+  fundingDomains?: Array<{ id: string; name: string }>;
 }
 
 // Re-export profile registry

@@ -188,6 +188,7 @@ model PortProfile {
   pastGrantAwards    Json?                  @map("past_grant_awards")
   disadvantagedCommunityData Json?          @map("disadvantaged_community_data")
   climateResilienceData Json?               @map("climate_resilience_data")
+  fundingDomains     Json?                  @map("funding_domains")
   profileEmbedding   Unsupported("vector(2560)")? @map("profile_embedding")
   createdAt          DateTime               @default(now()) @map("created_at")
   updatedAt          DateTime               @updatedAt @map("updated_at")

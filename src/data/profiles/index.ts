@@ -49,6 +49,7 @@ export async function ensureProfilesLoaded(): Promise<void> {
         certifications: (p.certifications as string[]) || [],
         environmentalGoals: (p.environmentalGoals as string[]) || [],
         communityImpact: (p.communityImpact as string[]) || [],
+        fundingDomains: (p.fundingDomains as Array<{ id: string; name: string }>) || undefined,
       };
     }
 

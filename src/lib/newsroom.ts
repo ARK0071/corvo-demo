@@ -81,22 +81,39 @@ const NEWS_QUERIES = [
   "port terminal expansion grant",
 ];
 
+const MARTA_NEWS_QUERIES = [
+  "MARTA transit grant awarded 2025 2026",
+  "public transit grant funding announcement FTA",
+  "FTA Low-No bus grant award transit",
+  "Capital Investment Grant transit rail",
+  "transit agency federal funding opportunity",
+  "bus rapid transit BRT grant funding",
+  "zero emission bus fleet grant",
+  "transit infrastructure modernization grant",
+];
+
 // ─── Public API ───
 
 export interface NewsSearchParams {
   query?: string;
   maxResults?: number;
+  profileSlug?: string;
 }
 
 export async function searchNewsroom(
   params: NewsSearchParams = {}
 ): Promise<NewsArticle[]> {
-  const { query, maxResults = 40 } = params;
+  const { query, maxResults = 40, profileSlug } = params;
   const articles: NewsArticle[] = [];
 
+  const isMarta = profileSlug === "marta";
+  const defaultQueries = isMarta ? MARTA_NEWS_QUERIES : NEWS_QUERIES;
+
   const queries = query
-    ? [query, `${query} port grant`, `${query} port infrastructure funding`]
-    : NEWS_QUERIES;
+    ? isMarta
+      ? [query, `${query} transit grant`, `${query} transit funding`]
+      : [query, `${query} port grant`, `${query} port infrastructure funding`]
+    : defaultQueries;
 
   const bravePromises: Promise<void>[] = [];
   const tavilyPromises: Promise<void>[] = [];

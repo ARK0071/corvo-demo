@@ -39,9 +39,44 @@ async function writeProfileEmbeddings(profileId: string) {
   const profileDir = path.join(EMBEDDINGS_DIR, "profiles", profileId);
   fs.mkdirSync(profileDir, { recursive: true });
 
-  // Generate project embeddings (from in-memory project data, if any)
+  // Generate project embeddings (from in-memory project data, or DB)
   initializeProjectsForProfile(profileId);
-  const projects = getAllProjects();
+  let projects = getAllProjects();
+
+  // If no in-memory projects, try loading from database
+  if (projects.length === 0) {
+    try {
+      const { prisma } = await import("@/lib/db/client");
+      const portProfile = await prisma.portProfile.findFirst({
+        where: { slug: profileId },
+        select: { id: true },
+      });
+      if (portProfile) {
+        const dbProjects = await prisma.project.findMany({
+          where: { portProfileId: portProfile.id },
+          orderBy: { name: "asc" },
+        });
+        if (dbProjects.length > 0) {
+          projects = dbProjects.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description || "",
+            projectType: p.projectType || "infrastructure",
+            status: p.status || "planning",
+            priority: p.priority || "medium",
+            budget: Number(p.budget || 0),
+            location: p.location || undefined,
+            focusAreas: (p.focusAreas as string[]) || [],
+            notes: p.notes || undefined,
+          }));
+          console.log(`   Loaded ${projects.length} projects from database for ${profileId}`);
+        }
+      }
+    } catch (err) {
+      console.warn(`   Could not load projects from DB for ${profileId}:`, err);
+    }
+  }
+
   if (projects.length > 0) {
     const projectTexts = projects.map((p) => buildProjectEmbeddingText(p));
     const projectVectors = await embedTexts(projectTexts);
@@ -104,13 +139,15 @@ async function main() {
 
   fs.mkdirSync(EMBEDDINGS_DIR, { recursive: true });
 
-  // Load DB-persisted profiles (e.g. admin-created entities)
+  // Load DB-persisted profiles (e.g. admin-created entities like MARTA)
   await ensureProfilesLoaded();
 
   const argProfile = process.argv[2];
   const profileIds = argProfile
     ? [argProfile]
     : [...PROFILE_IDS_WITH_PROJECT_EMBEDDINGS];
+
+  console.log("Target profiles:", profileIds.join(", "));
 
   // 1. Spend embeddings (global)
   console.log("\n1. Embedding spend categories...");

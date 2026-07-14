@@ -29,6 +29,7 @@ import {
   Database,
   MapPin,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PipelineGrant, PipelineStage } from "@/data/grant-pipeline";
@@ -45,7 +46,7 @@ import { GrantIntelligenceChatSidebar } from "@/components/grant-intelligence-ch
 import type { Project } from "@/data/projects";
 import { ProjectForm } from "@/components/projects/project-form";
 import { Edit, Trash2, SlidersHorizontal } from "lucide-react";
-import { FUNDING_DOMAINS } from "@/data/funding-domains";
+import { FUNDING_DOMAINS, type FundingDomain } from "@/data/funding-domains";
 import {
   Sheet,
   SheetContent,
@@ -183,6 +184,12 @@ function UnifiedGrantsDashboard() {
   const [editingProject, setEditingProject] = useState<Project | undefined>(undefined);
   const prevProfileIdRef = useRef<string | null>(null);
   const discoveredGrantsRef = useRef<DiscoveredGrant[]>([]);
+
+  // Funding domains: use profile-specific if available, else defaults
+  const effectiveDomains: FundingDomain[] = useMemo(
+    () => selectedProfile?.fundingDomains?.length ? selectedProfile.fundingDomains : FUNDING_DOMAINS,
+    [selectedProfile]
+  );
   discoveredGrantsRef.current = discoveredGrants;
 
   // State/Local discover state
@@ -191,11 +198,13 @@ function UnifiedGrantsDashboard() {
   const [slLoading, setSlLoading] = useState(false);
   const [slScoring, setSlScoring] = useState(false);
   const [slError, setSlError] = useState<string | null>(null);
-  const [slMissingFile, setSlMissingFile] = useState(false);
-  const [slExpectedPath, setSlExpectedPath] = useState<string | null>(null);
   const [slSortBy, setSlSortBy] = useState<"score" | "deadline">("score");
   const [slSearch, setSlSearch] = useState("");
   const [slLoaded, setSlLoaded] = useState(false);
+  const [slSearching, setSlSearching] = useState(false);
+  const [slSearchStep, setSlSearchStep] = useState("");
+  const [slExpandedGrant, setSlExpandedGrant] = useState<string | null>(null);
+  const [slDescExpanded, setSlDescExpanded] = useState<Set<string>>(new Set());
 
   // Fetch pipeline grants from API
   const fetchPipelineFromDB = useCallback(async () => {
@@ -314,22 +323,55 @@ function UnifiedGrantsDashboard() {
   const loadSlGrants = useCallback(async () => {
     setSlLoading(true);
     setSlError(null);
-    setSlMissingFile(false);
     try {
       const res = await fetch(`/api/state-local-grants?profileId=${encodeURIComponent(profileId)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load");
-      setSlGrants(data.grants ?? []);
-      setSlMissingFile(Boolean(data.missingFile));
-      if (typeof data.expectedPath === "string") setSlExpectedPath(data.expectedPath);
-      if ((data.grants ?? []).length > 0) void scoreSlGrants(data.grants);
-      else setSlScores(new Map());
-    } catch (e) {
-      setSlError(e instanceof Error ? e.message : "Failed to load");
-      setSlGrants([]);
+      const grants: DiscoveredGrant[] = data.grants ?? [];
+      if (grants.length > 0) {
+        setSlGrants(grants);
+        setSlLoaded(true);
+        void scoreSlGrants(grants);
+      }
+      // If no CSV data, don't mark as loaded — let user trigger AI search
+    } catch {
+      // CSV not found is fine — user can use AI search
     } finally {
       setSlLoading(false);
+    }
+  }, [profileId, scoreSlGrants]);
+
+  // AI-powered state/local grant search
+  const searchSlGrants = useCallback(async () => {
+    setSlSearching(true);
+    setSlError(null);
+    setSlSearchStep("Generating search queries from your profile...");
+    try {
+      const res = await fetch("/api/state-local-grants/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Search failed");
+      }
+      setSlSearchStep("Processing results...");
+      const data = await res.json();
+      const grants: DiscoveredGrant[] = data.grants ?? [];
+      setSlGrants(grants);
       setSlLoaded(true);
+      if (grants.length > 0) {
+        setSlSearchStep("Scoring and ranking grants...");
+        void scoreSlGrants(grants);
+      } else {
+        setSlScores(new Map());
+      }
+    } catch (e) {
+      setSlError(e instanceof Error ? e.message : "Search failed");
+    } finally {
+      setSlSearching(false);
+      setSlSearchStep("");
     }
   }, [profileId, scoreSlGrants]);
 
@@ -1117,7 +1159,7 @@ function UnifiedGrantsDashboard() {
                           </button>
                         </div>
                         <div className="flex flex-wrap gap-1.5 pl-6">
-                          {FUNDING_DOMAINS.map((domain) => {
+                          {effectiveDomains.map((domain) => {
                             const isSelected =
                               selectedDomainIds === "all" || selectedDomainIds.has(domain.id);
                             return (
@@ -1125,7 +1167,7 @@ function UnifiedGrantsDashboard() {
                                 key={domain.id}
                                 onClick={() => {
                                   if (selectedDomainIds === "all") {
-                                    const allExceptThis = new Set(FUNDING_DOMAINS.map((d) => d.id));
+                                    const allExceptThis = new Set(effectiveDomains.map((d) => d.id));
                                     allExceptThis.delete(domain.id);
                                     setSelectedDomainIds(allExceptThis);
                                   } else {
@@ -1135,7 +1177,7 @@ function UnifiedGrantsDashboard() {
                                     } else {
                                       next.add(domain.id);
                                     }
-                                    if (next.size === FUNDING_DOMAINS.length) setSelectedDomainIds("all");
+                                    if (next.size === effectiveDomains.length) setSelectedDomainIds("all");
                                     else setSelectedDomainIds(next);
                                   }
                                 }}
@@ -1612,31 +1654,59 @@ function UnifiedGrantsDashboard() {
 
               {discoverSource === "state-local" && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground">
-                      State & local grants for <span className="font-medium text-foreground">{selectedProfile.name}</span>
-                      {slLoaded && !slLoading && ` · ${sortedSlGrants.length} result${sortedSlGrants.length !== 1 ? "s" : ""}`}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex rounded-md border bg-muted/40 p-0.5">
-                        <Button variant={slSortBy === "score" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("score")}>Score</Button>
-                        <Button variant={slSortBy === "deadline" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("deadline")}>Deadline</Button>
-                      </div>
-                      <Button variant="outline" size="sm" className="h-7" disabled={slLoading || slScoring} onClick={() => { setSlLoaded(false); void loadSlGrants(); }}>
-                        {slLoading || slScoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  {/* Header row with search button and controls */}
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-3">
+                      <Button
+                        onClick={() => void searchSlGrants()}
+                        disabled={slSearching || slScoring}
+                        className="gap-2"
+                        size="sm"
+                      >
+                        {slSearching ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Searching…
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-3.5 w-3.5" />
+                            Find State & Local Grants
+                          </>
+                        )}
                       </Button>
+                      <p className="text-xs text-muted-foreground">
+                        {slLoaded && !slLoading && !slSearching && sortedSlGrants.length > 0
+                          ? `${sortedSlGrants.length} result${sortedSlGrants.length !== 1 ? "s" : ""} for `
+                          : "AI-powered search for "}
+                        <span className="font-medium text-foreground">{selectedProfile.name}</span>
+                      </p>
                     </div>
+                    {slGrants.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <div className="flex rounded-md border bg-muted/40 p-0.5">
+                          <Button variant={slSortBy === "score" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("score")}>Score</Button>
+                          <Button variant={slSortBy === "deadline" ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setSlSortBy("deadline")}>Deadline</Button>
+                        </div>
+                        <Button variant="outline" size="sm" className="h-7" disabled={slScoring} onClick={() => void scoreSlGrants(slGrants)}>
+                          {slScoring ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input
-                      placeholder="Search grants by keyword..."
-                      value={slSearch}
-                      onChange={(e) => setSlSearch(e.target.value)}
-                      className="h-8 pl-9 text-sm"
-                    />
-                  </div>
+                  {/* Search filter */}
+                  {slGrants.length > 0 && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                      <Input
+                        placeholder="Filter results by keyword..."
+                        value={slSearch}
+                        onChange={(e) => setSlSearch(e.target.value)}
+                        className="h-8 pl-9 text-sm"
+                      />
+                    </div>
+                  )}
 
                   {slError && (
                     <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2">
@@ -1645,24 +1715,43 @@ function UnifiedGrantsDashboard() {
                     </div>
                   )}
 
-                  {slLoading && (
+                  {/* AI search progress */}
+                  {slSearching && (
+                    <div className="space-y-3 py-8">
+                      <div className="flex flex-col items-center gap-3 text-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <div>
+                          <p className="text-sm font-medium">Searching for state & local grants...</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {slSearchStep || "Using AI to search across state agencies, regional organizations, and local government programs"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Loading state for CSV-based loading */}
+                  {slLoading && !slSearching && (
                     <div className="flex items-center gap-2 text-muted-foreground text-sm py-8 justify-center">
                       <Loader2 className="h-5 w-5 animate-spin" /> Loading grants…
                     </div>
                   )}
 
-                  {!slLoading && slMissingFile && (
-                    <Card className="p-6">
-                      <h2 className="text-sm font-medium mb-2">No state & local grants available for this profile</h2>
-                      <p className="text-sm text-muted-foreground mb-3">
-                        State and local grant data has not been configured for this profile yet.
+                  {/* Empty state when no search has been done */}
+                  {!slLoading && !slSearching && slGrants.length === 0 && !slLoaded && (
+                    <Card className="p-8 text-center">
+                      <MapPin className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-30" />
+                      <h3 className="text-sm font-medium mb-2">Discover state & local grants</h3>
+                      <p className="text-xs text-muted-foreground mb-4 max-w-md mx-auto">
+                        Click &ldquo;Find State & Local Grants&rdquo; to launch an AI-powered search that finds niche regional grants from state agencies, local programs, and development organizations tailored to {selectedProfile.name}.
                       </p>
                     </Card>
                   )}
 
-                  {!slLoading && !slMissingFile && slGrants.length === 0 && slLoaded && (
+                  {/* Empty results after search */}
+                  {!slLoading && !slSearching && slGrants.length === 0 && slLoaded && (
                     <Card className="p-6 text-center text-sm text-muted-foreground">
-                      No grants found for this profile.
+                      No grants found. Try searching again — results vary based on current web availability.
                     </Card>
                   )}
 
@@ -1672,48 +1761,305 @@ function UnifiedGrantsDashboard() {
                     </p>
                   )}
 
-                  <div className="space-y-2">
+                  {/* Grant cards — expandable like federal tab */}
+                  <div className="space-y-2" style={{ display: slSearching ? "none" : undefined }}>
                     {sortedSlGrants.map((grant) => {
                       const score = slScores.get(grant.id);
+                      const isExpanded = slExpandedGrant === grant.id;
+                      const inPipeline = isInPipeline(grant.id);
                       return (
                         <Card key={grant.id} className="overflow-hidden">
-                          <div className="p-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0 flex-1 space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <h2 className="text-sm font-medium leading-snug">{grant.title}</h2>
-                                <Badge variant="outline" className={`text-[10px] ${statusColors[grant.status] ?? ""}`}>{grant.status}</Badge>
-                                {grant.source && <Badge variant="outline" className="text-[9px] px-1.5 py-0">{grant.source}</Badge>}
+                          <button
+                            className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors text-left"
+                            onClick={() => setSlExpandedGrant(isExpanded ? null : grant.id)}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              {isExpanded ? (
+                                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-sm font-medium">{grant.title}</span>
+                                  <Badge variant="outline" className={`text-[10px] ${statusColors[grant.status] || ""}`}>
+                                    {grant.status}
+                                  </Badge>
+                                  {score && (
+                                    <>
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[10px] ${grantRecColors[score.recommendation]}`}
+                                      >
+                                        {score.overallScore}/100
+                                      </Badge>
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[10px] ${eligibilityColors[score.eligibilityStatus]}`}
+                                      >
+                                        {score.eligibilityStatus.replace("_", " ")}
+                                      </Badge>
+                                    </>
+                                  )}
+                                  {inPipeline && (
+                                    <Badge variant="outline" className="text-[10px] bg-blue-500/10 text-blue-600 border-blue-500/20">
+                                      In Pipeline
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <p className="text-xs text-muted-foreground truncate">{grant.agency}</p>
+                                  {grant.source && (
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0">
+                                      {grant.source}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {score && score.recommendation === "highly_recommended" && (
+                                  <p className="text-xs text-green-600 dark:text-green-400 font-medium mt-0.5">
+                                    Highly Recommended for {selectedProfile.name}
+                                  </p>
+                                )}
                               </div>
-                              <p className="text-xs text-muted-foreground">{grant.agency}</p>
+                            </div>
+                            <div className="text-right shrink-0 ml-4">
                               {score && (
-                                <div className="flex flex-wrap gap-2">
-                                  <Badge variant="outline" className={`text-[10px] ${grantRecColors[score.recommendation] ?? ""}`}>
-                                    {score.overallScore}/100 — {score.recommendation.replace(/_/g, " ")}
-                                  </Badge>
-                                  <Badge variant="outline" className={`text-[10px] ${eligibilityColors[score.eligibilityStatus] ?? ""}`}>
-                                    {score.eligibilityStatus.replace(/_/g, " ")}
-                                  </Badge>
+                                <div className="text-lg font-bold mb-1 text-primary">
+                                  {score.overallScore}
                                 </div>
                               )}
-                              {grant.description && <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-4">{grant.description}</p>}
-                              {grant.applicationUrl && (
-                                <a href={grant.applicationUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                                  Source link <ExternalLink className="h-3 w-3" />
-                                </a>
-                              )}
-                            </div>
-                            <div className="text-left sm:text-right shrink-0 space-y-1">
-                              {score && <div className="text-2xl font-bold text-primary">{score.overallScore}</div>}
                               <p className="text-sm font-mono font-medium">
-                                {grant.awardCeiling > 0 || grant.awardFloor > 0
-                                  ? grant.awardFloor > 0 && grant.awardCeiling > 0
-                                    ? `${formatCurrency(grant.awardFloor)} – ${formatCurrency(grant.awardCeiling)}`
-                                    : grant.awardCeiling > 0 ? `Up to ${formatCurrency(grant.awardCeiling)}` : `From ${formatCurrency(grant.awardFloor)}`
-                                  : "Amount TBD"}
+                                {grant.awardCeiling > 0 ? formatCurrency(grant.awardCeiling) : "TBD"}
                               </p>
-                              <p className="text-[10px] text-muted-foreground">{grant.closeDate ? `Deadline: ${grant.closeDate}` : "No deadline"}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {grant.closeDate || "No deadline"}
+                              </p>
                             </div>
-                          </div>
+                          </button>
+
+                          {/* Expanded details */}
+                          {isExpanded && (
+                            <div className="border-t px-4 pb-4 pt-3">
+                              {grant.description && (
+                                <>
+                                  <p
+                                    className={`text-sm text-muted-foreground mb-1 whitespace-pre-wrap ${
+                                      !slDescExpanded.has(grant.id) ? "line-clamp-4" : ""
+                                    }`}
+                                  >
+                                    {grant.description}
+                                  </p>
+                                  {grant.description.length > 200 && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSlDescExpanded((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(grant.id)) next.delete(grant.id);
+                                          else next.add(grant.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="text-xs text-primary hover:underline mb-3"
+                                    >
+                                      {slDescExpanded.has(grant.id) ? "See less" : "See more"}
+                                    </button>
+                                  )}
+                                </>
+                              )}
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                                <div>
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Award Range</span>
+                                  <p className="text-sm font-medium">
+                                    {grant.awardFloor > 0 || grant.awardCeiling > 0
+                                      ? grant.awardFloor > 0 && grant.awardCeiling > 0
+                                        ? `${formatCurrency(grant.awardFloor)} - ${formatCurrency(grant.awardCeiling)}`
+                                        : grant.awardCeiling > 0
+                                          ? `Up to ${formatCurrency(grant.awardCeiling)}`
+                                          : `From ${formatCurrency(grant.awardFloor)}`
+                                      : "TBD"}
+                                  </p>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Deadline</span>
+                                  <p className="text-sm font-medium">{grant.closeDate || "Not specified"}</p>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Cost Sharing</span>
+                                  <p className="text-sm font-medium">{grant.costSharing ? "Required" : "Not required"}</p>
+                                </div>
+                              </div>
+
+                              {grant.fundingCategories.length > 0 && (
+                                <div className="mb-3">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Focus Areas</span>
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {grant.fundingCategories.map((cat) => (
+                                      <Badge key={cat} variant="secondary" className="text-[10px]">{cat}</Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {grant.eligibility.length > 0 && (
+                                <div className="mb-3">
+                                  <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Eligible Applicants</span>
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {grant.eligibility.slice(0, 5).map((e) => (
+                                      <Badge key={e} variant="outline" className="text-[10px]">{e}</Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Score breakdown */}
+                              {score && (
+                                <div className="mb-4 p-3 rounded-md bg-muted/30 border">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <span className="text-xs font-semibold">{selectedProfile.name} Match Analysis</span>
+                                    <Badge className={`text-[10px] ${grantRecColors[score.recommendation]}`}>
+                                      {score.recommendation.replace(/_/g, " ").toUpperCase()}
+                                    </Badge>
+                                  </div>
+
+                                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase">Profile</span>
+                                      <p className="text-sm font-mono font-bold">{score.profileAlignmentScore}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase">Projects</span>
+                                      <p className="text-sm font-mono font-bold">{score.projectSimilarityScore}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase">Domains</span>
+                                      <p className="text-sm font-mono font-bold">{score.fundingDomainSimilarityScore ?? 0}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase">Eligibility</span>
+                                      <p className="text-sm font-mono font-bold">{score.eligibilityScore}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase">Impact</span>
+                                      <p className="text-sm font-mono font-bold">{score.impactScore}</p>
+                                    </div>
+                                  </div>
+
+                                  {score.topProjectMatches.length > 0 && (
+                                    <div className="mb-3">
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Top Project Matches</span>
+                                      <ul className="mt-1 space-y-0.5">
+                                        {score.topProjectMatches.slice(0, 5).map((m, i, arr) => (
+                                          <li key={m.projectId} className="text-xs font-medium flex items-center gap-2">
+                                            <span className="truncate basis-1/2 shrink-0">{m.projectName}</span>
+                                            <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                                              <div
+                                                className="h-full rounded-full animate-[bar-fill_0.6s_ease-out_forwards]"
+                                                style={{ width: 0, animationDelay: `${i * 80}ms`, backgroundColor: `rgba(34,197,94,${1 - i * (0.7 / (arr.length - 1 || 1))})`, '--bar-width': `${m.similarity}%` } as React.CSSProperties}
+                                              />
+                                            </div>
+                                            <span className="text-muted-foreground shrink-0 tabular-nums w-7 text-right">{m.similarity}%</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {(score.topDomainMatches ?? []).length > 0 && (
+                                    <div className="mb-3">
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Funding Domain Matches</span>
+                                      <ul className="mt-1 space-y-0.5">
+                                        {(score.topDomainMatches ?? []).slice(0, 5).map((m, i, arr) => (
+                                          <li key={m.domainId} className="text-xs font-medium flex items-center gap-2">
+                                            <span className="truncate basis-1/2 shrink-0">{m.domainName}</span>
+                                            <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
+                                              <div
+                                                className="h-full rounded-full animate-[bar-fill_0.6s_ease-out_forwards]"
+                                                style={{ width: 0, animationDelay: `${i * 80}ms`, backgroundColor: `rgba(34,197,94,${1 - i * (0.7 / (arr.length - 1 || 1))})`, '--bar-width': `${m.similarity}%` } as React.CSSProperties}
+                                              />
+                                            </div>
+                                            <span className="text-muted-foreground shrink-0 tabular-nums w-7 text-right">{m.similarity}%</span>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {score.strengths.length > 0 && (
+                                    <div className="mb-2">
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Strengths</span>
+                                      <ul className="mt-1 space-y-0.5">
+                                        {score.strengths.map((s, i) => (
+                                          <li key={i} className="text-xs text-green-600 dark:text-green-400 flex items-start gap-1.5">
+                                            <CheckCircle2 className="h-3 w-3 mt-0.5 shrink-0" />
+                                            {s}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {score.concerns.length > 0 && (
+                                    <div>
+                                      <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Considerations</span>
+                                      <ul className="mt-1 space-y-0.5">
+                                        {score.concerns.map((c, i) => (
+                                          <li key={i} className="text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1.5">
+                                            <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
+                                            {c}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Action buttons */}
+                              <div className="flex flex-wrap gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDraftGrant(grant);
+                                  }}
+                                  className="gap-1.5"
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                  Draft Grant
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleAddToPipeline(grant);
+                                  }}
+                                  disabled={inPipeline}
+                                  className="gap-1.5"
+                                >
+                                  <Plus className="h-3.5 w-3.5" />
+                                  {inPipeline ? "Already in Pipeline" : "Add to Pipeline"}
+                                </Button>
+                                {grant.applicationUrl && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      window.open(grant.applicationUrl, "_blank");
+                                    }}
+                                    className="gap-1.5"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                    View Source
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </Card>
                       );
                     })}
@@ -1744,7 +2090,7 @@ function UnifiedGrantsDashboard() {
             <div className="mt-2">
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-lg font-semibold">Port Projects</h2>
+                <h2 className="text-lg font-semibold">Projects</h2>
                 <p className="text-sm text-muted-foreground">
                   Manage your projects and find matching grants
                 </p>

@@ -13,7 +13,8 @@ const CACHE_TTL = 10 * 60 * 1000;
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() || "";
-  const cacheKey = query.toLowerCase();
+  const profileSlug = request.headers.get("x-corvo-port-slug") || request.nextUrl.searchParams.get("profile") || "";
+  const cacheKey = `${profileSlug}:${query}`.toLowerCase();
 
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
     const articles = await searchNewsroom({
       query: query || undefined,
       maxResults: 40,
+      profileSlug: profileSlug || undefined,
     });
 
     console.log(`[Newsroom API] Found ${articles.length} articles`);

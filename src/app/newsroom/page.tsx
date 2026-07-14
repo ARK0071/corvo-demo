@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useProfile } from "@/components/profile-provider";
 
 // ─── Types (mirror server) ───
 
@@ -96,6 +97,7 @@ export default function NewsroomPage() {
   const [error, setError] = useState<string | null>(null);
   const [searched, setSearched] = useState(false);
   const [activeFilter, setActiveFilter] = useState<NewsCategory | "all">("all");
+  const { profileId } = useProfile();
 
   const doSearch = useCallback(
     async (q?: string) => {
@@ -104,7 +106,10 @@ export default function NewsroomPage() {
       setSearched(true);
       try {
         const qs = q !== undefined ? q : query;
-        const url = `/api/newsroom${qs.trim() ? `?q=${encodeURIComponent(qs.trim())}` : ""}`;
+        const params = new URLSearchParams();
+        if (qs.trim()) params.set("q", qs.trim());
+        if (profileId) params.set("profile", profileId);
+        const url = `/api/newsroom${params.toString() ? `?${params}` : ""}`;
         const res = await fetch(url);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -119,13 +124,13 @@ export default function NewsroomPage() {
         setLoading(false);
       }
     },
-    [query]
+    [query, profileId]
   );
 
-  // Auto-load on mount with default queries
+  // Auto-load on mount (and re-load when profile changes)
   useEffect(() => {
     doSearch("");
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [profileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered =
     activeFilter === "all"
