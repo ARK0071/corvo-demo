@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { anthropic } from "@ai-sdk/anthropic";
 import { getProfile, ensureProfilesLoaded } from "@/data/profiles";
 import { searchBrave } from "@/lib/brave-search";
+import { prisma } from "@/lib/db/client";
 import type { PortProfile } from "@/data/port-profile";
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 
@@ -55,6 +56,9 @@ export async function POST(req: NextRequest) {
 
     // Step 3: Use Claude to extract structured grants from search results
     const grants = await extractGrants(allResults, profile);
+
+    // Step 4: Persist to database
+    await persistGrants(grants, profileId);
 
     return NextResponse.json({ grants });
   } catch (error) {
@@ -287,5 +291,75 @@ Return ONLY the JSON array, no other text.`,
   } catch (err) {
     console.error("[state-local-search] Failed to parse Claude response:", err);
     return [];
+  }
+}
+
+/**
+ * Step 4: Persist grants to the database, upserting by applicationUrl per profile.
+ */
+async function persistGrants(grants: DiscoveredGrant[], profileSlug: string): Promise<void> {
+  try {
+    const profile = await prisma.portProfile.findFirst({
+      where: { slug: profileSlug },
+      select: { id: true },
+    });
+    if (!profile) return;
+
+    const now = new Date();
+
+    for (const grant of grants) {
+      // Create a stable key from the applicationUrl
+      const grantKey = grant.applicationUrl
+        ? grant.applicationUrl.replace(/[^a-zA-Z0-9]/g, "").substring(0, 250)
+        : grant.title.replace(/[^a-zA-Z0-9]/g, "").substring(0, 250);
+
+      await prisma.stateLocalGrant.upsert({
+        where: {
+          portProfileId_grantKey: {
+            portProfileId: profile.id,
+            grantKey,
+          },
+        },
+        update: {
+          title: grant.title,
+          agency: grant.agency,
+          description: grant.description || null,
+          awardFloor: grant.awardFloor,
+          awardCeiling: grant.awardCeiling,
+          totalFunding: grant.totalFunding,
+          closeDate: grant.closeDate ? new Date(grant.closeDate) : null,
+          postDate: grant.postDate ? new Date(grant.postDate) : null,
+          status: grant.status,
+          applicationUrl: grant.applicationUrl || null,
+          costSharing: grant.costSharing,
+          eligibility: grant.eligibility,
+          fundingCategories: grant.fundingCategories,
+          source: grant.source || "state-local",
+          searchedAt: now,
+        },
+        create: {
+          portProfileId: profile.id,
+          grantKey,
+          title: grant.title,
+          agency: grant.agency,
+          description: grant.description || null,
+          awardFloor: grant.awardFloor,
+          awardCeiling: grant.awardCeiling,
+          totalFunding: grant.totalFunding,
+          closeDate: grant.closeDate ? new Date(grant.closeDate) : null,
+          postDate: grant.postDate ? new Date(grant.postDate) : null,
+          status: grant.status,
+          applicationUrl: grant.applicationUrl || null,
+          costSharing: grant.costSharing,
+          eligibility: grant.eligibility,
+          fundingCategories: grant.fundingCategories,
+          source: grant.source || "state-local",
+          searchedAt: now,
+        },
+      });
+    }
+  } catch (err) {
+    // Don't fail the search if persistence fails
+    console.error("[state-local-search] Failed to persist grants:", err);
   }
 }

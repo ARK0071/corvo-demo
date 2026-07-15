@@ -157,7 +157,7 @@ export default function CompetitiveIntelPage() {
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
           Search USAspending for historical grant &amp; assistance awards by
-          recipient (port name). Last 5 years by default.
+          recipient. Last 5 years by default.
         </p>
       </div>
 

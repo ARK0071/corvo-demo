@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, FileText, CalendarDays, Banknote, Users, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, FileText, Banknote, Users, ShieldCheck } from "lucide-react";
 
 const navItems = [
   { label: "Overview", href: "/reporting/overview", icon: LayoutDashboard },
   { label: "Forms", href: "/reporting/forms", icon: FileText },
   { label: "Drawdowns", href: "/reporting/drawdowns", icon: Banknote },
   { label: "Subrecipients", href: "/reporting/subrecipients", icon: Users },
-  { label: "Calendar", href: "/reporting/calendar", icon: CalendarDays },
   { label: "Audit", href: "/reporting/audit", icon: ShieldCheck },
 ];
 

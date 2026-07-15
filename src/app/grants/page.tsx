@@ -205,6 +205,7 @@ function UnifiedGrantsDashboard() {
   const [slSearchStep, setSlSearchStep] = useState("");
   const [slExpandedGrant, setSlExpandedGrant] = useState<string | null>(null);
   const [slDescExpanded, setSlDescExpanded] = useState<Set<string>>(new Set());
+  const [slLastSearchedAt, setSlLastSearchedAt] = useState<string | null>(null);
 
   // Fetch pipeline grants from API
   const fetchPipelineFromDB = useCallback(async () => {
@@ -328,16 +329,14 @@ function UnifiedGrantsDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load");
       const grants: DiscoveredGrant[] = data.grants ?? [];
-      if (grants.length > 0) {
-        setSlGrants(grants);
-        setSlLoaded(true);
-        void scoreSlGrants(grants);
-      }
-      // If no CSV data, don't mark as loaded — let user trigger AI search
+      setSlGrants(grants);
+      if (data.lastSearchedAt) setSlLastSearchedAt(data.lastSearchedAt);
+      if (grants.length > 0) void scoreSlGrants(grants);
     } catch {
-      // CSV not found is fine — user can use AI search
+      // DB unavailable — no problem
     } finally {
       setSlLoading(false);
+      setSlLoaded(true);
     }
   }, [profileId, scoreSlGrants]);
 
@@ -361,6 +360,7 @@ function UnifiedGrantsDashboard() {
       const grants: DiscoveredGrant[] = data.grants ?? [];
       setSlGrants(grants);
       setSlLoaded(true);
+      setSlLastSearchedAt(new Date().toISOString());
       if (grants.length > 0) {
         setSlSearchStep("Scoring and ranking grants...");
         void scoreSlGrants(grants);
@@ -565,6 +565,11 @@ function UnifiedGrantsDashboard() {
         awardFloor: detailed.awardFloor > 0 ? detailed.awardFloor : grant.awardFloor,
         awardCeiling: detailed.awardCeiling > 0 ? detailed.awardCeiling : grant.awardCeiling,
         totalFunding: detailed.totalFunding > 0 ? detailed.totalFunding : grant.totalFunding,
+        // Preserve original closeDate — detail API returns text descriptions (e.g. "Jul 15, 2026")
+        // which differ from the search API's date format
+        closeDate: grant.closeDate || detailed.closeDate,
+        // Preserve original status — detail API often lacks oppStatus, falling back to "unknown"
+        status: (detailed.status && detailed.status !== "unknown") ? detailed.status : grant.status,
         // Preserve source from original grant
         source: grant.source || detailed.source,
       };
@@ -1675,12 +1680,19 @@ function UnifiedGrantsDashboard() {
                           </>
                         )}
                       </Button>
-                      <p className="text-xs text-muted-foreground">
-                        {slLoaded && !slLoading && !slSearching && sortedSlGrants.length > 0
-                          ? `${sortedSlGrants.length} result${sortedSlGrants.length !== 1 ? "s" : ""} for `
-                          : "AI-powered search for "}
-                        <span className="font-medium text-foreground">{selectedProfile.name}</span>
-                      </p>
+                      <div className="text-xs text-muted-foreground">
+                        <p>
+                          {slLoaded && !slLoading && !slSearching && sortedSlGrants.length > 0
+                            ? `${sortedSlGrants.length} result${sortedSlGrants.length !== 1 ? "s" : ""} for `
+                            : "AI-powered search for "}
+                          <span className="font-medium text-foreground">{selectedProfile.name}</span>
+                        </p>
+                        {slLastSearchedAt && !slSearching && (
+                          <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                            Last searched {new Date(slLastSearchedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                          </p>
+                        )}
+                      </div>
                     </div>
                     {slGrants.length > 0 && (
                       <div className="flex items-center gap-2">
@@ -2089,12 +2101,7 @@ function UnifiedGrantsDashboard() {
           {activeTab === "projects" && (
             <div className="mt-2">
             <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-lg font-semibold">Projects</h2>
-                <p className="text-sm text-muted-foreground">
-                  Manage your projects and find matching grants
-                </p>
-              </div>
+              <div></div>
               <Button
                 onClick={() => {
                   setEditingProject(undefined);

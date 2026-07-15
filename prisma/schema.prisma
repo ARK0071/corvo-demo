@@ -198,8 +198,39 @@ model PortProfile {
   grantDrafts        GrantDraft[]
   tasks              Task[]
   grantAssignments   GrantAssignment[]
+  stateLocalGrants   StateLocalGrant[]
 
   @@map("port_profiles")
+}
+
+model StateLocalGrant {
+  id                 String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  portProfileId      String    @map("port_profile_id") @db.Uuid
+  grantKey           String    @map("grant_key") @db.VarChar(255)
+  title              String    @db.VarChar(500)
+  agency             String    @db.VarChar(500)
+  description        String?
+  awardFloor         Decimal   @default(0) @map("award_floor") @db.Decimal(15, 2)
+  awardCeiling       Decimal   @default(0) @map("award_ceiling") @db.Decimal(15, 2)
+  totalFunding       Decimal   @default(0) @map("total_funding") @db.Decimal(15, 2)
+  closeDate          DateTime? @map("close_date") @db.Date
+  postDate           DateTime? @map("post_date") @db.Date
+  status             String    @default("posted") @db.VarChar(50)
+  applicationUrl     String?   @map("application_url")
+  costSharing        Boolean   @default(false) @map("cost_sharing")
+  eligibility        Json      @default("[]")
+  fundingCategories  Json      @default("[]") @map("funding_categories")
+  source             String    @default("state-local") @db.VarChar(100)
+  searchedAt         DateTime  @default(now()) @map("searched_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  portProfile        PortProfile @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([portProfileId, grantKey])
+  @@index([portProfileId])
+  @@index([searchedAt])
+  @@map("state_local_grants")
 }
 
 model DiscoveredGrant {

@@ -155,9 +155,8 @@ export default function NewsroomPage() {
           Newsroom
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Recent news on port grant awards, new funding programs, vendor
-          opportunities, and policy updates. Powered by Brave Search &amp;
-          Tavily.
+          Recent news on grant awards, new funding programs, vendor
+          opportunities, and policy updates.
         </p>
       </div>
 

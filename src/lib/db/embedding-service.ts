@@ -5,6 +5,7 @@
 
 import { prisma } from "./client";
 import { dbConfig, tableNames } from "./config";
+import { getEmbeddingService } from "./tenant-config";
 import {
   embedText,
   embedTexts,
@@ -15,6 +16,19 @@ import {
 import type { DiscoveredGrant } from "@/lib/grants-gov";
 import type { PortVendor } from "@/data/port-vendors";
 import type { PortProfile } from "@/data/port-profile";
+
+/**
+ * Guard: skip embedding if the current environment expects EC2/Qwen3 embeddings (2560 dims)
+ * since embedText/embedTexts always produce OpenAI 1536-dim vectors.
+ */
+function requiresOpenAIEmbeddings(): boolean {
+  const service = getEmbeddingService();
+  if (service !== "openai") {
+    console.log(`[embedding-service] Skipping — environment uses ${service} embeddings, not OpenAI`);
+    return false;
+  }
+  return true;
+}
 
 // Format embedding array for PostgreSQL vector type
 function formatVectorForPg(embedding: number[]): string {
@@ -37,6 +51,8 @@ function buildVendorEmbeddingText(vendor: PortVendor): string {
  * Generate and store embedding for a single grant
  */
 export async function embedAndStoreGrant(grant: DiscoveredGrant): Promise<void> {
+  if (!requiresOpenAIEmbeddings()) return;
+
   const text = buildGrantEmbeddingText(grant);
   const embedding = await embedText(text);
 
@@ -65,6 +81,7 @@ export async function embedAndStoreGrants(grants: DiscoveredGrant[]): Promise<{
   failed: number;
 }> {
   if (grants.length === 0) return { success: 0, failed: 0 };
+  if (!requiresOpenAIEmbeddings()) return { success: 0, failed: 0 };
 
   const texts = grants.map(buildGrantEmbeddingText);
   const embeddings = await embedTexts(texts);
@@ -105,6 +122,8 @@ export async function embedAndStoreGrants(grants: DiscoveredGrant[]): Promise<{
  * Generate and store embedding for a single vendor
  */
 export async function embedAndStoreVendor(vendor: PortVendor): Promise<void> {
+  if (!requiresOpenAIEmbeddings()) return;
+
   const text = buildVendorEmbeddingText(vendor);
   const embedding = await embedText(text);
 
@@ -133,6 +152,7 @@ export async function embedAndStoreVendors(vendors: PortVendor[]): Promise<{
   failed: number;
 }> {
   if (vendors.length === 0) return { success: 0, failed: 0 };
+  if (!requiresOpenAIEmbeddings()) return { success: 0, failed: 0 };
 
   const texts = vendors.map(buildVendorEmbeddingText);
   const embeddings = await embedTexts(texts);
@@ -173,6 +193,8 @@ export async function embedAndStoreVendors(vendors: PortVendor[]): Promise<{
  * Generate and store embedding for a port profile
  */
 export async function embedAndStoreProfile(profile: PortProfile, profileId: string): Promise<void> {
+  if (!requiresOpenAIEmbeddings()) return;
+
   const text = buildProfileEmbeddingText(profile);
   const embedding = await embedText(text);
 
