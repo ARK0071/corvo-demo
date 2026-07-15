@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       orderBy: { searchedAt: "desc" },
     });
 
-    const grants: DiscoveredGrant[] = rows.map((r) => ({
+    const grants: DiscoveredGrant[] = rows.map((r: typeof rows[number]) => ({
       id: `sl-${r.grantKey}`,
       opportunityNumber: "",
       title: r.title,
