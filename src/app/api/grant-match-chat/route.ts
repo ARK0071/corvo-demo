@@ -45,6 +45,10 @@ function containsInjection(text: string): boolean {
 
 const MAX_MESSAGE_LENGTH = 4000;
 
+/**
+ * @deprecated Use /api/porter-chat instead. This endpoint is kept for
+ * backward compatibility with the grant analysis tab.
+ */
 export async function POST(req: Request) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return new Response(

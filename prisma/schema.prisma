@@ -48,6 +48,8 @@ model User {
   scheduledVisits       MonitoringVisit[]      @relation("VisitScheduler")
   confirmedVisits       MonitoringVisit[]      @relation("VisitConfirmer")
   completedVisits       MonitoringVisit[]      @relation("VisitCompleter")
+  chatConversations     ChatConversation[]
+  chatMessages          ChatMessage[]
 
   @@index([portId])
   @@index([subrecipientId])
@@ -145,6 +147,10 @@ model AuditLog {
   newValue     Json?    @map("new_value")
   ipAddress    String?  @map("ip_address") @db.VarChar(45)
   userAgent    String?  @map("user_agent")
+  actorType    String   @default("user") @map("actor_type") @db.VarChar(20) // "user" | "porter"
+  viaPorter    Boolean  @default(false) @map("via_porter")
+  resourceType String?  @map("resource_type") @db.VarChar(50) // "Task" | "PipelineGrant" | "Notification" | etc.
+  resourceId   String?  @map("resource_id") @db.VarChar(100)
   metadata     Json?
   createdAt    DateTime @default(now()) @map("created_at")
   @@index([portId])
@@ -153,6 +159,7 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+  @@index([viaPorter])
   @@map("audit_log")
 }
 
@@ -199,6 +206,8 @@ model PortProfile {
   tasks              Task[]
   grantAssignments   GrantAssignment[]
   stateLocalGrants   StateLocalGrant[]
+  documentSources    DocumentSource[]
+  chatConversations  ChatConversation[]
 
   @@map("port_profiles")
 }
@@ -1869,4 +1878,88 @@ model DemoCorrectiveActionPlan {
   @@index([findingId])
   @@index([status])
   @@map("demo_corrective_action_plans")
+}
+
+// =============================================================================
+// PORTER AI — Chat persistence, document RAG
+// =============================================================================
+
+model ChatConversation {
+  id            String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId        String        @map("user_id") @db.Uuid
+  portProfileId String        @map("port_profile_id") @db.Uuid
+  title         String        @default("New conversation") @db.VarChar(500)
+  pageContext   String?       @map("page_context") @db.VarChar(255) // route where conversation started
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  portProfile   PortProfile   @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+
+  @@index([userId])
+  @@index([portProfileId])
+  @@index([updatedAt])
+  @@map("chat_conversations")
+}
+
+model ChatMessage {
+  id              String           @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  conversationId  String           @map("conversation_id") @db.Uuid
+  userId          String?          @map("user_id") @db.Uuid
+  role            String           @db.VarChar(20) // "user" | "assistant" | "system"
+  content         String           @default("")
+  toolCalls       Json?            @map("tool_calls") // serialized tool call / result parts
+  createdAt       DateTime         @default(now()) @map("created_at")
+
+  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user            User?            @relation(fields: [userId], references: [id])
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("chat_messages")
+}
+
+model DocumentSource {
+  id            String          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  docType       String          @map("doc_type") @db.VarChar(50) // "nofo" | "2cfr200" | "agency_gtc" | "award_terms" | "special_conditions"
+  title         String          @db.VarChar(500)
+  sourceUrl     String?         @map("source_url")
+  grantId       String?         @map("grant_id") @db.VarChar(50)  // null for global corpus
+  awardId       String?         @map("award_id") @db.Uuid         // null for global corpus
+  portProfileId String?         @map("port_profile_id") @db.Uuid  // null for global corpus
+  scope         String          @default("tenant") @db.VarChar(20) // "global" | "tenant"
+  pageCount     Int?            @map("page_count")
+  checksum      String?         @db.VarChar(64) // SHA-256, detect re-ingestion needs
+  ingestedAt    DateTime        @default(now()) @map("ingested_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  portProfile   PortProfile?    @relation(fields: [portProfileId], references: [id], onDelete: Cascade)
+  chunks        DocumentChunk[]
+
+  @@index([docType])
+  @@index([grantId])
+  @@index([awardId])
+  @@index([portProfileId])
+  @@index([scope])
+  @@map("document_sources")
+}
+
+model DocumentChunk {
+  id           String                        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  documentId   String                        @map("document_id") @db.Uuid
+  chunkIndex   Int                           @map("chunk_index")
+  content      String                        // raw text of the chunk
+  section      String?                       @db.VarChar(255) // "§200.403" | "Section IV.B.2" | heading
+  pageNumber   Int?                          @map("page_number")
+  metadata     Json?                         // heading hierarchy, subsection labels
+  embedding    Unsupported("vector(1536)")?  // OpenAI text-embedding-3-small
+  searchTerms  Unsupported("tsvector")?      @map("search_terms") // BM25 full-text search
+
+  document     DocumentSource                @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([chunkIndex])
+  @@map("document_chunks")
+  // NOTE: GIN index on search_terms and HNSW index on embedding created via raw SQL migration
 }

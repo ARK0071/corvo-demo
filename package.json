@@ -8,7 +8,8 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "generate-embeddings": "tsx src/scripts/generate-embeddings.ts"
+    "generate-embeddings": "tsx src/scripts/generate-embeddings.ts",
+    "seed-global-corpus": "tsx src/scripts/seed-global-corpus.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.39",
