@@ -3,10 +3,11 @@
 import { Suspense, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool, Radar, Calendar } from "lucide-react";
+import { LayoutDashboard, Search, Layers, FolderKanban, Users, Anchor, BarChart3, Newspaper, Feather, Settings, Award, FileText, Shield, MessageSquare, PenTool, Radar, Calendar, Sparkles } from "lucide-react";
 import { useCurrentUser } from "@/contexts/user-context";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import { useTenant } from "@/contexts/tenant-context";
+import { usePorterPanel } from "@/contexts/porter-context";
 import {
   Sidebar,
   SidebarContent,
@@ -42,7 +43,8 @@ const grantMatchItems = [
   { title: "Pipeline", url: "/grants?tab=pipeline", icon: Layers },
   { title: "Projects", url: "/grants?tab=projects", icon: FolderKanban },
   { title: "Vendor Outreach", url: "/grants?tab=outreach", icon: Users },
-  { title: "Porter AI", url: "/grant-match", icon: MessageSquare },
+  { title: "Grant Analysis", url: "/grants?tab=analysis", icon: Sparkles },
+  { title: "Porter AI", url: "#porter", icon: MessageSquare },
   { title: "Drafting", url: "/drafting", icon: PenTool },
   { title: "Awards", url: "/awards", icon: Award },
   { title: "Reporting", url: "/reporting/overview", icon: FileText },
@@ -79,6 +81,23 @@ function AdminNavItem({ collapsed, isActive }: { collapsed: boolean; isActive: b
           <Shield className="mr-2 h-4 w-4 shrink-0" />
           {!collapsed && <span>Admin</span>}
         </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+function PorterNavItem({ collapsed }: { collapsed: boolean }) {
+  const { toggle, isOpen } = usePorterPanel();
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild>
+        <button
+          onClick={toggle}
+          className={`flex items-center w-full ${isOpen ? "bg-muted text-primary font-medium" : "hover:bg-muted/50"}`}
+        >
+          <MessageSquare className="mr-2 h-4 w-4 shrink-0" />
+          {!collapsed && <span>Porter AI</span>}
+        </button>
       </SidebarMenuButton>
     </SidebarMenuItem>
   );
@@ -130,6 +149,10 @@ function AppSidebarInner() {
           <SidebarGroupContent>
             <SidebarMenu>
               {grantNavItems.map((item) => {
+                // Porter AI uses the slide-out panel instead of navigation
+                if (item.url === "#porter") {
+                  return <PorterNavItem key={item.title} collapsed={collapsed} />;
+                }
                 const isActive = checkIsActive(item.url);
                 const isPipeline = item.title === "Pipeline";
                 return (

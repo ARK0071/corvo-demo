@@ -11,6 +11,9 @@ import SubrecipientSidebar from "@/components/sub-sidebar";
 import { getUpcomingDeadlineCount } from "@/data/grant-pipeline";
 import { UserProvider, useCurrentUser } from "@/contexts/user-context";
 import { Badge } from "@/components/ui/badge";
+import { PorterPanelProvider } from "@/contexts/porter-context";
+import { PorterPanel } from "@/components/porter/porter-panel";
+import { PorterFab } from "@/components/porter/porter-fab";
 
 const ROLE_LABELS: Record<string, string> = {
   drafter: "Drafter",
@@ -133,6 +136,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           </main>
         </div>
       </div>
+      {!isSubrecipient && <PorterFab />}
+      {!isSubrecipient && <PorterPanel />}
     </SidebarProvider>
   );
 }
@@ -140,7 +145,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <UserProvider>
-      <AppLayoutInner>{children}</AppLayoutInner>
+      <PorterPanelProvider>
+        <AppLayoutInner>{children}</AppLayoutInner>
+      </PorterPanelProvider>
     </UserProvider>
   );
 }
