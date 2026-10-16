@@ -55,6 +55,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { PipelineGanttChart } from "@/components/pipeline/gantt-chart";
+import { GrantAnalysisView } from "@/components/grant-analysis/grant-analysis-view";
 
 const statusColors: Record<string, string> = {
   posted: "bg-green-500/10 text-green-600 dark:text-green-400",
@@ -107,7 +108,7 @@ function formatCurrency(n: number) {
   return `$${n}`;
 }
 
-const VALID_TABS = ["discover", "pipeline", "projects", "outreach"] as const;
+const VALID_TABS = ["discover", "pipeline", "projects", "outreach", "analysis"] as const;
 
 export default function GrantsPage() {
   return (
@@ -777,7 +778,7 @@ function UnifiedGrantsDashboard() {
       <div className="flex-1 overflow-y-auto">
         <div
           className={`mx-auto px-6 py-8 ${
-            activeTab === "outreach" || activeTab === "discover" || activeTab === "pipeline" ? "max-w-[90rem]" : "max-w-6xl"
+            activeTab === "outreach" || activeTab === "discover" || activeTab === "pipeline" ? "max-w-[90rem]" : activeTab === "analysis" ? "max-w-5xl" : "max-w-6xl"
           }`}
         >
         {/* Header */}
@@ -790,12 +791,14 @@ function UnifiedGrantsDashboard() {
                 {activeTab === "pipeline" && "Grant Pipeline"}
                 {activeTab === "projects" && "Projects"}
                 {activeTab === "outreach" && "Vendor Outreach"}
+                {activeTab === "analysis" && "Grant Analysis"}
               </h1>
               <p className="text-sm text-muted-foreground">
                 {activeTab === "discover" && "Search and discover grant opportunities"}
                 {activeTab === "pipeline" && "Track your grant applications through each stage"}
                 {activeTab === "projects" && "Manage projects and match them to grants"}
                 {activeTab === "outreach" && "Search qualified federal contractors with Subchapter N compliance intelligence"}
+                {activeTab === "analysis" && "AI-powered analysis of how a grant applies to your entity"}
               </p>
             </div>
           </div>
@@ -2443,6 +2446,11 @@ function UnifiedGrantsDashboard() {
             <div className="mt-2">
               <VendorSearch projects={projects} />
             </div>
+          )}
+
+          {/* TAB 5: GRANT ANALYSIS — AI-powered grant analysis */}
+          {activeTab === "analysis" && (
+            <GrantAnalysisView pipelineGrants={pipelineGrants} />
           )}
         </div>
       </div>
