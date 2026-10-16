@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# claude
+.claude/
+
 # vercel
 .vercel
 
@@ -41,3 +44,4 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+.claude/
