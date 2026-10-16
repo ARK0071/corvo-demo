@@ -27,12 +27,12 @@ function PorterMessageBubbleInner({ message, isStreaming }: PorterMessageBubbleP
         {isUser ? <User className="h-3.5 w-3.5" /> : <Anchor className="h-3.5 w-3.5" />}
       </div>
 
-      <div className={`flex max-w-[85%] flex-col gap-0.5 ${isUser ? "items-end" : "items-start"}`}>
+      <div className={`flex min-w-0 flex-col gap-0.5 ${isUser ? "max-w-[85%] items-end" : "flex-1 items-start"}`}>
         <div className="text-[10px] font-medium text-muted-foreground">
           {isUser ? "You" : "Porter"}
         </div>
         <div
-          className={`rounded-lg px-3 py-2 text-sm ${
+          className={`max-w-full rounded-lg px-3 py-2 text-sm ${
             isUser
               ? "bg-primary text-primary-foreground"
               : "bg-card border border-border shadow-sm"

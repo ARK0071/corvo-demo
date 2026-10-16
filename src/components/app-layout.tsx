@@ -106,7 +106,8 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
     <SidebarProvider>
       <div className="min-h-screen flex w-full bg-background">
         {isSubrecipient ? <SubrecipientSidebar /> : <AppSidebar />}
-        <div className="flex-1 flex flex-col">
+        {/* Page shrinks when the Porter panel is docked beside it, but never below 400px on lg+ */}
+        <div className="flex-1 min-w-0 lg:min-w-[400px] flex flex-col">
           <header className="h-12 border-b flex items-center justify-between px-4">
             <div className="flex items-center gap-3">
               <SidebarTrigger aria-label="Toggle navigation" />
@@ -135,9 +136,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             {children}
           </main>
         </div>
+        {!isSubrecipient && <PorterPanel />}
       </div>
       {!isSubrecipient && <PorterFab />}
-      {!isSubrecipient && <PorterPanel />}
     </SidebarProvider>
   );
 }

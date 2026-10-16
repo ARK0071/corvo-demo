@@ -18,7 +18,7 @@ import {
   MessageSquarePlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { usePorterPanel } from "@/contexts/porter-context";
+import { usePorterPanel, PORTER_PANEL_DEFAULT_WIDTH, PORTER_PANEL_MIN_WIDTH } from "@/contexts/porter-context";
 import { PorterMessageBubble } from "./porter-message-bubble";
 
 // ---------------------------------------------------------------------------
@@ -235,12 +235,100 @@ function ConversationHistory({
 }
 
 // ---------------------------------------------------------------------------
+// Resize handle (desktop only)
+// ---------------------------------------------------------------------------
+
+const KEYBOARD_RESIZE_STEP = 24;
+
+function ResizeHandle({
+  panelRef,
+  width,
+  onResize,
+}: {
+  panelRef: React.RefObject<HTMLElement | null>;
+  width: number;
+  onResize: (width: number) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ startX: number; startWidth: number; latest: number } | null>(null);
+
+  function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.button !== 0 || !panelRef.current) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const startWidth = panelRef.current.getBoundingClientRect().width;
+    dragRef.current = { startX: e.clientX, startWidth, latest: startWidth };
+    setDragging(true);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }
+
+  function handlePointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || !panelRef.current) return;
+    // Panel is anchored on the right, so dragging left makes it wider.
+    // Write straight to the CSS variable to avoid re-rendering the app on every move.
+    // Flex layout caps how wide it can get, so track the rendered width — that's what
+    // gets committed on release, and it avoids a dead zone when dragging back.
+    const requested = Math.max(PORTER_PANEL_MIN_WIDTH, drag.startWidth + (drag.startX - e.clientX));
+    panelRef.current.style.setProperty("--porter-width", `${requested}px`);
+    drag.latest = panelRef.current.getBoundingClientRect().width;
+  }
+
+  function endDrag(e: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    dragRef.current = null;
+    setDragging(false);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    onResize(drag.latest);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      onResize(width + KEYBOARD_RESIZE_STEP);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      onResize(width - KEYBOARD_RESIZE_STEP);
+    }
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize Porter panel"
+      aria-valuenow={width}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onDoubleClick={() => onResize(PORTER_PANEL_DEFAULT_WIDTH)}
+      onKeyDown={handleKeyDown}
+      className="group absolute inset-y-0 -left-1.5 z-10 hidden w-3 cursor-col-resize touch-none lg:block focus-visible:outline-none"
+    >
+      <div
+        className={`mx-auto h-full w-0.5 transition-colors ${
+          dragging ? "bg-blue-600" : "bg-transparent group-hover:bg-blue-600/60 group-focus-visible:bg-blue-600"
+        }`}
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Porter Panel
 // ---------------------------------------------------------------------------
 
 export function PorterPanel() {
-  const { isOpen, close } = usePorterPanel();
+  const { isOpen, close, width, setWidth } = usePorterPanel();
   const pathname = usePathname();
+  const panelRef = useRef<HTMLElement>(null);
 
   const [showHistory, setShowHistory] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -385,12 +473,18 @@ export function PorterPanel() {
   const lastMessageIndex = messages.length - 1;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 flex">
-      {/* Backdrop */}
-      <div className="fixed inset-0 bg-black/20" onClick={close} />
+    <>
+      {/* Backdrop — below lg only; on large screens the panel is docked beside the page */}
+      <div className="fixed inset-0 z-50 bg-black/20 lg:hidden" onClick={close} />
 
-      {/* Panel */}
-      <div className="relative ml-auto flex h-full w-[480px] max-w-[90vw] flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right duration-300">
+      {/* Panel: overlay below lg; on lg+ a docked, resizable column. When docked it may
+          shrink (down to its min width) so the page keeps the min width set in app-layout. */}
+      <aside
+        ref={panelRef}
+        style={{ "--porter-width": `${width}px` } as React.CSSProperties}
+        className="fixed inset-y-0 right-0 z-50 flex w-full flex-col border-l bg-background shadow-2xl transition-none animate-in slide-in-from-right duration-300 sm:w-(--porter-width) sm:max-w-[90vw] lg:sticky lg:top-0 lg:z-30 lg:h-svh lg:min-w-[360px] lg:max-w-none lg:self-start lg:shadow-none"
+      >
+        <ResizeHandle panelRef={panelRef} width={width} onResize={setWidth} />
         {showHistory ? (
           <ConversationHistory
             onBack={() => setShowHistory(false)}
@@ -553,7 +647,7 @@ export function PorterPanel() {
             </div>
           </>
         )}
-      </div>
-    </div>
+      </aside>
+    </>
   );
 }
