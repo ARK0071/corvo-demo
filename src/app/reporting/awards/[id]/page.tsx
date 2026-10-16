@@ -22,6 +22,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useTenantHeaders, useTenant } from "@/contexts/tenant-context";
 import { AwardTasksTab } from "@/components/tasks/award-tasks-tab";
+import { InteractiveChecklist } from "@/components/compliance/interactive-checklist";
+import type { ChecklistFull } from "@/components/compliance/interactive-checklist";
 
 // ─── Types ───
 
@@ -83,14 +85,7 @@ interface Subrecipient {
   reports: { id: string; status: string; dueDate: string }[];
 }
 
-interface ComplianceChecklist {
-  id: string;
-  template: string;
-  title: string;
-  status: string;
-  completedItems: number;
-  totalItems: number;
-}
+type ComplianceChecklist = ChecklistFull;
 
 // ─── Helpers ───
 
@@ -433,29 +428,14 @@ export default function AwardDetailPage() {
       {/* Compliance Tab */}
       {tab === "compliance" && (
         <Card>
-          <CardHeader className="pb-3"><CardTitle className="text-base">Compliance Checklists ({checklists.length})</CardTitle></CardHeader>
+          <CardHeader className="pb-3"><CardTitle className="text-base">Compliance Checklists</CardTitle></CardHeader>
           <CardContent>
-            {checklists.length === 0 ? <p className="text-sm text-muted-foreground italic py-4">No compliance checklists attached</p> : (
-              <div className="space-y-3">
-                {checklists.map((cl) => {
-                  const pct = cl.totalItems > 0 ? Math.round((cl.completedItems / cl.totalItems) * 100) : 0;
-                  return (
-                    <div key={cl.id} className="p-3 rounded-lg border">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium">{cl.title}</span>
-                        <Badge className={cl.status === "compliant" ? "bg-emerald-100 text-emerald-700 text-[10px]" : "bg-blue-100 text-blue-700 text-[10px]"}>{cl.status.replace("_", " ")}</Badge>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${pct === 100 ? "bg-emerald-500" : "bg-[#3d8b8b]"}`} style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs tabular-nums text-muted-foreground">{cl.completedItems}/{cl.totalItems}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <InteractiveChecklist
+              checklists={checklists}
+              headers={headers}
+              onRefresh={fetchAll}
+              fixedAwardId={awardId}
+            />
           </CardContent>
         </Card>
       )}
